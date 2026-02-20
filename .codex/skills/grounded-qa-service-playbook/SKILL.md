@@ -52,6 +52,25 @@ Implement grounded QA as a strict staged pipeline and keep hallucination risk ob
    - Execute security, quality, and tests review pass.
    - Classify and fix Critical/High before sign-off.
 
+8. Apply release acceptance gate
+   - Contract acceptance:
+     - `sources == []` always returns deterministic low-confidence fallback.
+     - If citations exist, every citation must map to retrieved context IDs.
+   - Verification acceptance:
+     - Verifier parse errors are fail-closed (no unverifiable confident answer).
+     - Confidence downgrade rules are explicit and tested.
+   - Persistence acceptance:
+     - Stored fields include question/answer/confidence/citations/latency/tags.
+     - Failed/no-source outcomes are stored with reason codes for audit.
+   - Test acceptance:
+     - E2E happy path (index -> ask) passes.
+     - no-source path passes.
+     - verifier-fail path passes.
+     - auth and input validation paths pass.
+   - Security acceptance:
+     - No secrets hardcoded.
+     - Error responses do not leak internal connection/model details.
+
 ## Output Contract
 
 - Must provide:
@@ -59,6 +78,19 @@ Implement grounded QA as a strict staged pipeline and keep hallucination risk ob
   - fallback policy statement
   - verification policy statement
   - test matrix (happy/error/ownership/security)
+  - acceptance gate result (pass/fail per gate)
+
+## Acceptance Matrix Template
+
+Use this matrix for implementation/review handoff:
+
+| Gate | Check | Result | Evidence |
+|------|-------|--------|----------|
+| Fallback determinism | `sources == []` => fixed low-confidence fallback | pass/fail | test name + output |
+| Citation integrity | citations map to retrieved context IDs | pass/fail | service/API test |
+| Verifier fail-closed | parse/verification failure blocks confident answer | pass/fail | unit test |
+| Persistence auditability | all required fields + reason code stored | pass/fail | schema/store test |
+| Security baseline | no hardcoded secrets / safe error messages | pass/fail | code review notes |
 
 ## Command Contract
 
