@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth import LECTURE_TOKEN_HEADER, USER_ID_HEADER
 from app.core.config import settings
+from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
+from app.models.summary_window import SummaryWindow
 from app.models.visual_event import VisualEvent
 
 AUTH_HEADERS = {
@@ -504,3 +506,351 @@ async def test_post_lecture_visual_event_for_other_user_session_returns_404(
 
     assert response.status_code == 404
     assert body["error"]["code"] == "http_error"
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_returns_200_and_persists_window(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Summary latest endpoint should return a generated summary window."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "外れ値の確認手順を説明します。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    await async_client.post(
+        "/api/v4/lecture/visual/event",
+        data={
+            "session_id": session_id,
+            "timestamp_ms": "21000",
+            "source": "board",
+            "change_score": "0.42",
+        },
+        files={"image": ("frame.jpg", JPEG_BYTES, "image/jpeg")},
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["window_end_ms"] >= 30000
+    assert "summary" in body
+    assert "key_terms" in body
+    assert "evidence" in body
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(SummaryWindow).where(SummaryWindow.session_id == session_id)
+        )
+        summary_window = result.scalar_one_or_none()
+    assert summary_window is not None
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_with_unknown_session_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Summary latest endpoint should return 404 for unknown session."""
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": "lec_missing"},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 404
+    assert body["error"]["code"] == "http_error"
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_without_token_returns_401(
+    async_client: AsyncClient,
+) -> None:
+    """Summary latest endpoint should reject requests without lecture token."""
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": "lec_missing"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_for_other_user_session_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Summary latest endpoint should enforce session ownership."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=OWNER_A_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=OWNER_B_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_returns_200_and_stats(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Finalize endpoint should finalize session and return artifact stats."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "外れ値の確認手順を説明します。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={
+            "session_id": session_id,
+            "build_qa_index": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["status"] == "finalized"
+    assert body["stats"]["speech_events"] >= 1
+    assert body["stats"]["summary_windows"] >= 1
+    assert body["stats"]["lecture_chunks"] >= 1
+
+    async with session_factory() as session:
+        session_result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        finalized_session = session_result.scalar_one()
+        chunk_result = await session.execute(
+            select(LectureChunk).where(LectureChunk.session_id == session_id)
+        )
+        chunks = chunk_result.scalars().all()
+
+    assert finalized_session.status == "finalized"
+    assert len(chunks) == body["stats"]["lecture_chunks"]
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_is_idempotent(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize endpoint should be safe to call repeatedly."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "再実行テスト用イベント。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    first = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={
+            "session_id": session_id,
+            "build_qa_index": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+    second = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={
+            "session_id": session_id,
+            "build_qa_index": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    first_body = first.json()
+    second_body = second.json()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second_body["status"] == "finalized"
+    assert (
+        second_body["stats"]["lecture_chunks"] == first_body["stats"]["lecture_chunks"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_without_token_returns_401(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize endpoint should reject requests without lecture token."""
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": "lec_missing", "build_qa_index": False},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_with_unknown_session_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize endpoint should return 404 for unknown session."""
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": "lec_missing", "build_qa_index": False},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_for_other_user_session_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize endpoint should enforce session ownership."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=OWNER_A_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": session_id, "build_qa_index": False},
+        headers=OWNER_B_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_with_invalid_status_returns_409(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Finalize endpoint should return 409 when session state is invalid."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        lecture_session = result.scalar_one()
+        lecture_session.status = "error"
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": session_id, "build_qa_index": False},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 409

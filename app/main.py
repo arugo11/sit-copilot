@@ -15,9 +15,11 @@ from app.core.errors import register_error_handlers
 from app.db.base import Base
 from app.db.session import engine
 from app.models import (  # noqa: F401  # Ensure model metadata is loaded
+    LectureChunk,
     LectureSession,
     QATurn,
     SpeechEvent,
+    SummaryWindow,
     User,
     UserSettings,
     VisualEvent,

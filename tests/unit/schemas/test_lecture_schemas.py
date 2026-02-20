@@ -5,7 +5,10 @@ from pydantic import ValidationError
 
 from app.schemas.lecture import (
     MAX_VISUAL_IMAGE_BYTES,
+    LectureSessionFinalizeRequest,
+    LectureSessionFinalizeResponse,
     LectureSessionStartRequest,
+    LectureSummaryLatestResponse,
     SpeechChunkIngestRequest,
     VisualEventIngestRequest,
 )
@@ -232,3 +235,77 @@ def test_visual_event_ingest_request_rejects_oversized_image() -> None:
 
     with pytest.raises(ValidationError):
         VisualEventIngestRequest.model_validate(payload)
+
+
+def test_lecture_session_finalize_request_accepts_valid_payload() -> None:
+    """Finalize request should accept valid session payload."""
+    payload = {
+        "session_id": "lec_20260220_ab12cd",
+        "build_qa_index": True,
+    }
+
+    request = LectureSessionFinalizeRequest.model_validate(payload)
+
+    assert request.session_id == payload["session_id"]
+    assert request.build_qa_index is True
+
+
+def test_lecture_session_finalize_request_rejects_blank_session_id() -> None:
+    """Finalize request should reject blank session IDs."""
+    payload = {
+        "session_id": "   ",
+        "build_qa_index": False,
+    }
+
+    with pytest.raises(ValidationError):
+        LectureSessionFinalizeRequest.model_validate(payload)
+
+
+def test_lecture_summary_latest_response_requires_valid_structure() -> None:
+    """Summary latest response should validate key_terms/evidence fields."""
+    payload = {
+        "session_id": "lec_20260220_ab12cd",
+        "window_start_ms": 30000,
+        "window_end_ms": 60000,
+        "summary": "この区間では、外れ値の影響を説明しました。",
+        "key_terms": [
+            {
+                "term": "外れ値",
+                "evidence_tags": ["speech", "board"],
+            }
+        ],
+        "evidence": [
+            {
+                "type": "speech",
+                "ref_id": "sp_001",
+            }
+        ],
+        "status": "ok",
+    }
+
+    response = LectureSummaryLatestResponse.model_validate(payload)
+
+    assert response.session_id == payload["session_id"]
+    assert response.status == "ok"
+    assert response.key_terms[0].term == "外れ値"
+
+
+def test_lecture_session_finalize_response_requires_stats() -> None:
+    """Finalize response should include non-negative stats payload."""
+    payload = {
+        "session_id": "lec_20260220_ab12cd",
+        "status": "finalized",
+        "note_generated": True,
+        "qa_index_built": False,
+        "stats": {
+            "speech_events": 10,
+            "visual_events": 4,
+            "summary_windows": 3,
+            "lecture_chunks": 17,
+        },
+    }
+
+    response = LectureSessionFinalizeResponse.model_validate(payload)
+
+    assert response.status == "finalized"
+    assert response.stats.lecture_chunks == 17

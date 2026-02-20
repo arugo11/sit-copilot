@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_lecture_token, require_user_id
@@ -28,6 +28,7 @@ from app.services.lecture_index_service import (
     BM25LectureIndexService,
     LectureIndexService,
 )
+from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_qa_service import (
     LectureQAService,
     SqlAlchemyLectureQAService,
@@ -35,6 +36,7 @@ from app.services.lecture_qa_service import (
 from app.services.lecture_retrieval_service import (
     BM25LectureRetrievalService,
     LectureRetrievalService,
+    get_shared_lecture_retrieval_service,
 )
 from app.services.lecture_verifier_service import (
     AzureOpenAILectureVerifierService,
@@ -47,12 +49,10 @@ router = APIRouter(
     dependencies=[Depends(require_lecture_token)],
 )
 
-_shared_lecture_retrieval_service = BM25LectureRetrievalService()
-
 
 def get_lecture_retrieval_service() -> BM25LectureRetrievalService:
     """Dependency provider for lecture retrieval service."""
-    return _shared_lecture_retrieval_service
+    return get_shared_lecture_retrieval_service()
 
 
 def get_lecture_answerer_service() -> LectureAnswererService:
@@ -129,11 +129,17 @@ async def build_qa_index(
     service: Annotated[LectureIndexService, Depends(get_lecture_index_service)],
 ) -> LectureIndexBuildResponse:
     """Build BM25 search index from finalized speech events."""
-    return await service.build_index(
-        session_id=request.session_id,
-        user_id=user_id,
-        rebuild=request.rebuild,
-    )
+    try:
+        return await service.build_index(
+            session_id=request.session_id,
+            user_id=user_id,
+            rebuild=request.rebuild,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
 
 
 @router.post(
@@ -147,15 +153,21 @@ async def ask_question(
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureAskResponse:
     """Answer a lecture question using BM25 retrieval + Azure OpenAI."""
-    return await service.ask(
-        session_id=request.session_id,
-        user_id=user_id,
-        question=request.question,
-        lang_mode=request.lang_mode,
-        retrieval_mode=request.retrieval_mode,
-        top_k=request.top_k,
-        context_window=request.context_window,
-    )
+    try:
+        return await service.ask(
+            session_id=request.session_id,
+            user_id=user_id,
+            question=request.question,
+            lang_mode=request.lang_mode,
+            retrieval_mode=request.retrieval_mode,
+            top_k=request.top_k,
+            context_window=request.context_window,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
 
 
 @router.post(
@@ -169,13 +181,19 @@ async def ask_followup(
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureFollowupResponse:
     """Answer a follow-up question with conversation context."""
-    return await service.followup(
-        session_id=request.session_id,
-        user_id=user_id,
-        question=request.question,
-        lang_mode=request.lang_mode,
-        retrieval_mode=request.retrieval_mode,
-        top_k=request.top_k,
-        context_window=request.context_window,
-        history_turns=request.history_turns,
-    )
+    try:
+        return await service.followup(
+            session_id=request.session_id,
+            user_id=user_id,
+            question=request.question,
+            lang_mode=request.lang_mode,
+            retrieval_mode=request.retrieval_mode,
+            top_k=request.top_k,
+            context_window=request.context_window,
+            history_turns=request.history_turns,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc

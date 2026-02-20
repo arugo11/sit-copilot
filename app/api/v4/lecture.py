@@ -2,7 +2,16 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,19 +21,39 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.schemas.lecture import (
     MAX_VISUAL_IMAGE_BYTES,
+    LectureSessionFinalizeRequest,
+    LectureSessionFinalizeResponse,
     LectureSessionStartRequest,
     LectureSessionStartResponse,
+    LectureSummaryLatestResponse,
     LectureVisualSource,
     SpeechChunkIngestRequest,
     SpeechChunkIngestResponse,
     VisualEventIngestRequest,
     VisualEventIngestResponse,
 )
+from app.services.lecture_finalize_service import (
+    LectureFinalizeService,
+    LectureSessionStateError,
+    SqlAlchemyLectureFinalizeService,
+)
+from app.services.lecture_index_service import (
+    BM25LectureIndexService,
+    LectureIndexService,
+)
 from app.services.lecture_live_service import (
     LectureLiveService,
     LectureSessionInactiveError,
     LectureSessionNotFoundError,
     SqlAlchemyLectureLiveService,
+)
+from app.services.lecture_retrieval_service import (
+    BM25LectureRetrievalService,
+    get_shared_lecture_retrieval_service,
+)
+from app.services.lecture_summary_service import (
+    LectureSummaryService,
+    SqlAlchemyLectureSummaryService,
 )
 from app.services.vision_ocr_service import NoopVisionOCRService, VisionOCRService
 
@@ -37,12 +66,17 @@ router = APIRouter(
 
 def _is_jpeg_payload(image_bytes: bytes) -> bool:
     """Check JPEG signature bytes."""
-    return image_bytes.startswith(b"\xFF\xD8\xFF")
+    return image_bytes.startswith(b"\xff\xd8\xff")
 
 
 def get_vision_ocr_service() -> VisionOCRService:
     """Dependency provider for OCR adapter."""
     return NoopVisionOCRService()
+
+
+def get_lecture_retrieval_service() -> BM25LectureRetrievalService:
+    """Dependency provider for shared lecture retrieval service."""
+    return get_shared_lecture_retrieval_service()
 
 
 def get_lecture_live_service(
@@ -55,6 +89,43 @@ def get_lecture_live_service(
         db=db,
         user_id=user_id,
         vision_ocr_service=vision_ocr_service,
+    )
+
+
+def get_lecture_summary_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> LectureSummaryService:
+    """Dependency provider for lecture summary service."""
+    return SqlAlchemyLectureSummaryService(db=db)
+
+
+def get_lecture_index_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    retriever: Annotated[
+        BM25LectureRetrievalService, Depends(get_lecture_retrieval_service)
+    ],
+) -> LectureIndexService:
+    """Dependency provider for lecture index builder service."""
+    return BM25LectureIndexService(
+        db=db,
+        retrieval_service=retriever,
+    )
+
+
+def get_lecture_finalize_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[str, Depends(require_user_id)],
+    summary_service: Annotated[
+        LectureSummaryService, Depends(get_lecture_summary_service)
+    ],
+    index_service: Annotated[LectureIndexService, Depends(get_lecture_index_service)],
+) -> LectureFinalizeService:
+    """Dependency provider for lecture finalize service."""
+    return SqlAlchemyLectureFinalizeService(
+        db=db,
+        user_id=user_id,
+        summary_service=summary_service,
+        index_service=index_service,
     )
 
 
@@ -143,4 +214,72 @@ async def ingest_visual_event(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Lecture session is not active.",
+        ) from exc
+
+
+@router.get(
+    "/summary/latest",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureSummaryLatestResponse,
+)
+async def get_latest_summary(
+    session_id: Annotated[
+        str,
+        Query(..., min_length=1, max_length=64),
+    ],
+    user_id: Annotated[str, Depends(require_user_id)],
+    service: Annotated[LectureSummaryService, Depends(get_lecture_summary_service)],
+) -> LectureSummaryLatestResponse:
+    """Return latest 30-second summary for the lecture session."""
+    normalized_session_id = session_id.strip()
+    if not normalized_session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id must not be blank.",
+        )
+
+    try:
+        return await service.get_latest_summary(
+            session_id=normalized_session_id,
+            user_id=user_id,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session is not active.",
+        ) from exc
+
+
+@router.post(
+    "/session/finalize",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureSessionFinalizeResponse,
+)
+async def finalize_lecture_session(
+    request: LectureSessionFinalizeRequest,
+    service: Annotated[
+        LectureFinalizeService,
+        Depends(get_lecture_finalize_service),
+    ],
+) -> LectureSessionFinalizeResponse:
+    """Finalize a lecture session and generate summary/chunk artifacts."""
+    try:
+        return await service.finalize(
+            session_id=request.session_id,
+            build_qa_index=request.build_qa_index,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session state is invalid.",
         ) from exc

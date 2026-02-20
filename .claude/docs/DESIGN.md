@@ -1632,6 +1632,54 @@ def retrieve_with_context(
   - invalid JPEG signature rejection test
   - oversized upload rejection test
 
+## F1 Summary + Finalize Planning (2026-02-20)
+
+### Project: F1 Step 5-6 (`f1-summary-and-finalize`)
+
+**Goal**: Add live summary retrieval and session finalize orchestration to complete F1 step-5/6 backend scope.
+
+### Scope
+
+- **Include**
+  - `GET /api/v4/lecture/summary/latest?session_id=...`
+  - `POST /api/v4/lecture/session/finalize`
+  - `summary_windows` persistence
+  - `lecture_chunks` persistence
+  - finalize idempotency (`active -> finalized`, re-call safe)
+  - optional local BM25 build trigger when `build_qa_index=true`
+- **Exclude**
+  - Azure AI Search push for `lecture_index`
+  - real Azure OpenAI summarizer runtime
+  - frontend polling/UI changes
+
+### Planned Architecture
+
+- Add two dedicated services to keep lecture route thin:
+  - `lecture_summary_service.py`
+  - `lecture_finalize_service.py`
+- Keep existing auth/ownership guard patterns from lecture live endpoints.
+- Use deterministic summary generation in MVP to keep testability and avoid runtime external dependency coupling.
+- Persist artifacts required by SPEC step-6:
+  - summary windows (30s windows, 60s lookback)
+  - lecture chunks (`speech|visual|merged`)
+
+### Key Decisions
+
+1. **Finalize is idempotent by contract**
+   - First call finalizes active session and generates artifacts.
+   - Subsequent calls return stable stats without duplicate records.
+
+2. **Summary generation uses deterministic baseline first**
+   - MVP keeps stable behavior without requiring real LLM runtime.
+   - Optional AI summarizer integration remains a later, additive enhancement.
+
+3. **`build_qa_index` integrates with existing local BM25 builder**
+   - Reuses current `lecture_index_service` without introducing Azure Search coupling in this sprint.
+
+4. **Artifact persistence precedes external indexing**
+   - `summary_windows` + `lecture_chunks` are persisted locally now.
+   - Azure AI Search push is deferred to dedicated next feature.
+
 ## TODO
 
 - [ ] Test Agent Teams workflow end-to-end with a real project
@@ -1656,6 +1704,7 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-20 | Added Sprint5 `/startproject` plan for `f1-summary-and-finalize`: `summary/latest` + `session/finalize`, `summary_windows`/`lecture_chunks` persistence, idempotent finalize contract, and optional local BM25 build trigger |
 | 2026-02-20 | Applied team-review hardening for `f1-ocr-event-persistence` (High/Medium): bounded upload read/size limits, JPEG signature validation, OCR failure observability (`VisionOCRServiceError` + warning logs), and cross-user + oversized/invalid-signature regression tests |
 | 2026-02-20 | Implemented Sprint4 `f1-ocr-event-persistence`: added `/api/v4/lecture/visual/event`, `visual_events` model, OCR adapter boundary, fallback-safe persistence (`quality=bad` on OCR failure), and schema/service/API tests |
 | 2026-02-20 | Added Sprint4 `/startproject` plan for `f1-ocr-event-persistence`: visual OCR ingest endpoint, `visual_events` persistence, OCR adapter boundary, and fallback-safe quality policy (`quality=bad` on OCR failure) |

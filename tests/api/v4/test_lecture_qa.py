@@ -372,19 +372,7 @@ async def test_post_qa_index_build_validates_session_ownership(
     async_client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Index build should validate session ownership.
-
-    NOTE: This test is skipped because current implementation raises ValueError
-    which FastAPI converts to 500 error. The service layer should handle this
-    gracefully and return 404. This is documented for future improvement.
-    """
-    pytest.skip(
-        "Current implementation raises ValueError (500 error). "
-        "Should return 404 after proper error handling is implemented."
-    )
-
-    # Original test code (skipped):
-    # Create session owned by different user
+    """Index build should return 404 for session owned by another user."""
     async with session_factory() as session:
         from datetime import UTC, datetime
 
@@ -402,14 +390,78 @@ async def test_post_qa_index_build_validates_session_ownership(
         session.add(session_obj)
         await session.commit()
 
-    # Try to build index as test_user
     response = await async_client.post(
         "/api/v4/lecture/qa/index/build",
         json={"session_id": session_id, "rebuild": False},
         headers=AUTH_HEADERS,
     )
+    assert response.status_code == 404
 
-    # Should fail due to ownership mismatch
+
+@pytest.mark.asyncio
+async def test_post_qa_ask_with_other_user_session_returns_404(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Ask should return 404 for a session owned by another user."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session_obj = LectureSession(
+            id="test_session_qa_009",
+            user_id="other_user",
+            course_name="Test Course",
+            status="active",
+            started_at=datetime.now(UTC),
+        )
+        session.add(session_obj)
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": "test_session_qa_009",
+            "question": "テスト質問",
+            "lang_mode": "ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_qa_followup_with_other_user_session_returns_404(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Follow-up should return 404 for a session owned by another user."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session_obj = LectureSession(
+            id="test_session_qa_010",
+            user_id="other_user",
+            course_name="Test Course",
+            status="active",
+            started_at=datetime.now(UTC),
+        )
+        session.add(session_obj)
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/followup",
+        json={
+            "session_id": "test_session_qa_010",
+            "question": "それについてはどうですか",
+            "lang_mode": "ja",
+            "history_turns": 3,
+        },
+        headers=AUTH_HEADERS,
+    )
     assert response.status_code == 404
 
 

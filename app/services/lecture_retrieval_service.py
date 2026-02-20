@@ -13,6 +13,7 @@ __all__ = [
     "BM25LectureRetrievalService",
     "BM25TokenCache",
     "LectureRetrievalIndex",
+    "get_shared_lecture_retrieval_service",
 ]
 
 
@@ -277,3 +278,14 @@ class BM25LectureRetrievalService:
             sources.append(source)
 
         return sources
+
+
+_shared_lecture_retrieval_service: BM25LectureRetrievalService | None = None
+
+
+def get_shared_lecture_retrieval_service() -> BM25LectureRetrievalService:
+    """Return a process-wide shared lecture retrieval service instance."""
+    global _shared_lecture_retrieval_service
+    if _shared_lecture_retrieval_service is None:
+        _shared_lecture_retrieval_service = BM25LectureRetrievalService()
+    return _shared_lecture_retrieval_service

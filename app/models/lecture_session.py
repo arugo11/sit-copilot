@@ -14,7 +14,9 @@ from app.db.base import Base
 __all__ = ["LectureSession"]
 
 if TYPE_CHECKING:
+    from app.models.lecture_chunk import LectureChunk
     from app.models.speech_event import SpeechEvent
+    from app.models.summary_window import SummaryWindow
     from app.models.visual_event import VisualEvent
 
 
@@ -54,6 +56,16 @@ class LectureSession(Base):
     )
     visual_events: Mapped[list[VisualEvent]] = relationship(
         "VisualEvent",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+    summary_windows: Mapped[list[SummaryWindow]] = relationship(
+        "SummaryWindow",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+    lecture_chunks: Mapped[list[LectureChunk]] = relationship(
+        "LectureChunk",
         back_populates="session",
         cascade="all, delete-orphan",
     )

@@ -8,6 +8,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
 
 __all__ = [
@@ -126,9 +127,11 @@ class SqlAlchemyLectureFollowupService:
         """
         result = await self._db.execute(
             select(QATurn)
+            .join(LectureSession, LectureSession.id == QATurn.session_id)
             .where(
                 QATurn.session_id == session_id,
                 QATurn.feature == "lecture_qa",
+                LectureSession.user_id == user_id,
             )
             .order_by(QATurn.created_at.desc())
             .limit(turns)

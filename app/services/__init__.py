@@ -5,6 +5,11 @@ from app.services.lecture_answerer_service import (
     LectureAnswerDraft,
     LectureAnswererService,
 )
+from app.services.lecture_finalize_service import (
+    LectureFinalizeService,
+    LectureSessionStateError,
+    SqlAlchemyLectureFinalizeService,
+)
 from app.services.lecture_followup_service import (
     FollowupResolution,
     LectureFollowupService,
@@ -29,6 +34,11 @@ from app.services.lecture_retrieval_service import (
     BM25TokenCache,
     LectureRetrievalIndex,
     LectureRetrievalService,
+    get_shared_lecture_retrieval_service,
+)
+from app.services.lecture_summary_service import (
+    LectureSummaryService,
+    SqlAlchemyLectureSummaryService,
 )
 from app.services.lecture_verifier_service import (
     AzureOpenAILectureVerifierService,
@@ -65,6 +75,10 @@ __all__ = [
     "FakeProcedureAnswererService",
     "FakeProcedureRetrievalService",
     "FollowupResolution",
+    "get_shared_lecture_retrieval_service",
+    "LectureFinalizeService",
+    "LectureSessionStateError",
+    "LectureSummaryService",
     "LectureAnswerDraft",
     "LectureAnswererService",
     "LectureIndexService",
@@ -83,10 +97,11 @@ __all__ = [
     "ProcedureQAService",
     "ProcedureRetrievalService",
     "SettingsService",
+    "SqlAlchemyLectureFinalizeService",
     "SqlAlchemyLectureFollowupService",
-    "SqlAlchemyLectureIndexService",
     "SqlAlchemyLectureLiveService",
     "SqlAlchemyLectureQAService",
+    "SqlAlchemyLectureSummaryService",
     "SqlAlchemyProcedureQAService",
     "SqlAlchemySettingsService",
     "VisionOCRResult",

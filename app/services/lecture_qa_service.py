@@ -5,8 +5,10 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Literal, Protocol
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
 from app.schemas.lecture_qa import (
     LectureAskResponse,
@@ -20,6 +22,7 @@ from app.services.lecture_answerer_service import (
 from app.services.lecture_followup_service import (
     LectureFollowupService,
 )
+from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_retrieval_service import LectureRetrievalService
 from app.services.lecture_verifier_service import (
     LectureVerificationResult,
@@ -99,6 +102,7 @@ class SqlAlchemyLectureQAService:
         context_window: int,
     ) -> LectureAskResponse:
         """Execute retrieval + answer + verify + persist."""
+        await self._ensure_session_owned(session_id=session_id, user_id=user_id)
         started_at = perf_counter()
 
         # Retrieve relevant sources
@@ -194,6 +198,7 @@ class SqlAlchemyLectureQAService:
         history_turns: int,
     ) -> LectureFollowupResponse:
         """Answer follow-up question with conversation context."""
+        await self._ensure_session_owned(session_id=session_id, user_id=user_id)
         started_at = perf_counter()
 
         # Resolve follow-up to standalone query
@@ -334,6 +339,19 @@ class SqlAlchemyLectureQAService:
         )
         self._db.add(qa_turn)
         await self._db.flush()
+
+    async def _ensure_session_owned(self, *, session_id: str, user_id: str) -> None:
+        """Validate that the session exists and is owned by the caller."""
+        result = await self._db.execute(
+            select(LectureSession.id).where(
+                LectureSession.id == session_id,
+                LectureSession.user_id == user_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise LectureSessionNotFoundError(
+                f"lecture session not found: {session_id}"
+            )
 
     @staticmethod
     def _to_latency_ms(started_at: float) -> int:

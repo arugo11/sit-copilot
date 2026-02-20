@@ -8,6 +8,7 @@ LangMode = Literal["ja", "easy-ja", "en"]
 LectureSpeaker = Literal["teacher", "unknown"]
 LectureVisualSource = Literal["slide", "board"]
 VisualEventQuality = Literal["good", "warn", "bad"]
+LectureEvidenceType = Literal["speech", "slide", "board"]
 
 MAX_SESSION_ID_LENGTH = 64
 MAX_TEXT_LENGTH = 5000
@@ -182,3 +183,94 @@ class VisualEventIngestResponse(BaseModel):
     ocr_text: str
     ocr_confidence: float = Field(ge=0.0, le=1.0)
     quality: VisualEventQuality
+
+
+class LectureSummaryKeyTerm(BaseModel):
+    """Summary key term with source evidence tags."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    term: str = Field(min_length=1, max_length=128)
+    evidence_tags: list[LectureEvidenceType] = Field(min_length=1, max_length=3)
+
+    @field_validator("term")
+    @classmethod
+    def validate_term_not_blank(cls, value: str) -> str:
+        """Normalize term and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("term must not be blank.")
+        return normalized
+
+
+class LectureSummaryEvidence(BaseModel):
+    """Evidence reference used in lecture summary response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: LectureEvidenceType
+    ref_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("ref_id")
+    @classmethod
+    def validate_ref_id_not_blank(cls, value: str) -> str:
+        """Normalize evidence reference ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("ref_id must not be blank.")
+        return normalized
+
+
+class LectureSummaryLatestResponse(BaseModel):
+    """Response schema for the latest 30-second lecture summary window."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    window_start_ms: int = Field(ge=0)
+    window_end_ms: int = Field(ge=0)
+    summary: str
+    key_terms: list[LectureSummaryKeyTerm]
+    evidence: list[LectureSummaryEvidence]
+    status: Literal["ok", "no_data"] = "ok"
+
+
+class LectureSessionFinalizeRequest(BaseModel):
+    """Request schema for lecture session finalization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    build_qa_index: bool = True
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id_not_blank(cls, value: str) -> str:
+        """Normalize session ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("session_id must not be blank.")
+        return normalized
+
+
+class LectureSessionFinalizeStats(BaseModel):
+    """Artifact counts created by session finalization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    speech_events: int = Field(ge=0)
+    visual_events: int = Field(ge=0)
+    summary_windows: int = Field(ge=0)
+    lecture_chunks: int = Field(ge=0)
+
+
+class LectureSessionFinalizeResponse(BaseModel):
+    """Response schema for lecture session finalization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    status: Literal["finalized"]
+    note_generated: bool
+    qa_index_built: bool
+    stats: LectureSessionFinalizeStats

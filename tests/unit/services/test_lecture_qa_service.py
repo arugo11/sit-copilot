@@ -1,15 +1,19 @@
 """Unit tests for lecture QA service."""
 
-import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from datetime import UTC, datetime
 
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
 from app.schemas.lecture_qa import (
     LectureSource,
 )
 from app.services.lecture_answerer_service import LectureAnswerDraft
 from app.services.lecture_followup_service import FollowupResolution
+from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_qa_service import SqlAlchemyLectureQAService
 from app.services.lecture_verifier_service import LectureVerificationResult
 
@@ -157,11 +161,31 @@ class MockFollowup:
         )
 
 
+async def _seed_lecture_session(
+    db_session: AsyncSession,
+    *,
+    session_id: str = "session_123",
+    user_id: str = "user_1",
+) -> None:
+    """Seed an owned lecture session for QA ownership checks."""
+    db_session.add(
+        LectureSession(
+            id=session_id,
+            user_id=user_id,
+            course_name="Test Course",
+            status="active",
+            started_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+
+
 @pytest.mark.asyncio
 async def test_ask_with_sources_returns_answer_and_persists_turn(
     db_session: AsyncSession,
 ) -> None:
     """Service should answer with sources and persist qa_turn."""
+    await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
             chunk_id="speech_1",
@@ -233,6 +257,7 @@ async def test_ask_without_sources_returns_fallback_and_persists_turn(
     db_session: AsyncSession,
 ) -> None:
     """Service should return fallback and skip answerer for no-source path."""
+    await _seed_lecture_session(db_session)
     retriever = MockRetriever([])  # No sources
     answerer = MockAnswerer()
     verifier = MockVerifier()
@@ -284,6 +309,7 @@ async def test_ask_with_verification_failure_triggers_repair(
     db_session: AsyncSession,
 ) -> None:
     """Service should attempt repair when verification fails."""
+    await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
             chunk_id="speech_1",
@@ -339,6 +365,7 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
     db_session: AsyncSession,
 ) -> None:
     """Service should return fallback when verification fails and repair fails."""
+    await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
             chunk_id="speech_1",
@@ -395,6 +422,7 @@ async def test_followup_with_sources_resolves_query_and_returns_answer(
     db_session: AsyncSession,
 ) -> None:
     """Service should resolve follow-up query and return answer."""
+    await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
             chunk_id="speech_1",
@@ -453,6 +481,7 @@ async def test_followup_without_sources_returns_fallback(
     db_session: AsyncSession,
 ) -> None:
     """Service should return fallback when follow-up retrieval finds no sources."""
+    await _seed_lecture_session(db_session)
     retriever = MockRetriever([])  # No sources
     answerer = MockAnswerer()
     verifier = MockVerifier()
@@ -489,6 +518,7 @@ async def test_ask_respects_retrieval_limit(
     db_session: AsyncSession,
 ) -> None:
     """Service should respect retrieval_limit when calling retriever."""
+    await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
             chunk_id=f"speech_{i}",
@@ -531,6 +561,7 @@ async def test_ask_uses_custom_fallback_messages(
     db_session: AsyncSession,
 ) -> None:
     """Service should use custom fallback messages when configured."""
+    await _seed_lecture_session(db_session)
     retriever = MockRetriever([])
     answerer = MockAnswerer()
     verifier = MockVerifier()
@@ -562,3 +593,33 @@ async def test_ask_uses_custom_fallback_messages(
     assert response.answer == custom_fallback
     assert response.action_next == custom_action
     assert response.fallback == custom_fallback
+
+
+@pytest.mark.asyncio
+async def test_ask_unknown_or_other_user_session_raises_not_found(
+    db_session: AsyncSession,
+) -> None:
+    """Service should reject sessions not owned by caller."""
+    await _seed_lecture_session(
+        db_session,
+        session_id="session_other",
+        user_id="user_other",
+    )
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=MockRetriever([]),
+        answerer=MockAnswerer(),
+        verifier=MockVerifier(),
+        followup=MockFollowup(),
+    )
+
+    with pytest.raises(LectureSessionNotFoundError):
+        await service.ask(
+            session_id="session_other",
+            user_id="user_1",
+            question="Test?",
+            lang_mode="ja",
+            retrieval_mode="source-only",
+            top_k=5,
+            context_window=1,
+        )

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
 from app.schemas.lecture_qa import LectureIndexBuildResponse
+from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_retrieval_service import (
     BM25LectureRetrievalService,
     BM25TokenCache,
@@ -83,7 +84,7 @@ class BM25LectureIndexService:
             Response with index version, chunk count, and build status
 
         Raises:
-            ValueError: If session not found or ownership validation fails
+            LectureSessionNotFoundError: If session not found or ownership validation fails
         """
         # Use per-session lock to prevent concurrent builds
         async with self._get_lock(session_id):
@@ -151,7 +152,7 @@ class BM25LectureIndexService:
             The lecture session
 
         Raises:
-            ValueError: If session not found or ownership mismatch
+            LectureSessionNotFoundError: If session not found or ownership mismatch
         """
         result = await self._db.execute(
             select(LectureSession).where(
@@ -162,8 +163,8 @@ class BM25LectureIndexService:
         session = result.scalar_one_or_none()
 
         if session is None:
-            raise ValueError(
-                f"Lecture session not found or access denied: session_id={session_id}"
+            raise LectureSessionNotFoundError(
+                f"lecture session not found: {session_id}"
             )
 
         return session
