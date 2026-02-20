@@ -18,7 +18,19 @@ Implement approved plans without Claude Agent Teams. Use workstream ownership an
 1. Build execution lanes
    - Derive 2-4 workstreams from the plan (for example: data, service, api, tests).
    - Assign strict file ownership per workstream to avoid conflicts.
-   - Record ownership in the response before editing.
+   - Record ownership in the response before editing using this template:
+
+     | Lane | Goal | Owned Files | Depends On | Lane Checks |
+     |------|------|-------------|------------|-------------|
+     | data | ... | `path/a.py`, `path/b.py` | none | `ruff/ty/pytest <scope>` |
+     | service | ... | ... | data | ... |
+     | api | ... | ... | service | ... |
+     | tests | ... | ... | api | ... |
+
+   - Rules:
+     - Only the owning lane edits listed files.
+     - Cross-lane interface changes must be announced and immediately synchronized.
+     - Do not begin lane implementation until ownership table is published.
 
 2. Implement by workstream
    - Execute each lane end-to-end on its owned files.

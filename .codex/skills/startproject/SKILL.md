@@ -44,13 +44,27 @@ Plan a feature with Codex + Gemini only. Do not require Claude Agent Teams, Task
 5. Design and planning
    - Produce architecture, module boundaries, risks, and mitigations.
    - Create an implementation task plan with dependencies and verification steps.
+   - Add a dedicated `Merge Gate` section to `{feature}-plan.md` with:
+     - scope include/exclude freeze
+     - acceptance criteria
+     - key risks and mitigations
+     - unresolved questions (if any)
    - Save plan to:
      - `.claude/docs/research/{feature}-plan.md`
 
-6. Persist decisions
+6. Merge gate (approval-ready checkpoint)
+   - Before implementation, summarize `Merge Gate` in the response using this checklist:
+     - `Scope Frozen`: include/exclude is explicit and bounded
+     - `Evidence Ready`: research sources/assumptions are listed
+     - `Interfaces Locked`: API/schema boundaries are fixed
+     - `Quality Gates Defined`: lint/type/test commands are explicit
+     - `Risks Accepted`: owner + mitigation is defined for each high risk
+   - If any item is not ready, revise plan artifacts first.
+
+7. Persist decisions
    - Update `.claude/docs/DESIGN.md` with key decisions and rationale.
 
-7. Approval gate
+8. Approval gate
    - Present a concise plan summary to the user.
    - Ask for explicit approval before moving to `/team-implement`.
 

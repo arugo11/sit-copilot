@@ -18,6 +18,9 @@ Use the local checkpoint script directly and perform analysis in the same Codex 
    - Command:
      - `python .claude/skills/checkpointing/checkpoint.py`
      - or `python .claude/skills/checkpointing/checkpoint.py --since YYYY-MM-DD`
+   - If `python` is unavailable, use:
+     - `python3 .claude/skills/checkpointing/checkpoint.py`
+     - or `python3 .claude/skills/checkpointing/checkpoint.py --since YYYY-MM-DD`
 
 2. Verify generated artifacts
    - Confirm latest files exist:
@@ -28,8 +31,11 @@ Use the local checkpoint script directly and perform analysis in the same Codex 
 3. Analyze skill patterns without Claude subagents
    - Read the generated `.analyze-prompt.md` in the current Codex session.
    - Produce candidate skill patterns with confidence and evidence.
-   - Optionally save analysis to:
-     - `.claude/docs/research/skill-patterns-{date}.md`
+   - Save analysis to:
+     - `.claude/docs/research/skill-patterns-{checkpoint-timestamp}.md`
+   - Naming convention:
+     - Use the same UTC timestamp as checkpoint filename (example: `2026-02-20-225248`).
+     - This avoids overwriting date-only reports.
 
 4. Report to user
    - Summarize checkpoint stats and top pattern suggestions.
