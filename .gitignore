@@ -1,0 +1,20 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.azure.generated.example
+.env.azure.generated
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# Test and tooling caches
+.coverage
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+.venv/

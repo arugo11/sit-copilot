@@ -1,0 +1,146 @@
+"""Lecture live API endpoints."""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import require_lecture_token, require_user_id
+from app.core.config import settings
+from app.db.session import get_db
+from app.schemas.lecture import (
+    MAX_VISUAL_IMAGE_BYTES,
+    LectureSessionStartRequest,
+    LectureSessionStartResponse,
+    LectureVisualSource,
+    SpeechChunkIngestRequest,
+    SpeechChunkIngestResponse,
+    VisualEventIngestRequest,
+    VisualEventIngestResponse,
+)
+from app.services.lecture_live_service import (
+    LectureLiveService,
+    LectureSessionInactiveError,
+    LectureSessionNotFoundError,
+    SqlAlchemyLectureLiveService,
+)
+from app.services.vision_ocr_service import NoopVisionOCRService, VisionOCRService
+
+router = APIRouter(
+    prefix="/lecture",
+    tags=["lecture"],
+    dependencies=[Depends(require_lecture_token)],
+)
+
+
+def _is_jpeg_payload(image_bytes: bytes) -> bool:
+    """Check JPEG signature bytes."""
+    return image_bytes.startswith(b"\xFF\xD8\xFF")
+
+
+def get_vision_ocr_service() -> VisionOCRService:
+    """Dependency provider for OCR adapter."""
+    return NoopVisionOCRService()
+
+
+def get_lecture_live_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[str, Depends(require_user_id)],
+    vision_ocr_service: Annotated[VisionOCRService, Depends(get_vision_ocr_service)],
+) -> LectureLiveService:
+    """Dependency provider for lecture live service."""
+    return SqlAlchemyLectureLiveService(
+        db=db,
+        user_id=user_id,
+        vision_ocr_service=vision_ocr_service,
+    )
+
+
+@router.post(
+    "/session/start",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureSessionStartResponse,
+)
+async def start_lecture_session(
+    request: LectureSessionStartRequest,
+    service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
+) -> LectureSessionStartResponse:
+    """Start a new active lecture session."""
+    return await service.start_session(request)
+
+
+@router.post(
+    "/speech/chunk",
+    status_code=status.HTTP_200_OK,
+    response_model=SpeechChunkIngestResponse,
+)
+async def ingest_speech_chunk(
+    request: SpeechChunkIngestRequest,
+    service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
+) -> SpeechChunkIngestResponse:
+    """Persist a finalized subtitle chunk."""
+    try:
+        return await service.ingest_speech_chunk(request)
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session is not active.",
+        ) from exc
+
+
+@router.post(
+    "/visual/event",
+    status_code=status.HTTP_200_OK,
+    response_model=VisualEventIngestResponse,
+)
+async def ingest_visual_event(
+    session_id: Annotated[str, Form(...)],
+    timestamp_ms: Annotated[int, Form(...)],
+    source: Annotated[LectureVisualSource, Form(...)],
+    change_score: Annotated[float, Form(...)],
+    image: Annotated[UploadFile, File(...)],
+    service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
+) -> VisualEventIngestResponse:
+    """Persist an OCR visual event."""
+    max_image_bytes = min(
+        settings.lecture_visual_max_image_bytes,
+        MAX_VISUAL_IMAGE_BYTES,
+    )
+    image_bytes = await image.read(max_image_bytes + 1)
+    image_content_type = image.content_type or ""
+
+    try:
+        request = VisualEventIngestRequest.model_validate(
+            {
+                "session_id": session_id,
+                "timestamp_ms": timestamp_ms,
+                "source": source,
+                "change_score": change_score,
+                "image_content_type": image_content_type,
+                "image_size": len(image_bytes),
+                "upload_size_limit": max_image_bytes,
+                "image_has_jpeg_magic": _is_jpeg_payload(image_bytes),
+            }
+        )
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+    try:
+        return await service.ingest_visual_event(request, image_bytes)
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session is not active.",
+        ) from exc
