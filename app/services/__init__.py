@@ -1,5 +1,10 @@
 """Business logic services."""
 
+from app.services.azure_search_service import (
+    AzureAISearchService,
+    AzureSearchService,
+    get_shared_azure_search_service,
+)
 from app.services.lecture_answerer_service import (
     AzureOpenAILectureAnswererService,
     LectureAnswerDraft,
@@ -16,6 +21,7 @@ from app.services.lecture_followup_service import (
     SqlAlchemyLectureFollowupService,
 )
 from app.services.lecture_index_service import (
+    AzureLectureIndexService,
     BM25LectureIndexService,
     LectureIndexService,
 )
@@ -30,6 +36,7 @@ from app.services.lecture_qa_service import (
     SqlAlchemyLectureQAService,
 )
 from app.services.lecture_retrieval_service import (
+    AzureSearchLectureRetrievalService,
     BM25LectureRetrievalService,
     BM25TokenCache,
     LectureRetrievalIndex,
@@ -67,6 +74,11 @@ from app.services.vision_ocr_service import (
 )
 
 __all__ = [
+    "AzureAISearchService",
+    "AzureSearchService",
+    "get_shared_azure_search_service",
+    "AzureLectureIndexService",
+    "AzureSearchLectureRetrievalService",
     "AzureOpenAILectureAnswererService",
     "AzureOpenAILectureVerifierService",
     "BM25LectureIndexService",

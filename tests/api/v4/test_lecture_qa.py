@@ -1,18 +1,78 @@
 """Integration tests for lecture QA API endpoints."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.v4 import lecture_qa as lecture_qa_api
 from app.core.auth import LECTURE_TOKEN_HEADER, USER_ID_HEADER
 from app.core.config import settings
 from app.models.qa_turn import QATurn
+from app.services.lecture_retrieval_service import (
+    AzureSearchLectureRetrievalService,
+    BM25LectureRetrievalService,
+)
 
 AUTH_HEADERS = {
     LECTURE_TOKEN_HEADER: settings.lecture_api_token,
     USER_ID_HEADER: "test_user",
 }
+
+
+class FakeAzureSearchService:
+    """Azure search test double for API dependency overrides."""
+
+    def __init__(
+        self,
+        *,
+        documents: list[dict[str, Any]] | None = None,
+        succeeded_chunk_ids: list[str] | None = None,
+        fail_search: bool = False,
+    ) -> None:
+        self.documents = documents or []
+        self.succeeded_chunk_ids = succeeded_chunk_ids
+        self.fail_search = fail_search
+        self.upsert_calls: list[list[dict[str, Any]]] = []
+
+    async def ensure_lecture_index(self) -> None:
+        """No-op for tests."""
+
+    async def upsert_lecture_documents(
+        self,
+        documents: list[dict[str, Any]],
+    ) -> list[str]:
+        self.upsert_calls.append(documents)
+        if self.succeeded_chunk_ids is not None:
+            return self.succeeded_chunk_ids
+        return [str(document["chunk_id"]) for document in documents]
+
+    async def search_lecture_documents(
+        self,
+        *,
+        search_text: str,
+        session_id: str,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        _ = (search_text, session_id, top_k)
+        if self.fail_search:
+            raise RuntimeError("azure search query failed")
+        return self.documents[:top_k]
+
+    async def list_session_documents(
+        self,
+        *,
+        session_id: str,
+        max_documents: int = 1000,
+    ) -> list[dict[str, Any]]:
+        _ = (session_id, max_documents)
+        return self.documents[:max_documents]
+
+    async def has_session_documents(self, *, session_id: str) -> bool:
+        _ = session_id
+        return bool(self.documents)
 
 
 @pytest.mark.asyncio
@@ -574,3 +634,282 @@ async def test_post_qa_ask_respects_top_k_limit(
     assert response.status_code == 200
     # Should return at most top_k sources (or fewer if no matches)
     assert len(body["sources"]) <= 3
+
+
+def test_get_lecture_retrieval_service_uses_azure_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrieval provider should switch to Azure adapter when enabled."""
+    monkeypatch.setattr(settings, "azure_search_enabled", True)
+    monkeypatch.setattr(
+        settings,
+        "azure_search_endpoint",
+        "https://example.search.windows.net",
+    )
+    monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
+
+    service = lecture_qa_api.get_lecture_retrieval_service()
+    assert isinstance(service, AzureSearchLectureRetrievalService)
+
+
+def test_get_lecture_retrieval_service_falls_back_to_bm25_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrieval provider should keep BM25 path when Azure is disabled."""
+    monkeypatch.setattr(settings, "azure_search_enabled", False)
+    monkeypatch.setattr(settings, "azure_search_endpoint", "")
+    monkeypatch.setattr(settings, "azure_search_api_key", "")
+
+    service = lecture_qa_api.get_lecture_retrieval_service()
+    assert isinstance(service, BM25LectureRetrievalService)
+
+
+@pytest.mark.asyncio
+async def test_post_qa_index_build_uses_azure_service_when_enabled(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Index build endpoint should succeed via Azure index service wiring."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+        from app.models.speech_event import SpeechEvent
+
+        session_id = "test_session_qa_azure_001"
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=False,
+            )
+        )
+        session.add(
+            SpeechEvent(
+                session_id=session_id,
+                start_ms=0,
+                end_ms=5000,
+                text="Azure index source",
+                confidence=0.95,
+                is_final=True,
+                speaker="teacher",
+            )
+        )
+        await session.commit()
+
+    fake_search = FakeAzureSearchService()
+    monkeypatch.setattr(settings, "azure_search_enabled", True)
+    monkeypatch.setattr(settings, "azure_search_endpoint", "https://example.search")
+    monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
+    monkeypatch.setattr(
+        lecture_qa_api,
+        "get_azure_search_service",
+        lambda: fake_search,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": True},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert len(fake_search.upsert_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_post_qa_ask_uses_azure_retrieval_when_enabled(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ask endpoint should return sources from Azure retrieval adapter."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session_id = "test_session_qa_azure_002"
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=True,
+            )
+        )
+        await session.commit()
+
+    fake_search = FakeAzureSearchService(
+        documents=[
+            {
+                "chunk_id": "azure-chunk-1",
+                "chunk_type": "speech",
+                "speech_text": "Azure retrieval text",
+                "start_ms": 0,
+                "end_ms": 5000,
+                "@search.score": 2.0,
+            }
+        ]
+    )
+    monkeypatch.setattr(settings, "azure_search_enabled", True)
+    monkeypatch.setattr(settings, "azure_search_endpoint", "https://example.search")
+    monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
+    monkeypatch.setattr(
+        lecture_qa_api,
+        "get_azure_search_service",
+        lambda: fake_search,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": session_id,
+            "question": "Azure では何を説明しましたか",
+            "lang_mode": "ja",
+            "retrieval_mode": "source-only",
+            "top_k": 3,
+            "context_window": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["sources"][0]["chunk_id"] == "azure-chunk-1"
+
+
+@pytest.mark.asyncio
+async def test_post_qa_index_build_returns_503_when_azure_partial_failure(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Index build should return 503 on partial Azure indexing failure."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_chunk import LectureChunk
+        from app.models.lecture_session import LectureSession
+
+        session_id = "test_session_qa_azure_003"
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=False,
+            )
+        )
+        session.add(
+            LectureChunk(
+                id="chunk-a",
+                session_id=session_id,
+                chunk_type="speech",
+                start_ms=0,
+                end_ms=5000,
+                speech_text="A",
+                visual_text=None,
+                summary_text=None,
+                keywords_json=[],
+                embedding_text="A",
+                indexed_to_search=False,
+            )
+        )
+        session.add(
+            LectureChunk(
+                id="chunk-b",
+                session_id=session_id,
+                chunk_type="speech",
+                start_ms=5000,
+                end_ms=10000,
+                speech_text="B",
+                visual_text=None,
+                summary_text=None,
+                keywords_json=[],
+                embedding_text="B",
+                indexed_to_search=False,
+            )
+        )
+        await session.commit()
+
+    fake_search = FakeAzureSearchService(
+        documents=[],
+        succeeded_chunk_ids=["chunk-a"],
+    )
+    monkeypatch.setattr(settings, "azure_search_enabled", True)
+    monkeypatch.setattr(settings, "azure_search_endpoint", "https://example.search")
+    monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
+    monkeypatch.setattr(
+        lecture_qa_api,
+        "get_azure_search_service",
+        lambda: fake_search,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": True},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_post_qa_ask_returns_503_when_azure_search_fails(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ask endpoint should return 503 when Azure search query fails."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session_id = "test_session_qa_azure_004"
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=True,
+            )
+        )
+        await session.commit()
+
+    fake_search = FakeAzureSearchService(documents=[], fail_search=True)
+    monkeypatch.setattr(settings, "azure_search_enabled", True)
+    monkeypatch.setattr(settings, "azure_search_endpoint", "https://example.search")
+    monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
+    monkeypatch.setattr(
+        lecture_qa_api,
+        "get_azure_search_service",
+        lambda: fake_search,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": session_id,
+            "question": "error path",
+            "lang_mode": "ja",
+            "retrieval_mode": "source-only",
+            "top_k": 3,
+            "context_window": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 503

@@ -16,6 +16,10 @@ from app.schemas.lecture_qa import (
     LectureIndexBuildRequest,
     LectureIndexBuildResponse,
 )
+from app.services.azure_search_service import (
+    AzureSearchService,
+    get_shared_azure_search_service,
+)
 from app.services.lecture_answerer_service import (
     AzureOpenAILectureAnswererService,
     LectureAnswererService,
@@ -25,6 +29,7 @@ from app.services.lecture_followup_service import (
     SqlAlchemyLectureFollowupService,
 )
 from app.services.lecture_index_service import (
+    AzureLectureIndexService,
     BM25LectureIndexService,
     LectureIndexService,
 )
@@ -34,7 +39,7 @@ from app.services.lecture_qa_service import (
     SqlAlchemyLectureQAService,
 )
 from app.services.lecture_retrieval_service import (
-    BM25LectureRetrievalService,
+    AzureSearchLectureRetrievalService,
     LectureRetrievalService,
     get_shared_lecture_retrieval_service,
 )
@@ -50,8 +55,29 @@ router = APIRouter(
 )
 
 
-def get_lecture_retrieval_service() -> BM25LectureRetrievalService:
+def _azure_search_available() -> bool:
+    return (
+        settings.azure_search_enabled
+        and bool(settings.azure_search_endpoint.strip())
+        and bool(settings.azure_search_api_key.strip())
+    )
+
+
+def get_azure_search_service() -> AzureSearchService:
+    """Dependency provider for Azure Search service."""
+    return get_shared_azure_search_service(
+        endpoint=settings.azure_search_endpoint,
+        api_key=settings.azure_search_api_key,
+        index_name=settings.azure_search_index_name,
+    )
+
+
+def get_lecture_retrieval_service() -> LectureRetrievalService:
     """Dependency provider for lecture retrieval service."""
+    if _azure_search_available():
+        return AzureSearchLectureRetrievalService(
+            search_service=get_azure_search_service(),
+        )
     return get_shared_lecture_retrieval_service()
 
 
@@ -87,14 +113,17 @@ def get_lecture_followup_service(
 
 def get_lecture_index_service(
     db: Annotated[AsyncSession, Depends(get_db)],
-    retriever: Annotated[
-        BM25LectureRetrievalService, Depends(get_lecture_retrieval_service)
-    ],
 ) -> LectureIndexService:
     """Dependency provider for lecture index service."""
+    if _azure_search_available():
+        return AzureLectureIndexService(
+            db=db,
+            search_service=get_azure_search_service(),
+        )
+
     return BM25LectureIndexService(
         db=db,
-        retrieval_service=retriever,
+        retrieval_service=get_shared_lecture_retrieval_service(),
     )
 
 
@@ -128,7 +157,7 @@ async def build_qa_index(
     user_id: Annotated[str, Depends(require_user_id)],
     service: Annotated[LectureIndexService, Depends(get_lecture_index_service)],
 ) -> LectureIndexBuildResponse:
-    """Build BM25 search index from finalized speech events."""
+    """Build lecture QA index for the session (Azure or BM25 backend)."""
     try:
         return await service.build_index(
             session_id=request.session_id,
@@ -139,6 +168,11 @@ async def build_qa_index(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lecture session not found.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture index backend is unavailable.",
         ) from exc
 
 
@@ -152,7 +186,7 @@ async def ask_question(
     user_id: Annotated[str, Depends(require_user_id)],
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureAskResponse:
-    """Answer a lecture question using BM25 retrieval + Azure OpenAI."""
+    """Answer a lecture question using configured retrieval + Azure OpenAI."""
     try:
         return await service.ask(
             session_id=request.session_id,
@@ -167,6 +201,11 @@ async def ask_question(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lecture session not found.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture QA backend is unavailable.",
         ) from exc
 
 
@@ -196,4 +235,9 @@ async def ask_followup(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lecture session not found.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture QA backend is unavailable.",
         ) from exc

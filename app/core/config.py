@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""
     azure_openai_model: str = "gpt-4o"
+    azure_search_enabled: bool = False
+    azure_search_api_key: str = ""
+    azure_search_endpoint: str = ""
+    azure_search_index_name: str = "lecture_index"
     procedure_retrieval_limit: int = 3
     procedure_query_max_length: int = 512
     procedure_no_source_fallback: str = (

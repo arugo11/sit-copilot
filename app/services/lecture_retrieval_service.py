@@ -1,16 +1,18 @@
-"""Lecture retrieval service using BM25 for local search."""
+"""Lecture retrieval service using BM25 and Azure Search."""
 
 import asyncio
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from rank_bm25 import BM25Okapi
 
 from app.schemas.lecture_qa import LectureSource, RetrievalMode
+from app.services.azure_search_service import AzureSearchService
 
 __all__ = [
     "LectureRetrievalService",
     "BM25LectureRetrievalService",
+    "AzureSearchLectureRetrievalService",
     "BM25TokenCache",
     "LectureRetrievalIndex",
     "get_shared_lecture_retrieval_service",
@@ -278,6 +280,181 @@ class BM25LectureRetrievalService:
             sources.append(source)
 
         return sources
+
+
+class AzureSearchLectureRetrievalService:
+    """Lecture retrieval service backed by Azure AI Search."""
+
+    def __init__(
+        self,
+        search_service: AzureSearchService,
+    ) -> None:
+        self._search_service = search_service
+
+    async def retrieve(
+        self,
+        session_id: str,
+        query: str,
+        mode: RetrievalMode,
+        top_k: int,
+        context_window: int,
+    ) -> list[LectureSource]:
+        """Retrieve lecture sources from Azure Search."""
+        normalized_top_k = max(1, top_k)
+        direct_documents = await self._search_service.search_lecture_documents(
+            search_text=query,
+            session_id=session_id,
+            top_k=normalized_top_k,
+        )
+        direct_sources = self._to_sources(direct_documents)[:normalized_top_k]
+
+        if mode != "source-plus-context" or context_window <= 0:
+            return direct_sources
+
+        timeline_documents = await self._search_service.list_session_documents(
+            session_id=session_id,
+            max_documents=1000,
+        )
+        timeline_sources = self._to_sources(timeline_documents)
+        if not timeline_sources:
+            return direct_sources
+
+        return self._expand_context(
+            direct_sources=direct_sources,
+            timeline_sources=timeline_sources,
+            context_window=context_window,
+        )
+
+    async def get_index(self, session_id: str) -> LectureRetrievalIndex | None:
+        """Azure retrieval does not expose a local BM25 index."""
+        _ = session_id
+        return None
+
+    async def set_index(self, session_id: str, index: LectureRetrievalIndex) -> None:
+        """No-op for Azure retrieval implementation."""
+        _ = (session_id, index)
+
+    async def has_index(self, session_id: str) -> bool:
+        """Azure retrieval does not track in-process index existence."""
+        _ = session_id
+        return False
+
+    async def remove_index(self, session_id: str) -> None:
+        """No-op for Azure retrieval implementation."""
+        _ = session_id
+
+    @classmethod
+    def _to_sources(cls, documents: list[dict[str, Any]]) -> list[LectureSource]:
+        sources: list[LectureSource] = []
+        for document in documents:
+            chunk_id = str(document.get("chunk_id", "")).strip()
+            if not chunk_id:
+                continue
+
+            chunk_type = str(document.get("chunk_type", "")).strip().lower()
+            source_type = "visual" if chunk_type == "visual" else "speech"
+
+            text = cls._extract_text(document)
+            if not text:
+                continue
+
+            start_ms = cls._to_optional_int(document.get("start_ms"))
+            end_ms = cls._to_optional_int(document.get("end_ms"))
+            bm25_score = cls._to_optional_float(document.get("@search.score")) or 0.0
+
+            sources.append(
+                LectureSource(
+                    chunk_id=chunk_id,
+                    type=source_type,
+                    text=text,
+                    timestamp=cls._format_timestamp(start_ms)
+                    if start_ms is not None
+                    else None,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    speaker=cls._to_optional_str(document.get("speaker")),
+                    bm25_score=bm25_score,
+                    is_direct_hit=True,
+                )
+            )
+        return sources
+
+    @staticmethod
+    def _extract_text(document: dict[str, Any]) -> str:
+        for field in ("speech_text", "visual_text", "summary_text"):
+            value = document.get(field)
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if normalized:
+                return normalized
+        return ""
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_optional_str(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @staticmethod
+    def _format_timestamp(start_ms: int) -> str:
+        total_seconds = start_ms // 1000
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+
+    @staticmethod
+    def _expand_context(
+        *,
+        direct_sources: list[LectureSource],
+        timeline_sources: list[LectureSource],
+        context_window: int,
+    ) -> list[LectureSource]:
+        """Expand direct hits with timeline neighbors."""
+        if not direct_sources:
+            return []
+
+        index_by_chunk_id = {
+            source.chunk_id: idx for idx, source in enumerate(timeline_sources)
+        }
+        direct_ids = {source.chunk_id for source in direct_sources}
+        expanded_indices: set[int] = set()
+
+        for direct in direct_sources:
+            center_idx = index_by_chunk_id.get(direct.chunk_id)
+            if center_idx is None:
+                continue
+            for offset in range(-context_window, context_window + 1):
+                candidate = center_idx + offset
+                if 0 <= candidate < len(timeline_sources):
+                    expanded_indices.add(candidate)
+
+        expanded_sources: list[LectureSource] = []
+        for idx in sorted(expanded_indices):
+            source = timeline_sources[idx]
+            expanded_sources.append(
+                source.model_copy(update={"is_direct_hit": source.chunk_id in direct_ids})
+            )
+        return expanded_sources
 
 
 _shared_lecture_retrieval_service: BM25LectureRetrievalService | None = None

@@ -32,12 +32,17 @@ from app.schemas.lecture import (
     VisualEventIngestRequest,
     VisualEventIngestResponse,
 )
+from app.services.azure_search_service import (
+    AzureSearchService,
+    get_shared_azure_search_service,
+)
 from app.services.lecture_finalize_service import (
     LectureFinalizeService,
     LectureSessionStateError,
     SqlAlchemyLectureFinalizeService,
 )
 from app.services.lecture_index_service import (
+    AzureLectureIndexService,
     BM25LectureIndexService,
     LectureIndexService,
 )
@@ -79,6 +84,23 @@ def get_lecture_retrieval_service() -> BM25LectureRetrievalService:
     return get_shared_lecture_retrieval_service()
 
 
+def _azure_search_available() -> bool:
+    return (
+        settings.azure_search_enabled
+        and bool(settings.azure_search_endpoint.strip())
+        and bool(settings.azure_search_api_key.strip())
+    )
+
+
+def get_azure_search_service() -> AzureSearchService:
+    """Dependency provider for Azure Search service."""
+    return get_shared_azure_search_service(
+        endpoint=settings.azure_search_endpoint,
+        api_key=settings.azure_search_api_key,
+        index_name=settings.azure_search_index_name,
+    )
+
+
 def get_lecture_live_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     user_id: Annotated[str, Depends(require_user_id)],
@@ -101,14 +123,17 @@ def get_lecture_summary_service(
 
 def get_lecture_index_service(
     db: Annotated[AsyncSession, Depends(get_db)],
-    retriever: Annotated[
-        BM25LectureRetrievalService, Depends(get_lecture_retrieval_service)
-    ],
 ) -> LectureIndexService:
     """Dependency provider for lecture index builder service."""
+    if _azure_search_available():
+        return AzureLectureIndexService(
+            db=db,
+            search_service=get_azure_search_service(),
+        )
+
     return BM25LectureIndexService(
         db=db,
-        retrieval_service=retriever,
+        retrieval_service=get_lecture_retrieval_service(),
     )
 
 

@@ -1680,6 +1680,44 @@ def retrieve_with_context(
    - `summary_windows` + `lecture_chunks` are persisted locally now.
    - Azure AI Search push is deferred to dedicated next feature.
 
+## Lecture Index Azure Search Integration Planning (2026-02-20)
+
+### Project: `lecture-index-azure-search-integration`
+
+**Goal**: Push finalized lecture chunks to Azure AI Search `lecture_index` and enable session-scoped lecture QA retrieval from Azure Search, while preserving BM25 fallback for local/dev reliability.
+
+### Scope
+
+- **Include**
+  - Azure Search settings (`enabled`, `endpoint`, `api_key`, `index_name`)
+  - Azure Search index lifecycle and document upsert service
+  - finalize/index-build integration to sync `lecture_chunks` into Azure
+  - update `lecture_chunks.indexed_to_search` based on indexing result
+  - Azure retrieval adapter for `/lecture/qa/ask` + `/followup` with mandatory `session_id` filter
+  - BM25 fallback path when Azure Search is disabled/unavailable
+- **Exclude**
+  - frontend changes
+  - large ranking redesign outside current QA contract
+  - full alias-based zero-downtime migration workflow in this sprint
+
+### Key Decisions
+
+1. **Finalize remains authoritative index sync point**
+   - `finalize`/index-build path is the single source of truth for Azure index synchronization.
+
+2. **Canonical source = local `lecture_chunks`**
+   - Azure documents are derived from `lecture_chunks` + `lecture_sessions` metadata.
+
+3. **State consistency contract**
+   - `qa_index_built=true` only when Azure index sync succeeds (or explicit fallback policy is met).
+   - `indexed_to_search` is updated per successfully indexed chunk.
+
+4. **Safe migration strategy**
+   - Keep current BM25 retrieval available as fallback behind config toggle for local/dev and rollback safety.
+
+5. **Session isolation is non-negotiable**
+   - Azure retrieval must enforce `session_id` filtering in all lecture QA queries.
+
 ## TODO
 
 - [ ] Test Agent Teams workflow end-to-end with a real project
@@ -1704,6 +1742,8 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-20 | Applied post-review hardening for `lecture-index-azure-search-integration`: Azure retrieval now supports `source-plus-context` expansion, Azure Search service is process-shared for schema-cache stability, read path no longer performs schema management, skip logic checks remote session documents, and lecture QA endpoints map backend runtime failures to `503` |
+| 2026-02-20 | Added `/startproject` design for `lecture-index-azure-search-integration`: Azure Search-backed lecture index sync from `lecture_chunks`, session-filtered lecture QA retrieval, `indexed_to_search` consistency contract, and BM25 fallback strategy |
 | 2026-02-20 | Added Sprint5 `/startproject` plan for `f1-summary-and-finalize`: `summary/latest` + `session/finalize`, `summary_windows`/`lecture_chunks` persistence, idempotent finalize contract, and optional local BM25 build trigger |
 | 2026-02-20 | Applied team-review hardening for `f1-ocr-event-persistence` (High/Medium): bounded upload read/size limits, JPEG signature validation, OCR failure observability (`VisionOCRServiceError` + warning logs), and cross-user + oversized/invalid-signature regression tests |
 | 2026-02-20 | Implemented Sprint4 `f1-ocr-event-persistence`: added `/api/v4/lecture/visual/event`, `visual_events` model, OCR adapter boundary, fallback-safe persistence (`quality=bad` on OCR failure), and schema/service/API tests |
