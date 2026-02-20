@@ -25,6 +25,11 @@ from app.schemas.procedure import (
     ProcedureAskResponse,
     ProcedureSource,
 )
+from app.schemas.readiness import (
+    ReadinessCheckRequest,
+    ReadinessCheckResponse,
+    ReadinessTerm,
+)
 from app.schemas.settings import SettingsResponse, SettingsUpsertRequest
 
 __all__ = [
@@ -42,6 +47,9 @@ __all__ = [
     "ProcedureAskRequest",
     "ProcedureAskResponse",
     "ProcedureSource",
+    "ReadinessCheckRequest",
+    "ReadinessCheckResponse",
+    "ReadinessTerm",
     "LectureSource",
     "SpeechChunkIngestRequest",
     "SpeechChunkIngestResponse",

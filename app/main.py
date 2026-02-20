@@ -9,6 +9,7 @@ from app.api.v4 import health as health_api
 from app.api.v4 import lecture as lecture_api
 from app.api.v4 import lecture_qa as lecture_qa_api
 from app.api.v4 import procedure as procedure_api
+from app.api.v4 import readiness as readiness_api
 from app.api.v4 import settings as settings_api
 from app.core.config import settings
 from app.core.errors import register_error_handlers
@@ -48,6 +49,7 @@ app.include_router(settings_api.router, prefix="/api/v4")
 app.include_router(procedure_api.router, prefix="/api/v4")
 app.include_router(lecture_api.router, prefix="/api/v4")
 app.include_router(lecture_qa_api.router, prefix="/api/v4")
+app.include_router(readiness_api.router, prefix="/api/v4")
 
 
 @app.get("/")

@@ -65,6 +65,10 @@ from app.services.procedure_retrieval_service import (
     FakeProcedureRetrievalService,
     ProcedureRetrievalService,
 )
+from app.services.readiness_service import (
+    DeterministicReadinessService,
+    ReadinessService,
+)
 from app.services.settings_service import SettingsService, SqlAlchemySettingsService
 from app.services.vision_ocr_service import (
     NoopVisionOCRService,
@@ -108,6 +112,8 @@ __all__ = [
     "ProcedureAnswererService",
     "ProcedureQAService",
     "ProcedureRetrievalService",
+    "ReadinessService",
+    "DeterministicReadinessService",
     "SettingsService",
     "SqlAlchemyLectureFinalizeService",
     "SqlAlchemyLectureFollowupService",

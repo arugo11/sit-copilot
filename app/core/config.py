@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     procedure_no_source_action_next: str = (
         "教務課または公式ポータルで最新の手続き情報を確認してください。"
     )
+    readiness_course_name_max_length: int = 255
+    readiness_syllabus_max_length: int = 20_000
+    readiness_blob_path_max_length: int = 1_024
+    readiness_terms_min_items: int = 10
+    readiness_terms_max_items: int = 20
+    readiness_points_min_items: int = 2
+    readiness_points_max_items: int = 5
+    readiness_default_disclaimer: str = (
+        "この結果は履修準備の目安です. 履修可否を判定するものではありません."
+    )
 
     model_config = {
         "env_file": (".env", ".env.azure.generated"),

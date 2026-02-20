@@ -1718,6 +1718,39 @@ def retrieve_with_context(
 5. **Session isolation is non-negotiable**
    - Azure retrieval must enforce `session_id` filtering in all lecture QA queries.
 
+## F0 Readiness Check Planning (2026-02-20)
+
+### Project: `f0-readiness-check`
+
+**Goal**: Add `POST /api/v4/course/readiness/check` with deterministic, rule-based readiness guidance that returns the full response contract within the F0 latency target.
+
+### Scope
+
+- **Include**
+  - readiness endpoint + DI wiring
+  - strict request/response schemas for readiness contract
+  - deterministic readiness scoring (0-100 clamp)
+  - auth guard using existing token pattern
+  - API + service + schema tests
+- **Exclude**
+  - blob/PDF content parsing from `first_material_blob_path`
+  - external LLM/OpenAI dependency for score generation
+  - DB persistence for readiness results in this phase
+
+### Key Decisions
+
+1. **Deterministic scoring is the source of truth**
+   - Score computation is fully rule-based and does not depend on external model outputs.
+
+2. **Use current backend layering and feature module structure**
+   - Implement with `app/api/v4/readiness.py`, `app/schemas/readiness.py`, `app/services/readiness_service.py`.
+
+3. **Auth alignment with lecture-side protected routes**
+   - Require `X-Lecture-Token` for readiness check to match existing protected API baseline.
+
+4. **No persistence in F0 baseline**
+   - Keep readiness check stateless to reduce migration and regression risk for the initial delivery.
+
 ## TODO
 
 - [ ] Test Agent Teams workflow end-to-end with a real project
@@ -1728,6 +1761,7 @@ def retrieve_with_context(
 - [ ] Implement lecture QA index build endpoint (`/api/v4/lecture/qa/index/build`) and BM25 in-memory store
 - [ ] Implement lecture QA ask endpoint with follow-up rewrite, retrieval modes, Azure answerer, and verifier pipeline
 - [ ] Add lecture QA unit/integration tests for verifier-fail fallback, no-source fallback, and context-expansion behavior
+- [x] Implement F0 `f0-readiness-check` from approved `/startproject` plan
 - [x] Implement Sprint4 step-4 `f1-ocr-event-persistence` from approved startproject plan
 - [x] Implement Sprint3 `sprint3-f1-speech-events-and-subtitles` from approved startproject plan
 - [x] Implement Sprint2 procedure-qa-minimal from approved startproject plan
@@ -1742,6 +1776,8 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-20 | Implemented F0 `f0-readiness-check`: added authenticated `POST /api/v4/course/readiness/check`, strict readiness schemas, deterministic readiness scoring service, and API/schema/service tests |
+| 2026-02-20 | Added `/startproject` design for `f0-readiness-check`: deterministic readiness scoring, `/api/v4/course/readiness/check` interface lock, `X-Lecture-Token` auth alignment, and stateless (no-persistence) F0 scope freeze |
 | 2026-02-20 | Applied post-review hardening for `lecture-index-azure-search-integration`: Azure retrieval now supports `source-plus-context` expansion, Azure Search service is process-shared for schema-cache stability, read path no longer performs schema management, skip logic checks remote session documents, and lecture QA endpoints map backend runtime failures to `503` |
 | 2026-02-20 | Added `/startproject` design for `lecture-index-azure-search-integration`: Azure Search-backed lecture index sync from `lecture_chunks`, session-filtered lecture QA retrieval, `indexed_to_search` consistency contract, and BM25 fallback strategy |
 | 2026-02-20 | Added Sprint5 `/startproject` plan for `f1-summary-and-finalize`: `summary/latest` + `session/finalize`, `summary_windows`/`lecture_chunks` persistence, idempotent finalize contract, and optional local BM25 build trigger |
