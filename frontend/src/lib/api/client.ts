@@ -3,7 +3,22 @@
  * Base API client for backend communication
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+function resolveApiBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL
+  if (typeof configured === 'string') {
+    return configured.trim().replace(/\/+$/, '')
+  }
+  // In dev, prefer same-origin + Vite proxy to avoid CORS setup.
+  if (import.meta.env.DEV) {
+    return ''
+  }
+  return 'http://localhost:8000'
+}
+
+export const API_BASE_URL = resolveApiBaseUrl()
+export const LECTURE_API_TOKEN =
+  import.meta.env.VITE_LECTURE_API_TOKEN || 'dev-lecture-token'
+export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo-user'
 
 export class ApiError extends Error {
   status: number
@@ -17,40 +32,175 @@ export class ApiError extends Error {
   }
 }
 
-export interface Lecture {
-  lectureId: string
-  title: string
-  instructor: string
-  room: string
-  startAt: string
-  endAt: string
-  status: 'upcoming' | 'live' | 'ended'
-  languageTags: string[]
-  accessibilityTags: string[]
-  lastSummary?: string
+export interface UserSettings {
+  theme?: 'light' | 'dark' | 'high-contrast'
+  language?: 'ja' | 'en'
+  fontSize?: 'small' | 'normal' | 'large'
+  reducedMotion?: boolean
+  transcriptDensity?: 'comfortable' | 'compact'
+  autoScrollDefault?: boolean
 }
 
-export interface QaRequest {
+interface SettingsResponsePayload {
+  user_id: string
+  settings: Record<string, unknown>
+  updated_at: string | null
+}
+
+export interface LectureSessionStartRequest {
+  course_name: string
+  course_id?: string
+  lang_mode?: 'ja' | 'easy-ja' | 'en'
+  camera_enabled: boolean
+  consent_acknowledged: boolean
+}
+
+export interface LectureSessionStartResponse {
+  session_id: string
+  status: 'active'
+}
+
+export interface LectureSessionFinalizeResponse {
+  session_id: string
+  status: 'finalized'
+}
+
+export interface SpeechChunkIngestRequest {
+  session_id: string
+  start_ms: number
+  end_ms: number
+  text: string
+  confidence: number
+  is_final: boolean
+  speaker: 'teacher' | 'student'
+}
+
+export interface SpeechChunkIngestResponse {
+  event_id: string
+  session_id: string
+  accepted: boolean
+}
+
+export interface ReadinessCheckRequest {
+  course_name: string
+  syllabus_text: string
+  lang_mode: 'ja' | 'easy-ja' | 'en'
+}
+
+export interface ReadinessCheckResponse {
+  readiness_score: number
+}
+
+export interface HealthResponse {
+  status: string
+  version: string
+}
+
+interface SummaryKeyTerm {
+  term: string
+}
+
+export interface LectureSummaryLatestResponse {
+  session_id: string
+  window_start_ms: number
+  window_end_ms: number
+  summary: string
+  key_terms: SummaryKeyTerm[]
+  status: 'ok' | 'no_data'
+}
+
+export type LectureQaLangMode = 'ja' | 'easy-ja' | 'en'
+export type LectureQaConfidence = 'high' | 'medium' | 'low'
+export type LectureQaRetrievalMode = 'source-only' | 'source-plus-context'
+export type LectureQaSourceType = 'speech' | 'visual'
+
+export interface LectureSource {
+  chunk_id: string
+  type: LectureQaSourceType
+  text: string
+  timestamp: string | null
+  start_ms: number | null
+  end_ms: number | null
+  speaker: string | null
+  bm25_score: number
+  is_direct_hit: boolean
+}
+
+export interface LectureAskRequest {
+  session_id: string
   question: string
-  answerLanguage: 'ja' | 'en'
-  answerStyle: 'short' | 'normal' | 'detailed'
-  scope: 'whole_lecture' | 'current_topic' | 'selected_range'
-  selectedRange?: { fromMs: number; toMs: number }
+  lang_mode: LectureQaLangMode
+  retrieval_mode: LectureQaRetrievalMode
+  top_k: number
+  context_window: number
 }
 
-export interface QaAnswer {
-  answerId: string
-  status: 'streaming' | 'done' | 'error'
-  markdown: string
-  citations: Array<{
-    citationId: string
-    type: 'audio' | 'slide' | 'board' | 'ocr'
-    label: string
-    tsStartMs?: number
-    tsEndMs?: number
-    sourceFrameId?: string
-  }>
-  followups: string[]
+export interface LectureAskResponse {
+  answer: string
+  confidence: LectureQaConfidence
+  sources: LectureSource[]
+  verification_summary: string | null
+  action_next: string
+  fallback: string | null
+}
+
+export interface LectureFollowupRequest extends LectureAskRequest {
+  history_turns: number
+}
+
+export interface LectureFollowupResponse extends LectureAskResponse {
+  resolved_query: string
+}
+
+export interface LectureIndexBuildRequest {
+  session_id: string
+  rebuild?: boolean
+}
+
+export interface LectureIndexBuildResponse {
+  index_version: string
+  chunk_count: number
+  built_at: string
+  status: 'success' | 'skipped'
+}
+
+function normalizeUserSettings(value: unknown): UserSettings {
+  if (!value || typeof value !== 'object') {
+    return {}
+  }
+  const settings = value as Record<string, unknown>
+  const normalized: UserSettings = {}
+
+  if (settings.theme === 'light' || settings.theme === 'dark' || settings.theme === 'high-contrast') {
+    normalized.theme = settings.theme
+  }
+  if (settings.language === 'ja' || settings.language === 'en') {
+    normalized.language = settings.language
+  }
+  if (settings.fontSize === 'small' || settings.fontSize === 'normal' || settings.fontSize === 'large') {
+    normalized.fontSize = settings.fontSize
+  }
+  if (typeof settings.reducedMotion === 'boolean') {
+    normalized.reducedMotion = settings.reducedMotion
+  }
+  if (settings.transcriptDensity === 'comfortable' || settings.transcriptDensity === 'compact') {
+    normalized.transcriptDensity = settings.transcriptDensity
+  }
+  if (typeof settings.autoScrollDefault === 'boolean') {
+    normalized.autoScrollDefault = settings.autoScrollDefault
+  }
+
+  return normalized
+}
+
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.message
+  }
+  if (error instanceof Error) {
+    return error.message
+  }
+  return fallback
 }
 
 /**
@@ -69,12 +219,14 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
 
+    const headers = new Headers(options.headers ?? {})
+    headers.set('Content-Type', 'application/json')
+    headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
+    headers.set('X-User-Id', DEMO_USER_ID)
+
     const config: RequestInit = {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
     }
 
     try {
@@ -83,10 +235,17 @@ class ApiClient {
       if (!response.ok) {
         let message = 'API request failed'
         try {
-          const error = await response.json()
-          message = error.message || error.detail || message
+          const errorPayload = await response.json() as {
+            message?: string
+            detail?: string
+          }
+          message = errorPayload.message || errorPayload.detail || message
         } catch {
           message = response.statusText || message
+        }
+        if (response.status === 401) {
+          message =
+            'Unauthorized. デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
         }
         throw new ApiError(response.status, message)
       }
@@ -110,84 +269,103 @@ class ApiClient {
       body: data ? JSON.stringify(data) : undefined,
     })
   }
-
-  async put<T>(endpoint: string, data?: unknown): Promise<T> {
-    return this.request<T>(endpoint, {
-      method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
-    })
-  }
-
-  async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: 'DELETE' })
-  }
 }
 
 export const apiClient = new ApiClient()
 
 /**
- * Lecture API
+ * Demo API
  */
-export const lectureApi = {
-  /**
-   * Get all lectures
-   */
-  async list(): Promise<Lecture[]> {
-    return apiClient.get<Lecture[]>('/api/v4/lectures')
+export const demoApi = {
+  async startDemoSession(
+    request: LectureSessionStartRequest
+  ): Promise<LectureSessionStartResponse> {
+    return apiClient.post<LectureSessionStartResponse>(
+      '/api/v4/lecture/session/start',
+      request
+    )
   },
 
-  /**
-   * Get lecture by ID
-   */
-  async get(id: string): Promise<Lecture> {
-    return apiClient.get<Lecture>(`/api/v4/lectures/${id}`)
+  async finalizeDemoSession(sessionId: string): Promise<LectureSessionFinalizeResponse> {
+    return apiClient.post<LectureSessionFinalizeResponse>(
+      '/api/v4/lecture/session/finalize',
+      {
+        session_id: sessionId,
+        build_qa_index: false,
+      }
+    )
   },
 
-  /**
-   * Ask a question about a lecture
-   */
-  async ask(lectureId: string, request: QaRequest): Promise<QaAnswer> {
-    return apiClient.post<QaAnswer>(`/api/v4/lectures/${lectureId}/qa/ask`, request)
+  async checkReadiness(
+    request: ReadinessCheckRequest
+  ): Promise<ReadinessCheckResponse> {
+    return apiClient.post<ReadinessCheckResponse>(
+      '/api/v4/course/readiness/check',
+      request
+    )
   },
 
-  /**
-   * Follow up with context
-   */
+  async ingestSpeechChunk(
+    request: SpeechChunkIngestRequest
+  ): Promise<SpeechChunkIngestResponse> {
+    return apiClient.post<SpeechChunkIngestResponse>(
+      '/api/v4/lecture/speech/chunk',
+      request
+    )
+  },
+
+  async getLatestSummary(sessionId: string): Promise<LectureSummaryLatestResponse> {
+    return apiClient.get<LectureSummaryLatestResponse>(
+      `/api/v4/lecture/summary/latest?session_id=${encodeURIComponent(sessionId)}`
+    )
+  },
+}
+
+/**
+ * Lecture QA API
+ */
+export const lectureQaApi = {
+  async buildIndex(
+    request: LectureIndexBuildRequest
+  ): Promise<LectureIndexBuildResponse> {
+    return apiClient.post<LectureIndexBuildResponse>(
+      '/api/v4/lecture/qa/index/build',
+      {
+        session_id: request.session_id,
+        rebuild: request.rebuild ?? false,
+      }
+    )
+  },
+
+  async ask(request: LectureAskRequest): Promise<LectureAskResponse> {
+    return apiClient.post<LectureAskResponse>('/api/v4/lecture/qa/ask', request)
+  },
+
   async followup(
-    lectureId: string,
-    answerId: string,
-    question: string
-  ): Promise<QaAnswer> {
-    return apiClient.post<QaAnswer>(`/api/v4/lectures/${lectureId}/qa/followup`, {
-      answerId,
-      question,
-    })
+    request: LectureFollowupRequest
+  ): Promise<LectureFollowupResponse> {
+    return apiClient.post<LectureFollowupResponse>(
+      '/api/v4/lecture/qa/followup',
+      request
+    )
   },
 }
 
 /**
  * Settings API
  */
-export interface UserSettings {
-  theme?: 'light' | 'dark' | 'high-contrast'
-  language?: 'ja' | 'en'
-  fontSize?: 'small' | 'normal' | 'large'
-  reducedMotion?: boolean
-}
-
 export const settingsApi = {
-  /**
-   * Get user preferences
-   */
   async get(): Promise<UserSettings> {
-    return apiClient.get<UserSettings>('/api/v4/settings/me')
+    const payload = await apiClient.get<SettingsResponsePayload>('/api/v4/settings/me')
+    return normalizeUserSettings(payload.settings)
   },
 
-  /**
-   * Update user preferences
-   */
   async update(settings: UserSettings): Promise<UserSettings> {
-    return apiClient.put<UserSettings>('/api/v4/settings/me', settings)
+    const payload = await apiClient.post<SettingsResponsePayload>(
+      '/api/v4/settings/me',
+      { settings }
+    )
+    return normalizeUserSettings(payload.settings)
   },
 }
 
@@ -195,10 +373,7 @@ export const settingsApi = {
  * Health Check API
  */
 export const healthApi = {
-  /**
-   * Check API health
-   */
-  async check(): Promise<{ status: string }> {
-    return apiClient.get<{ status: string }>('/api/v4/health')
+  async check(): Promise<HealthResponse> {
+    return apiClient.get<HealthResponse>('/api/v4/health')
   },
 }
