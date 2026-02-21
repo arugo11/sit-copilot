@@ -1,0 +1,134 @@
+{
+  "app": {
+    "name": "講義支援アプリ",
+    "title": "Lecture Support App"
+  },
+  "nav": {
+    "home": "ホーム",
+    "lectures": "講義一覧",
+    "settings": "設定"
+  },
+  "landing": {
+    "title": "講義支援アプリ",
+    "subtitle": "外国人留学生、障がいのある学生、日本語話者の学生を含めて、同じ講義を補助付きで受けられるようにします。",
+    "login": "大学アカウントでログイン",
+    "demo": "デモを見る",
+    "features": {
+      "title": "主な機能",
+      "captions": "リアルタイム字幕と翻訳",
+      "materials": "板書・投影資料の取り込み",
+      "qa": "講義後の根拠付きQA"
+    },
+    "audience": {
+      "international": "留学生",
+      "disability": "障がいのある学生",
+      "native": "日本語学生"
+    }
+  },
+  "lectures": {
+    "title": "講義一覧",
+    "description": "受講中の講義、予定、過去の講義を確認できます",
+    "filters": {
+      "all": "すべて",
+      "live": "ライブ中",
+      "upcoming": "予定",
+      "ended": "終了"
+    },
+    "status": {
+      "live": "ライブ中",
+      "upcoming": "予定",
+      "ended": "終了"
+    },
+    "actions": {
+      "enter": "講義に入る",
+      "review": "レビューを見る"
+    },
+    "empty": {
+      "title": "講義が見つかりません",
+      "description": "選択したフィルター条件に一致する講義がありません",
+      "clear": "フィルタを解除"
+    }
+  },
+  "live": {
+    "connection": {
+      "connecting": "接続中",
+      "live": "ライブ",
+      "reconnecting": "再接続中",
+      "degraded": "接続不安定",
+      "error": "エラー"
+    },
+    "lag": "遅延",
+    "panels": {
+      "sources": "資料",
+      "transcript": "字幕",
+      "assist": "補助"
+    },
+    "assist": {
+      "status": "状態",
+      "keypoints": "要点",
+      "qa": "質問",
+      "recording": "録音中",
+      "transcribing": "文字起こし中"
+    },
+    "scroll": {
+      "auto": "自動スクロール",
+      "back": "現在位置に戻る"
+    }
+  },
+  "review": {
+    "title": "レビュー",
+    "qa": {
+      "title": "質問する",
+      "placeholder": "講義について質問を入力してください...",
+      "submit": "送信",
+      "scope": {
+        "all": "全体",
+        "topic": "現在のトピック",
+        "range": "選択範囲"
+      }
+    },
+    "sources": {
+      "title": "ソースビューア"
+    }
+  },
+  "settings": {
+    "title": "設定",
+    "sections": {
+      "display": "表示",
+      "language": "言語",
+      "accessibility": "アクセシビリティ"
+    },
+    "theme": {
+      "title": "テーマ",
+      "light": "ライト",
+      "dark": "ダーク",
+      "highContrast": "ハイコントラスト"
+    },
+    "fontSize": {
+      "title": "文字サイズ",
+      "small": "小",
+      "normal": "中",
+      "large": "大"
+    },
+    "language": {
+      "title": "UI言語"
+    },
+    "accessibility": {
+      "reducedMotion": "アニメーションを減らす",
+      "reducedMotionDesc": "動きを最小限にして見やすくします"
+    },
+    "actions": {
+      "save": "保存",
+      "reset": "リセット"
+    }
+  },
+  "common": {
+    "loading": "読み込み中",
+    "error": "エラー",
+    "retry": "再試行",
+    "close": "閉じる",
+    "back": "戻る",
+    "save": "保存",
+    "cancel": "キャンセル"
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "app": {
+    "name": "Lecture Support App",
+    "title": "Lecture Support App"
+  },
+  "nav": {
+    "home": "Home",
+    "lectures": "Lectures",
+    "settings": "Settings"
+  },
+  "landing": {
+    "title": "Lecture Support App",
+    "subtitle": "Enabling international students, students with disabilities, and native Japanese students to attend the same lecture with support.",
+    "login": "Login with University Account",
+    "demo": "View Demo",
+    "features": {
+      "title": "Key Features",
+      "captions": "Real-time Captions & Translation",
+      "materials": "Board & Projection Materials",
+      "qa": "Post-lecture QA with Citations"
+    },
+    "audience": {
+      "international": "International Students",
+      "disability": "Students with Disabilities",
+      "native": "Native Japanese Students"
+    }
+  },
+  "lectures": {
+    "title": "Lectures",
+    "description": "View your current, upcoming, and past lectures",
+    "filters": {
+      "all": "All",
+      "live": "Live",
+      "upcoming": "Upcoming",
+      "ended": "Ended"
+    },
+    "status": {
+      "live": "Live",
+      "upcoming": "Upcoming",
+      "ended": "Ended"
+    },
+    "actions": {
+      "enter": "Enter Lecture",
+      "review": "View Review"
+    },
+    "empty": {
+      "title": "No Lectures Found",
+      "description": "No lectures match the selected filter criteria",
+      "clear": "Clear Filters"
+    }
+  },
+  "live": {
+    "connection": {
+      "connecting": "Connecting",
+      "live": "Live",
+      "reconnecting": "Reconnecting",
+      "degraded": "Unstable Connection",
+      "error": "Error"
+    },
+    "lag": "Lag",
+    "panels": {
+      "sources": "Sources",
+      "transcript": "Transcript",
+      "assist": "Assist"
+    },
+    "assist": {
+      "status": "Status",
+      "keypoints": "Key Points",
+      "qa": "Questions",
+      "recording": "Recording",
+      "transcribing": "Transcribing"
+    },
+    "scroll": {
+      "auto": "Auto Scroll",
+      "back": "Back to Current Position"
+    }
+  },
+  "review": {
+    "title": "Review",
+    "qa": {
+      "title": "Ask a Question",
+      "placeholder": "Enter your question about the lecture...",
+      "submit": "Submit",
+      "scope": {
+        "all": "Entire Lecture",
+        "topic": "Current Topic",
+        "range": "Selected Range"
+      }
+    },
+    "sources": {
+      "title": "Source Viewer"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "sections": {
+      "display": "Display",
+      "language": "Language",
+      "accessibility": "Accessibility"
+    },
+    "theme": {
+      "title": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "highContrast": "High Contrast"
+    },
+    "fontSize": {
+      "title": "Font Size",
+      "small": "Small",
+      "normal": "Normal",
+      "large": "Large"
+    },
+    "language": {
+      "title": "UI Language"
+    },
+    "accessibility": {
+      "reducedMotion": "Reduce Motion",
+      "reducedMotionDesc": "Minimize motion for better visibility"
+    },
+    "actions": {
+      "save": "Save",
+      "reset": "Reset"
+    }
+  },
+  "common": {
+    "loading": "Loading",
+    "error": "Error",
+    "retry": "Retry",
+    "close": "Close",
+    "back": "Back",
+    "save": "Save",
+    "cancel": "Cancel"
+  }
+}
