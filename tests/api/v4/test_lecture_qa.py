@@ -913,3 +913,454 @@ async def test_post_qa_ask_returns_503_when_azure_search_fails(
     )
 
     assert response.status_code == 503
+
+
+# ============================================================================
+# End-to-End Integration Tests (Actual API Flow)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_e2e_lecture_qa_full_workflow(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """End-to-end test: session start → speech events → index build → ask → followup.
+
+    This test performs a complete QA workflow using actual HTTP API calls
+    and verifies database persistence at each step.
+
+    Flow:
+    1. Start a lecture session via POST /lecture/session/start
+    2. Add speech events via POST /lecture/speech/chunk
+    3. Build QA index via POST /lecture/qa/index/build
+    4. Ask a question via POST /lecture/qa/ask
+    5. Ask a follow-up via POST /lecture/qa/followup
+    6. Verify database persistence (QATurn records)
+    """
+    # Step 1: Start a lecture session
+    start_payload = {
+        "course_name": "データ構造とアルゴリズム",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    assert start_response.status_code == 200
+    start_body = start_response.json()
+    session_id = start_body["session_id"]
+    assert session_id.startswith("lec_")
+
+    # Verify session was persisted
+    async with session_factory() as session:
+        from app.models.lecture_session import LectureSession
+
+        result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        lecture_session = result.scalar_one()
+    assert lecture_session is not None
+    assert lecture_session.user_id == "test_user"
+    assert lecture_session.course_name == start_payload["course_name"]
+
+    # Step 2: Add speech events (simulating live lecture transcription)
+    speech_events = [
+        {
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 25000,
+            "text": "今日はハッシュテーブルについて学習します。ハッシュテーブルはキーと値のペアを高速に検索するデータ構造です。",
+            "confidence": 0.95,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        {
+            "session_id": session_id,
+            "start_ms": 26000,
+            "end_ms": 36000,
+            "text": "ハッシュ関数を使ってキーをインデックスに変換し、配列に値を格納します。平均的な検索時間はO(1)です。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        {
+            "session_id": session_id,
+            "start_ms": 37000,
+            "end_ms": 47000,
+            "text": "ただし、ハッシュ衝突が発生する可能性があります。衝突回避にはチェイン法やオープンアドレス法が使われます。",
+            "confidence": 0.94,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+    ]
+
+    event_ids = []
+    for event_payload in speech_events:
+        event_response = await async_client.post(
+            "/api/v4/lecture/speech/chunk",
+            json=event_payload,
+            headers=AUTH_HEADERS,
+        )
+        assert event_response.status_code == 200
+        event_body = event_response.json()
+        assert event_body["accepted"] is True
+        event_ids.append(event_body["event_id"])
+
+    # Verify speech events were persisted
+    async with session_factory() as session:
+        from app.models.speech_event import SpeechEvent
+
+        result = await session.execute(
+            select(SpeechEvent)
+            .where(SpeechEvent.session_id == session_id)
+            .order_by(SpeechEvent.start_ms)
+        )
+        persisted_events = result.scalars().all()
+    assert len(persisted_events) == len(speech_events)
+    assert persisted_events[0].text.startswith("今日はハッシュテーブル")
+
+    # Step 3: Build QA index
+    index_build_response = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": False},
+        headers=AUTH_HEADERS,
+    )
+    assert index_build_response.status_code == 200
+    index_body = index_build_response.json()
+    assert index_body["status"] == "success"
+    assert index_body["chunk_count"] >= len(speech_events)
+    assert "index_version" in index_body
+
+    # Verify qa_index_built flag was updated
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        updated_session = result.scalar_one()
+    assert updated_session.qa_index_built is True
+
+    # Step 4: Ask a question
+    ask_payload = {
+        "session_id": session_id,
+        "question": "ハッシュテーブルの検索時間はどのくらいですか",
+        "lang_mode": "ja",
+        "retrieval_mode": "source-only",
+        "top_k": 5,
+        "context_window": 1,
+    }
+    ask_response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json=ask_payload,
+        headers=AUTH_HEADERS,
+    )
+    assert ask_response.status_code == 200
+    ask_body = ask_response.json()
+    assert "answer" in ask_body
+    assert ask_body["answer"] != ""
+    assert ask_body["confidence"] in {"high", "medium", "low"}
+    assert isinstance(ask_body["sources"], list)
+    assert len(ask_body["sources"]) > 0  # Should have retrieved sources
+    assert "action_next" in ask_body
+    assert "verification_summary" in ask_body
+
+    # Verify source content
+    first_source = ask_body["sources"][0]
+    assert "chunk_id" in first_source
+    assert "text" in first_source
+    assert "bm25_score" in first_source
+
+    # Verify QATurn was persisted
+    async with session_factory() as session:
+        result = await session.execute(
+            select(QATurn).where(
+                QATurn.session_id == session_id,
+                QATurn.question == ask_payload["question"],
+            )
+        )
+        qa_turn = result.scalar_one()
+    assert qa_turn is not None
+    assert qa_turn.feature == "lecture_qa"
+    assert qa_turn.answer == ask_body["answer"]
+    assert qa_turn.confidence == ask_body["confidence"]
+    assert qa_turn.verifier_supported is True
+    assert qa_turn.latency_ms >= 0
+
+    # Step 5: Ask a follow-up question
+    followup_payload = {
+        "session_id": session_id,
+        "question": "衝突が起きたらどうなりますか",
+        "lang_mode": "ja",
+        "retrieval_mode": "source-only",
+        "top_k": 5,
+        "history_turns": 3,
+    }
+    followup_response = await async_client.post(
+        "/api/v4/lecture/qa/followup",
+        json=followup_payload,
+        headers=AUTH_HEADERS,
+    )
+    assert followup_response.status_code == 200
+    followup_body = followup_response.json()
+    assert "answer" in followup_body
+    assert followup_body["answer"] != ""
+    assert "resolved_query" in followup_body
+    assert isinstance(followup_body["resolved_query"], str)
+    assert followup_body["resolved_query"] != ""
+    assert len(followup_body["sources"]) > 0
+
+    # Verify second QATurn was persisted
+    async with session_factory() as session:
+        result = await session.execute(
+            select(QATurn).where(QATurn.session_id == session_id)
+        )
+        all_qa_turns = result.scalars().all()
+    assert len(all_qa_turns) == 2  # One from ask, one from followup
+
+    # Step 6: Verify retrieval found relevant content about hash collisions
+    # The follow-up asked about "衝突" (collision), should retrieve event mentioning it
+    sources_text = " ".join([s["text"] for s in followup_body["sources"]])
+    assert "衝突" in sources_text or "collision" in sources_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_e2e_lecture_qa_fallback_without_index(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """End-to-end test: QA ask without index should return fallback answer."""
+    # Start session
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "テスト講義",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    # Ask without building index
+    ask_response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": session_id,
+            "question": "何でも質問",
+            "lang_mode": "ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert ask_response.status_code == 200
+    body = ask_response.json()
+    assert body["confidence"] == "low"
+    assert body["sources"] == []
+    assert body["fallback"] is not None
+    assert "見つかりません" in body["fallback"] or "ありません" in body["fallback"]
+
+
+@pytest.mark.asyncio
+async def test_e2e_lecture_qa_source_plus_context_mode(
+    async_client: AsyncClient,
+) -> None:
+    """End-to-end test: source-plus-context mode should return expanded sources."""
+    # Start session
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "テスト講義",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    # Add multiple speech events to test context expansion
+    for i, text in enumerate(
+        [
+            "最初の概念を説明します。",
+            "次に重要なポイントです。",
+            "ここが検索対象の内容です。",
+            "追加のコンテキスト情報。",
+            "最後のまとめです。",
+        ]
+    ):
+        await async_client.post(
+            "/api/v4/lecture/speech/chunk",
+            json={
+                "session_id": session_id,
+                "start_ms": i * 10000,
+                "end_ms": (i + 1) * 10000,
+                "text": text,
+                "confidence": 0.95,
+                "is_final": True,
+                "speaker": "teacher",
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    # Build index
+    await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": True},
+        headers=AUTH_HEADERS,
+    )
+
+    # Ask with source-plus-context mode
+    ask_response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": session_id,
+            "question": "検索対象",
+            "lang_mode": "ja",
+            "retrieval_mode": "source-plus-context",
+            "top_k": 1,
+            "context_window": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert ask_response.status_code == 200
+    body = ask_response.json()
+    # Should return direct hit + context (up to 3 chunks with window=1)
+    assert len(body["sources"]) >= 1
+    # Check that at least one is a direct hit
+    direct_hits = [s for s in body["sources"] if s["is_direct_hit"]]
+    assert len(direct_hits) >= 1
+
+
+@pytest.mark.asyncio
+async def test_e2e_lecture_qa_rebuild_index(
+    async_client: AsyncClient,
+) -> None:
+    """End-to-end test: index rebuild should update existing index."""
+    # Start session and add events
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "テスト講義",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 5000,
+            "text": "最初のコンテンツ",
+            "confidence": 0.95,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    # First build
+    first_build = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": False},
+        headers=AUTH_HEADERS,
+    )
+    assert first_build.status_code == 200
+    first_body = first_build.json()
+    assert first_body["status"] == "success"
+    assert first_body["chunk_count"] == 1
+
+    # Add more events
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 6000,
+            "end_ms": 11000,
+            "text": "追加のコンテンツ",
+            "confidence": 0.95,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    # Rebuild
+    rebuild_response = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": True},
+        headers=AUTH_HEADERS,
+    )
+    assert rebuild_response.status_code == 200
+    rebuild_body = rebuild_response.json()
+    assert rebuild_body["status"] == "success"
+    assert rebuild_body["chunk_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_e2e_lecture_qa_ownership_enforcement(
+    async_client: AsyncClient,
+) -> None:
+    """End-to-end test: User cannot access another user's QA resources."""
+    # User A starts session
+    owner_a_headers = {
+        LECTURE_TOKEN_HEADER: settings.lecture_api_token,
+        USER_ID_HEADER: "owner_a",
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "オーナーAの講義",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=owner_a_headers,
+    )
+    session_id = start_response.json()["session_id"]
+
+    # User B tries to build index for User A's session
+    owner_b_headers = {
+        LECTURE_TOKEN_HEADER: settings.lecture_api_token,
+        USER_ID_HEADER: "owner_b",
+    }
+    build_response = await async_client.post(
+        "/api/v4/lecture/qa/index/build",
+        json={"session_id": session_id, "rebuild": False},
+        headers=owner_b_headers,
+    )
+    assert build_response.status_code == 404
+
+    # User B tries to ask question for User A's session
+    ask_response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": session_id,
+            "question": "質問",
+            "lang_mode": "ja",
+        },
+        headers=owner_b_headers,
+    )
+    assert ask_response.status_code == 404

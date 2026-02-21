@@ -1885,6 +1885,44 @@ def retrieve_with_context(
 - Quality Gates Defined: Ready
 - Risks Accepted: Ready
 
+## F4 Lecture QA Test Architecture Expansion (2026-02-21)
+
+### Goal
+
+- Raise test coverage from `81%` to `85%+` by targeting low-coverage lecture QA services:
+  - `app/services/lecture_bm25_store.py`
+  - `app/services/lecture_verifier_service.py`
+  - `app/services/lecture_followup_service.py`
+
+### Test Design Decisions
+
+1. **Service-first unit testing before endpoint expansion**
+   - Prioritize deterministic unit tests at service boundaries to close branch gaps quickly.
+   - Reuse existing API/integration tests only for critical wiring checks.
+
+2. **Standardize Azure OpenAI HTTP mocking pattern**
+   - Follow existing `urlopen` patch pattern (`@patch("app.services.<module>.urlopen")`).
+   - Use deterministic response payload builders for success, parse failure, HTTPError, URLError.
+
+3. **Follow pytest composition style used in current codebase**
+   - Prefer fixture composition and helper builders over test-class inheritance.
+   - Keep fake dependency classes local to test files (same pattern as `FakeAzureSearchService` and QA mocks).
+
+4. **Coverage gate by branch families (not only line count)**
+   - Gate additions by behavior families:
+     - local fallback paths
+     - remote Azure success/failure paths
+     - parser/normalization fail-closed paths
+     - DB history ordering and ownership filtering
+     - lock/cache lifecycle correctness
+
+### Planned Deliverables
+
+- New: `tests/unit/services/test_lecture_bm25_store.py`
+- Expand: `tests/unit/services/test_lecture_verifier_service.py`
+- New: `tests/unit/services/test_lecture_followup_service.py`
+- Coverage verification command set for focused QA services and global threshold regression check.
+
 ## F1 Azure OpenAI Summary Generator Planning (2026-02-21)
 
 ### Project: `f1-azure-openai-summary-generator`
@@ -1962,6 +2000,8 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-21 | Added F4 lecture QA test-architecture expansion plan for `lecture_bm25_store`, `lecture_verifier_service`, and `lecture_followup_service`, including service-first unit strategy, standardized Azure OpenAI mock approach, branch-family coverage gates, and target deliverables to raise overall coverage to 85%+ |
+| 2026-02-21 | Completed F4 QA test completion architecture: detailed test design for bm25_store (0%→95%+), verifier (49%→85%+), followup (35%→85%+), mock strategy for Azure OpenAI and BM25, 8-step implementation plan with dependencies, and test case checklists for each service |
 | 2026-02-21 | Fixed review findings for lecture summary/QA hardening: gated summary DI to Azure-available runtime with explicit unavailable generator, mapped lecture summary/finalize runtime failures to `503`, capped and deduplicated summary key-term evidence tags to schema limit, and made verifier `passed` parsing strict/fail-closed (`"true"/"false"` only for string normalization) with regression tests |
 | 2026-02-21 | Applied F1 summary review follow-ups: propagated `session.lang_mode` into summary generation, added inactive-session error-path test, and added explicit English-mode tests in summary service/generator |
 | 2026-02-21 | Added F1 Azure summary generator design: `LectureSummaryGeneratorService` boundary, Japanese structured prompt, fail-closed Azure policy (no deterministic fallback), and `LectureSummaryLatestResponse` compatibility constraints |
