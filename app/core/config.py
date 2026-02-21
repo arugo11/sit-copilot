@@ -1,5 +1,8 @@
 """Application configuration using Pydantic Settings."""
 
+import re
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -18,6 +21,10 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""
     azure_openai_model: str = "gpt-4o"
+    azure_speech_key: str = ""
+    azure_speech_region: str = ""
+    azure_speech_token_expires_in_sec: int = Field(default=540, ge=1, le=600)
+    azure_speech_sts_timeout_seconds: int = Field(default=5, ge=1, le=30)
     azure_search_enabled: bool = False
     azure_search_api_key: str = ""
     azure_search_endpoint: str = ""
@@ -40,6 +47,17 @@ class Settings(BaseSettings):
     readiness_default_disclaimer: str = (
         "この結果は履修準備の目安です. 履修可否を判定するものではありません."
     )
+
+    @field_validator("azure_speech_region")
+    @classmethod
+    def validate_azure_speech_region(cls, value: str) -> str:
+        """Normalize and validate Azure Speech region name."""
+        normalized = value.strip().lower()
+        if not normalized:
+            return normalized
+        if not re.fullmatch(r"[a-z0-9-]+", normalized):
+            raise ValueError("azure_speech_region must contain only a-z, 0-9, '-'.")
+        return normalized
 
     model_config = {
         "env_file": (".env", ".env.azure.generated"),

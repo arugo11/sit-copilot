@@ -70,6 +70,13 @@ from app.services.readiness_service import (
     ReadinessService,
 )
 from app.services.settings_service import SettingsService, SqlAlchemySettingsService
+from app.services.speech_token_service import (
+    AzureSpeechTokenService,
+    SpeechTokenConfigurationError,
+    SpeechTokenProviderError,
+    SpeechTokenService,
+    issue_speech_token_via_sts,
+)
 from app.services.vision_ocr_service import (
     NoopVisionOCRService,
     VisionOCRResult,
@@ -115,6 +122,11 @@ __all__ = [
     "ReadinessService",
     "DeterministicReadinessService",
     "SettingsService",
+    "SpeechTokenConfigurationError",
+    "SpeechTokenProviderError",
+    "SpeechTokenService",
+    "AzureSpeechTokenService",
+    "issue_speech_token_via_sts",
     "SqlAlchemyLectureFinalizeService",
     "SqlAlchemyLectureFollowupService",
     "SqlAlchemyLectureLiveService",

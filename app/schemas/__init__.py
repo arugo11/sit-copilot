@@ -31,6 +31,7 @@ from app.schemas.readiness import (
     ReadinessTerm,
 )
 from app.schemas.settings import SettingsResponse, SettingsUpsertRequest
+from app.schemas.speech_token import SpeechTokenResponse
 
 __all__ = [
     "ErrorResponse",
@@ -57,4 +58,5 @@ __all__ = [
     "VisualEventIngestResponse",
     "SettingsResponse",
     "SettingsUpsertRequest",
+    "SpeechTokenResponse",
 ]
