@@ -1751,6 +1751,94 @@ def retrieve_with_context(
 4. **No persistence in F0 baseline**
    - Keep readiness check stateless to reduce migration and regression risk for the initial delivery.
 
+## F1 Speech Token Issuance Planning (2026-02-20)
+
+### Project: `f1-speech-token-issuance`
+
+**Goal**: Add `GET /api/v4/auth/speech-token` that securely issues short-lived Azure Speech SDK tokens from backend without exposing long-lived subscription keys to clients.
+
+### Scope
+
+- **Include**
+  - `GET /api/v4/auth/speech-token` route
+  - server-side Azure Speech STS exchange (`/sts/v1.0/issueToken`)
+  - typed response contract: `token`, `region`, `expires_in_sec`
+  - speech settings wiring (`azure_speech_key`, `azure_speech_region`)
+  - schema/service/API tests for success + failure paths
+- **Exclude**
+  - frontend Speech SDK integration/refresh loop
+  - Entra ID migration for speech auth
+  - issuance audit persistence
+  - performance cache optimization in first implementation
+
+### Key Decisions
+
+1. **Backend-only secret boundary**
+   - Speech subscription key remains server-side only; frontend receives short-lived token + region.
+
+2. **Auth alignment with lecture-protected endpoints**
+   - Speech token endpoint requires `X-Lecture-Token` to avoid anonymous token minting.
+
+3. **Conservative client refresh metadata**
+   - Return `expires_in_sec=540` while Azure token lifetime is 600 seconds to reduce expiry-race risk on clients.
+
+4. **Deterministic failure mapping**
+   - Speech STS/config failures are mapped to `503` so clients can retry safely without exposing internal details.
+
+5. **MVP issues token per request**
+   - Do not add server-side token cache in first implementation; optimize only if measured traffic needs it.
+
+## F1 Speech Token Issuance Implementation (2026-02-20)
+
+### Implemented Scope
+
+- Added `GET /api/v4/auth/speech-token` under an authenticated `auth` router.
+- Added backend Azure Speech STS exchange service (`/sts/v1.0/issueToken`) with:
+  - strict configuration validation (`azure_speech_key`, `azure_speech_region`)
+  - deterministic provider/config error mapping for API safety
+  - conservative TTL metadata response (`expires_in_sec=540`)
+- Added speech token response schema contract and unit/API tests.
+- Wired route registration into app bootstrap (`app/main.py`, `app/api/v4/__init__.py`).
+
+### Delivered Files
+
+- `app/api/v4/auth.py`
+- `app/services/speech_token_service.py`
+- `app/schemas/speech_token.py`
+- `tests/api/v4/test_auth.py`
+- `tests/unit/services/test_speech_token_service.py`
+- `tests/unit/schemas/test_speech_token_schemas.py`
+- wiring updates:
+  - `app/core/config.py`
+  - `app/main.py`
+  - `app/api/v4/__init__.py`
+  - `app/services/__init__.py`
+  - `app/schemas/__init__.py`
+
+### Verification Results
+
+- Lane-scope checks (new feature scope):
+  - `uv run ruff check <speech-token changed files>`: pass
+  - `uv run ty check app/`: pass
+  - `uv run pytest tests/unit/schemas/test_speech_token_schemas.py tests/unit/services/test_speech_token_service.py tests/api/v4/test_auth.py -q`: pass
+- Global checks:
+  - `uv run ty check app/`: pass
+  - `uv run pytest -v`: pass (`190 passed`)
+  - `uv run ruff check .`: fails on pre-existing unrelated `.claude/hooks/*` and `.claude/skills/checkpointing/checkpoint.py`
+  - `uv run ruff format --check .`: fails on pre-existing unrelated `.claude/hooks/*` and existing non-feature files
+
+### Post-Review Hardening (Medium/Low Findings Fixed)
+
+- Added in-memory rate limit guard + issuance telemetry hooks on speech-token endpoint.
+- Added config-level speech region format validation with normalization.
+- Added configurable speech token TTL + STS timeout knobs via settings and DI wiring.
+- Tightened STS requester typing contract (`Protocol`-based callable signature).
+- Added test coverage for:
+  - real DI factory path (settings + requester wiring)
+  - rate-limit rejection (`429`)
+  - empty-token provider response branch
+  - speech region config validation
+
 ## TODO
 
 - [ ] Test Agent Teams workflow end-to-end with a real project
@@ -1776,6 +1864,9 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-21 | Applied team-review hardening for `f1-speech-token-issuance` (Medium/Low): speech-token rate limit + telemetry, `azure_speech_region` format validation, stricter requester typing, and additional DI/rate-limit/empty-token/config tests |
+| 2026-02-20 | Implemented `f1-speech-token-issuance`: added authenticated `GET /api/v4/auth/speech-token`, Azure Speech STS issuance service, speech token schema, and schema/service/API tests |
+| 2026-02-20 | Added `/startproject` design for `f1-speech-token-issuance`: backend-only Azure Speech STS token exchange, `GET /api/v4/auth/speech-token` interface lock, lecture-token auth alignment, and `503`-mapped failure policy |
 | 2026-02-20 | Implemented F0 `f0-readiness-check`: added authenticated `POST /api/v4/course/readiness/check`, strict readiness schemas, deterministic readiness scoring service, and API/schema/service tests |
 | 2026-02-20 | Added `/startproject` design for `f0-readiness-check`: deterministic readiness scoring, `/api/v4/course/readiness/check` interface lock, `X-Lecture-Token` auth alignment, and stateless (no-persistence) F0 scope freeze |
 | 2026-02-20 | Applied post-review hardening for `lecture-index-azure-search-integration`: Azure retrieval now supports `source-plus-context` expansion, Azure Search service is process-shared for schema-cache stability, read path no longer performs schema management, skip logic checks remote session documents, and lecture QA endpoints map backend runtime failures to `503` |
