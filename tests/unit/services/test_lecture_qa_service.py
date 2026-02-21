@@ -11,11 +11,17 @@ from app.models.qa_turn import QATurn
 from app.schemas.lecture_qa import (
     LectureSource,
 )
-from app.services.lecture_answerer_service import LectureAnswerDraft
+from app.services.lecture_answerer_service import (
+    LectureAnswerDraft,
+    LectureAnswererError,
+)
 from app.services.lecture_followup_service import FollowupResolution
 from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_qa_service import SqlAlchemyLectureQAService
-from app.services.lecture_verifier_service import LectureVerificationResult
+from app.services.lecture_verifier_service import (
+    LectureVerificationResult,
+    LectureVerifierError,
+)
 
 
 class MockRetriever:
@@ -74,6 +80,20 @@ class MockAnswerer:
         return self._draft
 
 
+class ErrorAnswerer:
+    """Answerer that always raises LectureAnswererError."""
+
+    async def answer(
+        self,
+        question: str,
+        lang_mode: str,
+        sources: list[LectureSource],
+        history: str,
+    ) -> LectureAnswerDraft:
+        _ = (question, lang_mode, sources, history)
+        raise LectureAnswererError("Azure OpenAI generation failed")
+
+
 class MockVerifier:
     """Mock verifier returning pre-defined result."""
 
@@ -126,6 +146,46 @@ class MockVerifier:
             }
         )
         return self._repaired_answer if self._can_repair else None
+
+
+class ErrorVerifier:
+    """Verifier that always raises LectureVerifierError."""
+
+    def __init__(self) -> None:
+        self.verify_calls: list[dict] = []
+        self.repair_calls: list[dict] = []
+
+    async def verify(
+        self,
+        question: str,
+        answer: str,
+        sources: list[LectureSource],
+    ) -> LectureVerificationResult:
+        self.verify_calls.append(
+            {
+                "question": question,
+                "answer": answer,
+                "sources": sources,
+            }
+        )
+        raise LectureVerifierError("Azure OpenAI verification failed")
+
+    async def repair_answer(
+        self,
+        question: str,
+        answer: str,
+        sources: list[LectureSource],
+        unsupported_claims: list[str],
+    ) -> str | None:
+        self.repair_calls.append(
+            {
+                "question": question,
+                "answer": answer,
+                "sources": sources,
+                "unsupported_claims": unsupported_claims,
+            }
+        )
+        return None
 
 
 class MockFollowup:
@@ -418,6 +478,128 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
 
 
 @pytest.mark.asyncio
+async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persists(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return local grounded answer when answerer fails."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Test content from lecture",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()  # Always raises LectureAnswererError
+    verifier = MockVerifier(passed=True, summary="Verified.")
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="What is this?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    # Should return local grounded answer with sources
+    assert response.confidence == "low"
+    assert response.fallback == ""
+    assert response.answer.startswith("講義資料では「")
+    assert "Test content from lecture" in response.answer
+    assert response.sources == sources
+
+    # Verify persistence
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.feature == "lecture_qa",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.citations_json == [sources[0].model_dump()]
+    assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+
+
+@pytest.mark.asyncio
+async def test_ask_with_verifier_error_skips_verification_and_persists(
+    db_session: AsyncSession,
+) -> None:
+    """Service should skip verification when verifier fails and return answer."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Test content",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer(
+        LectureAnswerDraft(
+            answer="Generated answer.",
+            confidence="high",
+            action_next="Action.",
+        )
+    )
+    verifier = ErrorVerifier()  # Always raises LectureVerifierError
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="What is this?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    # Should return generated answer even though verification failed
+    assert response.answer == "Generated answer."
+    assert response.confidence == "high"
+    assert response.sources == sources
+    assert len(verifier.verify_calls) == 1
+
+    # Verify persistence
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.feature == "lecture_qa",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.answer == "Generated answer."
+    assert qa_turn.citations_json == [sources[0].model_dump()]
+    assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+
+
+@pytest.mark.asyncio
 async def test_followup_with_sources_resolves_query_and_returns_answer(
     db_session: AsyncSession,
 ) -> None:
@@ -511,6 +693,107 @@ async def test_followup_without_sources_returns_fallback(
     assert response.sources == []
     assert response.fallback is not None
     assert len(answerer.answer_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_followup_with_answerer_error_returns_local_grounded_answer(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return local grounded answer when follow-up answerer fails."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Followup content from lecture",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()  # Always raises LectureAnswererError
+    verifier = MockVerifier(passed=True, summary="Verified.")
+    followup = MockFollowup(
+        standalone_query="What is machine learning?",
+        history_context="Previous context.",
+    )
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.followup(
+        session_id="session_123",
+        user_id="user_1",
+        question="What about that?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+        history_turns=3,
+    )
+
+    # Should return local grounded answer with sources
+    assert response.confidence == "low"
+    assert response.fallback == ""
+    assert response.answer.startswith("講義資料では「")
+    assert "Followup content from lecture" in response.answer
+    assert response.sources == sources
+    assert response.resolved_query == "What is machine learning?"
+
+
+@pytest.mark.asyncio
+async def test_followup_with_verifier_error_skips_verification(
+    db_session: AsyncSession,
+) -> None:
+    """Service should skip verification when follow-up verifier fails."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Test content",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer(
+        LectureAnswerDraft(
+            answer="Followup answer.",
+            confidence="high",
+            action_next="Action.",
+        )
+    )
+    verifier = ErrorVerifier()  # Always raises LectureVerifierError
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.followup(
+        session_id="session_123",
+        user_id="user_1",
+        question="What about that?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+        history_turns=3,
+    )
+
+    # Should return generated answer even though verification failed
+    assert response.answer == "Followup answer."
+    assert response.confidence == "high"
+    assert response.sources == sources
+    assert len(verifier.verify_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -623,3 +906,246 @@ async def test_ask_unknown_or_other_user_session_raises_not_found(
             top_k=5,
             context_window=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_error_and_empty_sources_returns_backend_fallback(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return backend fallback when answerer fails and sources are empty."""
+    await _seed_lecture_session(db_session)
+    # Sources with empty text (will be filtered out)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="   ",  # Only whitespace
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+        backend_failure_fallback="バックエンドエラーが発生しました。",
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="What is this?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    # Should return backend failure fallback
+    assert response.confidence == "low"
+    assert response.answer == "バックエンドエラーが発生しました。"
+    assert response.fallback == "バックエンドエラーが発生しました。"
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_error_and_single_source_returns_single_snippet(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return single snippet format when answerer fails with one source."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Single source content here",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="What is this?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    # Should use single snippet format
+    assert response.confidence == "low"
+    assert (
+        response.answer
+        == "講義資料では「Single source content here」と説明されています。"
+    )
+    assert response.fallback == ""
+
+
+@pytest.mark.asyncio
+async def test_followup_with_answerer_error_includes_resolved_query(
+    db_session: AsyncSession,
+) -> None:
+    """Service should include resolved_query in followup error response."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Content here",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup(
+        standalone_query="Resolved standalone query",
+        history_context="Context",
+    )
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.followup(
+        session_id="session_123",
+        user_id="user_1",
+        question="Followup question?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+        history_turns=3,
+    )
+
+    # Should include resolved_query in error response
+    assert response.resolved_query == "Resolved standalone query"
+    assert response.confidence == "low"
+
+
+@pytest.mark.asyncio
+async def test_ask_with_verification_failure_and_repair_error_safely_continues(
+    db_session: AsyncSession,
+) -> None:
+    """Service should continue safely when both verification and repair fail."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Test content",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer(
+        LectureAnswerDraft(
+            answer="Original answer.",
+            confidence="high",
+            action_next="Action.",
+        )
+    )
+    # Verification fails, and repair also fails (returns None)
+    verifier = MockVerifier(
+        passed=False,
+        summary="Claims not supported.",
+        can_repair=False,  # Repair fails
+    )
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="What is this?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    # Should return original answer with fallback
+    assert response.answer == "Original answer."
+    assert response.fallback == "Original answer."
+    assert len(verifier.verify_calls) == 1
+    assert len(verifier.repair_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_followup_with_verifier_repair_error_continues_safely(
+    db_session: AsyncSession,
+) -> None:
+    """Service should continue safely when followup verifier repair fails."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Test content",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer(
+        LectureAnswerDraft(
+            answer="Followup answer.",
+            confidence="high",
+            action_next="Action.",
+        )
+    )
+    # Use ErrorVerifier which raises on repair
+    verifier = ErrorVerifier()
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.followup(
+        session_id="session_123",
+        user_id="user_1",
+        question="Followup?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+        history_turns=3,
+    )
+
+    # Should return answer despite verification/repair errors
+    assert response.answer == "Followup answer."
+    assert response.confidence == "high"
+    assert len(verifier.verify_calls) == 1

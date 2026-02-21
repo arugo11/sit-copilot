@@ -16,7 +16,7 @@ Every run does everything:
 import argparse
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -63,7 +63,7 @@ def parse_cli_logs(since: str | None = None) -> list[dict]:
     entries = []
     since_dt = None
     if since:
-        since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+        since_dt = datetime.fromisoformat(since).replace(tzinfo=UTC)
 
     with open(LOG_FILE, encoding="utf-8") as f:
         for line in f:
@@ -301,7 +301,7 @@ def generate_checkpoint(
     since: str | None,
 ) -> str:
     """Generate full checkpoint markdown content."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lines: list[str] = []
 
     # Header
@@ -502,7 +502,7 @@ def generate_session_summary(
     teams_data: list[dict],
 ) -> str:
     """Generate concise session summary for CLAUDE.md."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     total_files = sum(len(v) for v in file_changes.values())
     codex_count = sum(1 for e in cli_entries if e.get("tool") == "codex")
     gemini_count = sum(1 for e in cli_entries if e.get("tool") == "gemini")
@@ -630,7 +630,7 @@ def main():
 
     # 2. Generate checkpoint
     CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S")
     checkpoint_file = CHECKPOINTS_DIR / f"{timestamp}.md"
 
     checkpoint_content = generate_checkpoint(

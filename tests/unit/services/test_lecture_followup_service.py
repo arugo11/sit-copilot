@@ -340,6 +340,20 @@ def test_is_azure_openai_ready_valid_config():
     assert result is True
 
 
+def test_is_azure_openai_ready_with_missing_deployment() -> None:
+    """Missing deployment should return false."""
+    service = SqlAlchemyLectureFollowupService(
+        db=AsyncMock(),
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
+        openai_endpoint="https://test.openai.azure.com",
+        model="",
+    )
+
+    result = service._is_azure_openai_ready()  # noqa: SLF001 - testing private method
+
+    assert result is False
+
+
 @pytest.mark.asyncio
 async def test_extract_content_various_formats():
     """Extract content from various response formats."""
@@ -647,3 +661,21 @@ def test_build_chat_completion_url_with_trailing_slash():
     )
     # Should not have triple slash (mis-handled trailing slash)
     assert "///" not in result
+
+
+def test_build_chat_completion_url_normalizes_cognitive_endpoint():
+    """Cognitive endpoint should be normalized when account name is provided."""
+    service = SqlAlchemyLectureFollowupService(
+        db=AsyncMock(),
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
+        openai_endpoint="https://japaneast.api.cognitive.microsoft.com/",
+        openai_account_name="aoai-test",
+        model="gpt-4o",
+    )
+
+    result = service._build_chat_completion_url()  # noqa: SLF001 - testing private method
+
+    assert (
+        "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        in result
+    )

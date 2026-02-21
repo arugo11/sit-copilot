@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.qa_turn import QATurn
 from app.schemas.procedure import ProcedureAskRequest, ProcedureSource
-from app.services.procedure_answerer_service import ProcedureAnswerDraft
+from app.services.procedure_answerer_service import (
+    ProcedureAnswerDraft,
+    ProcedureAnswererError,
+)
 from app.services.procedure_qa_service import SqlAlchemyProcedureQAService
 
 
@@ -36,6 +39,16 @@ class SpyAnswerer:
         _ = (query, lang_mode, sources)
         self.call_count += 1
         return self._draft
+
+
+class ErrorAnswerer:
+    """Answerer that always fails."""
+
+    async def answer(
+        self, query: str, lang_mode: str, sources: list[ProcedureSource]
+    ) -> ProcedureAnswerDraft:
+        _ = (query, lang_mode, sources)
+        raise ProcedureAnswererError("failed")
 
 
 @pytest.mark.asyncio
@@ -121,3 +134,43 @@ async def test_ask_without_sources_returns_fallback_and_does_not_call_answerer(
     assert qa_turn.latency_ms >= 0
     assert qa_turn.citations_json == []
     assert qa_turn.retrieved_chunk_ids_json == []
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_failure_returns_local_grounded_answer_and_persists(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return local grounded answer when generation fails."""
+    sources = [
+        ProcedureSource(
+            title="証明書発行案内",
+            section="申請方法",
+            snippet="在学証明書は証明書発行機で発行できます。",
+            source_id="doc_012_c03",
+        )
+    ]
+    retriever = StubRetriever(sources)
+    service = SqlAlchemyProcedureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=ErrorAnswerer(),
+        backend_failure_fallback="回答生成に失敗しました。",
+    )
+
+    response = await service.ask(
+        ProcedureAskRequest(query="在学証明書はどこですか。", lang_mode="ja")
+    )
+
+    assert response.confidence == "low"
+    assert response.fallback == ""
+    assert response.answer.startswith("根拠資料から確認できる内容です。")
+    assert "doc_012_c03" in response.answer
+    assert response.sources == sources
+
+    result = await db_session.execute(
+        select(QATurn).where(QATurn.question == "在学証明書はどこですか。")
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.citations_json == [sources[0].model_dump()]
+    assert qa_turn.retrieved_chunk_ids_json == ["doc_012_c03"]

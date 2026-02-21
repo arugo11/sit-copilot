@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     azure_openai_enabled: bool = False
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""
+    azure_openai_account_name: str = ""
     azure_openai_model: str = "gpt-4o"
+    azure_openai_api_version: str = "2024-02-15-preview"
     azure_speech_key: str = ""
     azure_speech_region: str = ""
     azure_speech_token_expires_in_sec: int = Field(default=540, ge=1, le=600)
@@ -29,10 +31,15 @@ class Settings(BaseSettings):
     azure_search_api_key: str = ""
     azure_search_endpoint: str = ""
     azure_search_index_name: str = "lecture_index"
+    procedure_search_index_name: str = "procedure_index"
     procedure_retrieval_limit: int = 3
     procedure_query_max_length: int = 512
     procedure_no_source_fallback: str = (
         "現在の質問に対応する公式根拠が見つかりませんでした。"
+    )
+    procedure_backend_failure_fallback: str = (
+        "回答生成中にエラーが発生しました。"
+        "教務課または公式ポータルで最新の手続き情報を確認してください。"
     )
     procedure_no_source_action_next: str = (
         "教務課または公式ポータルで最新の手続き情報を確認してください。"

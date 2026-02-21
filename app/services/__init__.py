@@ -53,8 +53,9 @@ from app.services.lecture_verifier_service import (
     LectureVerifierService,
 )
 from app.services.procedure_answerer_service import (
-    FakeProcedureAnswererService,
+    AzureOpenAIProcedureAnswererService,
     ProcedureAnswerDraft,
+    ProcedureAnswererError,
     ProcedureAnswererService,
 )
 from app.services.procedure_qa_service import (
@@ -62,8 +63,11 @@ from app.services.procedure_qa_service import (
     SqlAlchemyProcedureQAService,
 )
 from app.services.procedure_retrieval_service import (
-    FakeProcedureRetrievalService,
+    AzureProcedureSearchService,
+    AzureSearchProcedureRetrievalService,
+    NoopProcedureRetrievalService,
     ProcedureRetrievalService,
+    ProcedureSearchService,
 )
 from app.services.readiness_service import (
     DeterministicReadinessService,
@@ -95,8 +99,9 @@ __all__ = [
     "BM25LectureIndexService",
     "BM25LectureRetrievalService",
     "BM25TokenCache",
-    "FakeProcedureAnswererService",
-    "FakeProcedureRetrievalService",
+    "AzureOpenAIProcedureAnswererService",
+    "AzureProcedureSearchService",
+    "AzureSearchProcedureRetrievalService",
     "FollowupResolution",
     "get_shared_lecture_retrieval_service",
     "LectureFinalizeService",
@@ -115,10 +120,13 @@ __all__ = [
     "LectureVerifierService",
     "LectureFollowupService",
     "NoopVisionOCRService",
+    "NoopProcedureRetrievalService",
     "ProcedureAnswerDraft",
+    "ProcedureAnswererError",
     "ProcedureAnswererService",
     "ProcedureQAService",
     "ProcedureRetrievalService",
+    "ProcedureSearchService",
     "ReadinessService",
     "DeterministicReadinessService",
     "SettingsService",

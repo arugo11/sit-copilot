@@ -676,6 +676,34 @@ def test_is_azure_openai_ready_with_invalid_endpoint() -> None:
     assert service._is_azure_openai_ready() is False  # noqa: SLF001
 
 
+def test_is_azure_openai_ready_with_missing_deployment() -> None:
+    """Empty deployment should return false."""
+    service = AzureOpenAILectureVerifierService(
+        api_key=TEST_AZURE_OPENAI_KEY,
+        endpoint="https://test.openai.azure.com/",
+        model="",
+    )
+
+    assert service._is_azure_openai_ready() is False  # noqa: SLF001
+
+
+def test_build_chat_completion_url_normalizes_cognitive_endpoint() -> None:
+    """Cognitive endpoint should normalize to OpenAI host with account name."""
+    service = AzureOpenAILectureVerifierService(
+        api_key=TEST_AZURE_OPENAI_KEY,
+        endpoint="https://japaneast.api.cognitive.microsoft.com/",
+        account_name="aoai-test",
+        model="gpt-4o",
+    )
+
+    result = service._build_chat_completion_url()  # noqa: SLF001
+
+    assert (
+        "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        in result
+    )
+
+
 def test_contains_source_fragment_with_exact_match() -> None:
     """Fragment matching should detect overlapping content when answer directly contains source text."""
     service = AzureOpenAILectureVerifierService(

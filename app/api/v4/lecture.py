@@ -150,7 +150,7 @@ def _extract_assist_terms(key_terms_raw: object) -> list[dict[str, str]]:
     for item in key_terms_raw:
         if not isinstance(item, dict):
             continue
-        raw_term = item.get("term")
+        raw_term = item.get("term", "")  # type: ignore[arg-type]
         if not isinstance(raw_term, str):
             continue
         term = raw_term.strip()
@@ -204,9 +204,7 @@ async def _fetch_stream_batch(
     )
     session_status = session_result.scalar_one_or_none()
     if session_status is None:
-        raise LectureSessionNotFoundError(
-            f"lecture session not found: {session_id}"
-        )
+        raise LectureSessionNotFoundError(f"lecture session not found: {session_id}")
     if session_status not in {"active", "finalized"}:
         raise LectureSessionInactiveError(
             f"lecture session state does not allow stream: {session_status}"
@@ -224,7 +222,7 @@ async def _fetch_stream_batch(
         .offset(offsets.speech)
         .limit(SSE_BATCH_LIMIT)
     )
-    speech_events = speech_result.scalars().all()
+    speech_events: list[SpeechEvent] = list(speech_result.scalars().all())
     offsets.speech += len(speech_events)
 
     visual_result = await db.execute(
@@ -238,7 +236,7 @@ async def _fetch_stream_batch(
         .offset(offsets.visual)
         .limit(SSE_BATCH_LIMIT)
     )
-    visual_events = visual_result.scalars().all()
+    visual_events: list[VisualEvent] = list(visual_result.scalars().all())
     offsets.visual += len(visual_events)
 
     summary_result = await db.execute(
@@ -252,7 +250,7 @@ async def _fetch_stream_batch(
         .offset(offsets.summary)
         .limit(SSE_BATCH_LIMIT)
     )
-    summary_windows = summary_result.scalars().all()
+    summary_windows: list[SummaryWindow] = list(summary_result.scalars().all())
     offsets.summary += len(summary_windows)
 
     return session_status, speech_events, visual_events, summary_windows
@@ -267,9 +265,7 @@ async def _stream_lecture_events(
     single_batch: bool = False,
 ) -> AsyncIterator[str]:
     offsets = _EventOffsets()
-    yield _to_sse_payload(
-        {"type": "session.status", "payload": {"connection": "live"}}
-    )
+    yield _to_sse_payload({"type": "session.status", "payload": {"connection": "live"}})
 
     while True:
         if await request.is_disconnected():
@@ -368,9 +364,7 @@ async def _stream_lecture_events(
 
             assist_terms = _extract_assist_terms(window.key_terms_json)
             if assist_terms:
-                yield _to_sse_payload(
-                    {"type": "assist.term", "payload": assist_terms}
-                )
+                yield _to_sse_payload({"type": "assist.term", "payload": assist_terms})
                 emitted = True
 
         if session_status == "finalized":
@@ -444,6 +438,7 @@ def get_lecture_summary_service(
         summary_generator = AzureOpenAILectureSummaryGeneratorService(
             api_key=settings.azure_openai_api_key,
             endpoint=settings.azure_openai_endpoint,
+            account_name=settings.azure_openai_account_name,
             model=settings.azure_openai_model,
         )
     else:

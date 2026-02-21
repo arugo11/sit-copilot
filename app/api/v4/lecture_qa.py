@@ -86,7 +86,9 @@ def get_lecture_answerer_service() -> LectureAnswererService:
     return AzureOpenAILectureAnswererService(
         api_key=settings.azure_openai_api_key,
         endpoint=settings.azure_openai_endpoint,
+        account_name=settings.azure_openai_account_name,
         model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
     )
 
 
@@ -95,7 +97,9 @@ def get_lecture_verifier_service() -> LectureVerifierService:
     return AzureOpenAILectureVerifierService(
         api_key=settings.azure_openai_api_key,
         endpoint=settings.azure_openai_endpoint,
+        account_name=settings.azure_openai_account_name,
         model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
     )
 
 
@@ -107,7 +111,9 @@ def get_lecture_followup_service(
         db=db,
         openai_api_key=settings.azure_openai_api_key,
         openai_endpoint=settings.azure_openai_endpoint,
+        openai_account_name=settings.azure_openai_account_name,
         model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
     )
 
 

@@ -13,6 +13,7 @@ from app.schemas.procedure import (
 )
 from app.services.procedure_answerer_service import (
     ProcedureAnswerDraft,
+    ProcedureAnswererError,
     ProcedureAnswererService,
 )
 from app.services.procedure_retrieval_service import ProcedureRetrievalService
@@ -23,6 +24,10 @@ PROCEDURE_QA_FEATURE = "procedure_qa"
 DEFAULT_RETRIEVAL_LIMIT = 3
 DEFAULT_NO_SOURCE_FALLBACK = "現在の質問に対応する公式根拠が見つかりませんでした。"
 DEFAULT_NO_SOURCE_ACTION_NEXT = (
+    "教務課または公式ポータルで最新の手続き情報を確認してください。"
+)
+DEFAULT_BACKEND_FAILURE_FALLBACK = (
+    "回答生成中にエラーが発生しました。"
     "教務課または公式ポータルで最新の手続き情報を確認してください。"
 )
 
@@ -46,6 +51,7 @@ class SqlAlchemyProcedureQAService:
         retrieval_limit: int = DEFAULT_RETRIEVAL_LIMIT,
         no_source_fallback: str = DEFAULT_NO_SOURCE_FALLBACK,
         no_source_action_next: str = DEFAULT_NO_SOURCE_ACTION_NEXT,
+        backend_failure_fallback: str = DEFAULT_BACKEND_FAILURE_FALLBACK,
     ) -> None:
         self._db = db
         self._retriever = retriever
@@ -53,6 +59,7 @@ class SqlAlchemyProcedureQAService:
         self._retrieval_limit = max(1, retrieval_limit)
         self._no_source_fallback = no_source_fallback
         self._no_source_action_next = no_source_action_next
+        self._backend_failure_fallback = backend_failure_fallback
 
     async def ask(self, request: ProcedureAskRequest) -> ProcedureAskResponse:
         """Execute retrieval + answer generation and persist qa turn."""
@@ -78,15 +85,18 @@ class SqlAlchemyProcedureQAService:
             )
             return response
 
-        draft = await self._answerer.answer(
-            query=request.query,
-            lang_mode=request.lang_mode,
-            sources=sources,
-        )
-        response = self._build_success_response(
-            draft=draft,
-            sources=sources,
-        )
+        try:
+            draft = await self._answerer.answer(
+                query=request.query,
+                lang_mode=request.lang_mode,
+                sources=sources,
+            )
+            response = self._build_success_response(
+                draft=draft,
+                sources=sources,
+            )
+        except ProcedureAnswererError:
+            response = self._build_local_grounded_response(sources=sources)
         await self._persist_turn(
             question=request.query,
             response=response,
@@ -102,6 +112,32 @@ class SqlAlchemyProcedureQAService:
             confidence=draft.confidence,
             sources=sources,
             action_next=draft.action_next,
+            fallback="",
+        )
+
+    def _build_local_grounded_response(
+        self, *, sources: list[ProcedureSource]
+    ) -> ProcedureAskResponse:
+        excerpts = [
+            f"[{source.source_id}] {source.title}（{source.section}）: {source.snippet}"
+            for source in sources[:2]
+            if source.snippet.strip()
+        ]
+        if not excerpts:
+            return ProcedureAskResponse(
+                answer=self._backend_failure_fallback,
+                confidence="low",
+                sources=sources,
+                action_next=self._no_source_action_next,
+                fallback=self._backend_failure_fallback,
+            )
+
+        joined_excerpt = " / ".join(excerpts)
+        return ProcedureAskResponse(
+            answer=f"根拠資料から確認できる内容です。{joined_excerpt}",
+            confidence="low",
+            sources=sources,
+            action_next=self._no_source_action_next,
             fallback="",
         )
 

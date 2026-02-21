@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from app.core.azure_openai_config import ValidationResult, validate_openai_config
 from app.schemas.lecture_qa import LectureSource
 
 __all__ = [
@@ -77,6 +78,7 @@ class AzureOpenAILectureVerifierService:
         self,
         api_key: str,
         endpoint: str,
+        account_name: str = "",
         model: str = DEFAULT_MODEL,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
@@ -100,6 +102,12 @@ class AzureOpenAILectureVerifierService:
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
         self._api_version = api_version
+        self._validation = self._validate_configuration(account_name=account_name)
+        if not self._validation.is_valid:
+            logger.warning(
+                "azure_openai_lecture_verify_config_invalid reason=%s",
+                self._validation.reason,
+            )
 
     async def verify(
         self,
@@ -476,20 +484,22 @@ class AzureOpenAILectureVerifierService:
         raise ValueError("passed must be a boolean value")
 
     def _is_azure_openai_ready(self) -> bool:
-        if not self._api_key.strip():
-            return False
-        if not self._endpoint.strip():
-            return False
-        if not self._model.strip():
-            return False
-        return "openai.azure.com" in self._endpoint.lower()
+        return self._validation.is_valid
 
     def _build_chat_completion_url(self) -> str:
-        endpoint = self._endpoint.rstrip("/")
+        endpoint = self._validation.normalized_endpoint.rstrip("/")
         deployment = quote(self._model.strip(), safe="")
         return (
             f"{endpoint}/openai/deployments/{deployment}/chat/completions"
             f"?api-version={self._api_version}"
+        )
+
+    def _validate_configuration(self, *, account_name: str) -> ValidationResult:
+        return validate_openai_config(
+            api_key=self._api_key,
+            endpoint=self._endpoint,
+            deployment=self._model,
+            account_name=account_name,
         )
 
     def _extract_content(self, response_json: dict[str, object]) -> str:

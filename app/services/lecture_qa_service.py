@@ -17,6 +17,7 @@ from app.schemas.lecture_qa import (
 )
 from app.services.lecture_answerer_service import (
     LectureAnswerDraft,
+    LectureAnswererError,
     LectureAnswererService,
 )
 from app.services.lecture_followup_service import (
@@ -26,6 +27,7 @@ from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_retrieval_service import LectureRetrievalService
 from app.services.lecture_verifier_service import (
     LectureVerificationResult,
+    LectureVerifierError,
     LectureVerifierService,
 )
 
@@ -35,6 +37,9 @@ LECTURE_QA_FEATURE = "lecture_qa"
 DEFAULT_RETRIEVAL_LIMIT = 5
 DEFAULT_NO_SOURCE_FALLBACK = "講義資料に該当する情報が見つかりませんでした。"
 DEFAULT_NO_SOURCE_ACTION_NEXT = "別の質問をしてください。"
+DEFAULT_BACKEND_FAILURE_FALLBACK = (
+    "回答生成中にエラーが発生しました。講義資料を直接確認してください。"
+)
 
 
 class LectureQAService(Protocol):
@@ -81,6 +86,7 @@ class SqlAlchemyLectureQAService:
         retrieval_limit: int = DEFAULT_RETRIEVAL_LIMIT,
         no_source_fallback: str = DEFAULT_NO_SOURCE_FALLBACK,
         no_source_action_next: str = DEFAULT_NO_SOURCE_ACTION_NEXT,
+        backend_failure_fallback: str = DEFAULT_BACKEND_FAILURE_FALLBACK,
     ) -> None:
         self._db = db
         self._retriever = retriever
@@ -90,6 +96,7 @@ class SqlAlchemyLectureQAService:
         self._retrieval_limit = max(1, retrieval_limit)
         self._no_source_fallback = no_source_fallback
         self._no_source_action_next = no_source_action_next
+        self._backend_failure_fallback = backend_failure_fallback
 
     async def ask(
         self,
@@ -132,16 +139,26 @@ class SqlAlchemyLectureQAService:
             )
             return response
 
-        # Generate answer
-        draft = await self._answerer.answer(
-            question=question,
-            lang_mode=lang_mode,
-            sources=sources,
-            history="",
-        )
+        # Generate answer with error handling
+        try:
+            draft = await self._answerer.answer(
+                question=question,
+                lang_mode=lang_mode,
+                sources=sources,
+                history="",
+            )
+        except LectureAnswererError:
+            response = self._build_local_grounded_response(sources=sources)
+            await self._persist_turn(
+                session_id=session_id,
+                question=question,
+                response=response,
+                latency_ms=self._to_latency_ms(started_at),
+            )
+            return response
 
-        # Verify answer
-        verification = await self._verifier.verify(
+        # Verify answer with error handling
+        verification = await self._safe_verify(
             question=question,
             answer=draft.answer,
             sources=sources,
@@ -149,8 +166,7 @@ class SqlAlchemyLectureQAService:
 
         # Handle verification failure
         if not verification.passed:
-            # Attempt repair once
-            repaired = await self._verifier.repair_answer(
+            repaired = await self._safe_repair(
                 question=question,
                 answer=draft.answer,
                 sources=sources,
@@ -162,8 +178,7 @@ class SqlAlchemyLectureQAService:
                     confidence="medium",
                     action_next=draft.action_next,
                 )
-                # Re-verify repaired answer
-                verification = await self._verifier.verify(
+                verification = await self._safe_verify(
                     question=question,
                     answer=repaired,
                     sources=sources,
@@ -237,16 +252,34 @@ class SqlAlchemyLectureQAService:
             )
             return response
 
-        # Generate answer with history context
-        draft = await self._answerer.answer(
-            question=resolution.standalone_query,
-            lang_mode=lang_mode,
-            sources=sources,
-            history=resolution.history_context,
-        )
+        # Generate answer with history context and error handling
+        try:
+            draft = await self._answerer.answer(
+                question=resolution.standalone_query,
+                lang_mode=lang_mode,
+                sources=sources,
+                history=resolution.history_context,
+            )
+        except LectureAnswererError:
+            base_response = self._build_local_grounded_response(sources=sources)
+            await self._persist_turn(
+                session_id=session_id,
+                question=question,
+                response=base_response,
+                latency_ms=self._to_latency_ms(started_at),
+            )
+            return LectureFollowupResponse(
+                answer=base_response.answer,
+                confidence=base_response.confidence,
+                sources=base_response.sources,
+                verification_summary=base_response.verification_summary,
+                action_next=base_response.action_next,
+                fallback=base_response.fallback,
+                resolved_query=resolution.standalone_query,
+            )
 
-        # Verify answer
-        verification = await self._verifier.verify(
+        # Verify answer with error handling
+        verification = await self._safe_verify(
             question=resolution.standalone_query,
             answer=draft.answer,
             sources=sources,
@@ -254,7 +287,7 @@ class SqlAlchemyLectureQAService:
 
         # Handle verification failure
         if not verification.passed:
-            repaired = await self._verifier.repair_answer(
+            repaired = await self._safe_repair(
                 question=resolution.standalone_query,
                 answer=draft.answer,
                 sources=sources,
@@ -266,7 +299,7 @@ class SqlAlchemyLectureQAService:
                     confidence="medium",
                     action_next=draft.action_next,
                 )
-                verification = await self._verifier.verify(
+                verification = await self._safe_verify(
                     question=resolution.standalone_query,
                     answer=repaired,
                     sources=sources,
@@ -297,6 +330,81 @@ class SqlAlchemyLectureQAService:
             fallback=response.fallback,
             resolved_query=resolution.standalone_query,
         )
+
+    def _build_local_grounded_response(
+        self, *, sources: list[LectureSource]
+    ) -> LectureAskResponse:
+        """Build a local grounded response from sources when Azure OpenAI fails."""
+        snippets = [
+            source.text.strip().replace("\n", " ")[:120]
+            for source in sources[:2]
+            if source.text.strip()
+        ]
+        if not snippets:
+            return LectureAskResponse(
+                answer=self._backend_failure_fallback,
+                confidence="low",
+                sources=sources,
+                verification_summary="回答生成に失敗しました。",
+                action_next=self._no_source_action_next,
+                fallback=self._backend_failure_fallback,
+            )
+
+        if len(snippets) == 1:
+            answer = f"講義資料では「{snippets[0]}」と説明されています。"
+        else:
+            answer = (
+                f"講義資料では「{snippets[0]}」および「{snippets[1]}」"
+                "の内容が関連しています。"
+            )
+        return LectureAskResponse(
+            answer=answer,
+            confidence="low",
+            sources=sources,
+            verification_summary="回答生成に失敗したため、資料から直接抜粋しました。",
+            action_next=self._no_source_action_next,
+            fallback="",
+        )
+
+    async def _safe_verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        sources: list[LectureSource],
+    ) -> LectureVerificationResult:
+        """Safely verify answer, catching verifier errors."""
+        try:
+            return await self._verifier.verify(
+                question=question,
+                answer=answer,
+                sources=sources,
+            )
+        except LectureVerifierError:
+            return LectureVerificationResult(
+                passed=False,
+                summary="検証中にエラーが発生しました。",
+                unsupported_claims=[answer],
+            )
+
+    async def _safe_repair(
+        self,
+        *,
+        question: str,
+        answer: str,
+        sources: list[LectureSource],
+        unsupported_claims: list[str],
+    ) -> str | None:
+        """Safely repair answer, catching verifier errors."""
+        try:
+            return await self._verifier.repair_answer(
+                question=question,
+                answer=answer,
+                sources=sources,
+                unsupported_claims=unsupported_claims,
+            )
+        except LectureVerifierError:
+            return None
 
     def _build_response(
         self,

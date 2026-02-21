@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.azure_openai_config import ValidationResult, validate_openai_config
 from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
 
@@ -66,6 +67,7 @@ class SqlAlchemyLectureFollowupService:
         db: AsyncSession,
         openai_api_key: str = "",
         openai_endpoint: str = "",
+        openai_account_name: str = "",
         model: str = DEFAULT_REWRITE_MODEL,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         api_version: str = DEFAULT_API_VERSION,
@@ -85,6 +87,14 @@ class SqlAlchemyLectureFollowupService:
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._api_version = api_version
+        self._validation = self._validate_configuration(
+            account_name=openai_account_name
+        )
+        if not self._validation.is_valid:
+            logger.warning(
+                "azure_openai_followup_config_invalid reason=%s",
+                self._validation.reason,
+            )
 
     async def resolve_query(
         self,
@@ -309,20 +319,22 @@ class SqlAlchemyLectureFollowupService:
             ) from exc
 
     def _is_azure_openai_ready(self) -> bool:
-        if not self._openai_api_key.strip():
-            return False
-        if not self._openai_endpoint.strip():
-            return False
-        if not self._model.strip():
-            return False
-        return "openai.azure.com" in self._openai_endpoint.lower()
+        return self._validation.is_valid
 
     def _build_chat_completion_url(self) -> str:
-        endpoint = self._openai_endpoint.rstrip("/")
+        endpoint = self._validation.normalized_endpoint.rstrip("/")
         deployment = quote(self._model.strip(), safe="")
         return (
             f"{endpoint}/openai/deployments/{deployment}/chat/completions"
             f"?api-version={self._api_version}"
+        )
+
+    def _validate_configuration(self, *, account_name: str) -> ValidationResult:
+        return validate_openai_config(
+            api_key=self._openai_api_key,
+            endpoint=self._openai_endpoint,
+            deployment=self._model,
+            account_name=account_name,
         )
 
     def _extract_content(self, response_json: dict[str, object]) -> str:

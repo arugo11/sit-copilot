@@ -239,9 +239,13 @@ POST /api/v4/lecture/qa/ask
 - CPU-bound → use `asyncio.to_thread()` for BM25 operations
 
 **Azure OpenAI**:
+- **API Version**: `2024-02-15-preview` (required for Cognitive Services endpoints)
+- **Endpoint Format**: `https://japaneast.api.cognitive.microsoft.com` (region-based)
+- **Deployment Name**: Must match deployed model name (e.g., `gpt-4.1`)
 - Source-only constraint: "Use ONLY information from the sources"
 - Citation format: `{"type": "speech|visual", "timestamp": "...", "text": "..."}`
 - Verifier pattern: claim-by-claim validation with fallback
+- Error handling: `LectureAnswererError` → local grounded response (graceful degradation)
 
 **SpeechEvent as Chunk**:
 - Primary source unit = one `SpeechEvent` row (`chunk_id = speech_event.id`)
@@ -509,3 +513,19 @@ tests/unit/services/
 - Agent Teams: frontend-impl (5 teammates, 16/27 tasks)
 - Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
 - Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
+
+### 2026-02-22
+
+- 0 commits (uncommitted changes), 24 files changed (+1784, -137)
+- Codex: 2 consultations (Azure CLI research, RAG error handling debug)
+- Gemini: 1 research (codebase analysis)
+- Agent Teams: rag-error-handling-fix (2 teammates, 6/6 tasks completed)
+- **RAG Error Handling Fixed**: Implemented graceful degradation on Azure OpenAI failures (HTTP 200 with local fallback instead of HTTP 503)
+- **Azure OpenAI Integration Completed**: Configured Cognitive Services endpoint with gpt-4.1 deployment (Japan East)
+- **API Version Fix**: Discovered `2024-02-15-preview` required for Cognitive Services endpoints
+- **Test Coverage**: All 345 tests passing (86% coverage)
+- **Documentation Updated**: DESIGN.md + azure-openai-config-template.md + CLAUDE.md
+- **Key Patterns Discovered**:
+  - LLM Error Handling with Graceful Degradation (Confidence: 0.95)
+  - Safe Wrapper for LLM Verification (Confidence: 0.90)
+- **Azure CLI Setup**: Installed via uv tool with Python 3.10, created patched wrapper for compatibility
