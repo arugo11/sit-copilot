@@ -1,130 +1,256 @@
 /**
  * Lecture Live Page
- * Based on docs/frontend.md Section 8.3
+ * SSE-first live stream with mock fallback
  */
 
-import { prefersReducedMotion } from '@/lib/utils'
+import { useCallback, useEffect, useRef } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useConnectionAnnouncer } from '@/hooks/useLiveRegion'
+import { useToast } from '@/components/common/Toast'
+import { AppShell } from '@/components/common/AppShell'
+import { SourcePanel } from '@/features/live/components/SourcePanel'
+import { TranscriptPanel } from '@/features/live/components/TranscriptPanel'
+import { AssistPanel } from '@/features/live/components/AssistPanel'
+import { streamClient, mockStreamTransport, sseStreamTransport } from '@/lib/stream'
+import { useLiveSessionStore } from '@/stores/liveSessionStore'
+import { useMicrophoneInput } from '@/features/audio/useMicrophoneInput'
+import { useUserSettings } from '@/lib/api/hooks'
+import { demoApi, getApiErrorMessage } from '@/lib/api/client'
 
-function cn(...classes: (string | boolean | undefined | null)[]): string {
-  return classes.filter(Boolean).join(' ')
-}
+const CHUNK_WINDOW_MS = 4000
+const SUMMARY_TRIGGER_CHUNK_COUNT = 3
+const ERROR_TOAST_THROTTLE_MS = 5000
+const DEMO_TRANSCRIPT_SNIPPETS = [
+  '今日は機械学習の過学習について説明します。',
+  '訓練データでは高精度でも未知データで性能が落ちる状態です。',
+  '対策として正則化と検証データ監視が重要です。',
+]
 
 export function LectureLivePage() {
+  const { t } = useTranslation()
+  const { id } = useParams()
+  const sessionId = id ?? 'demo-session'
+  const { showToast } = useToast()
+  const { announceConnection } = useConnectionAnnouncer()
+  const { data: userSettings } = useUserSettings()
+
+  const connection = useLiveSessionStore((state) => state.connection)
+  const transcriptLagMs = useLiveSessionStore((state) => state.transcriptLagMs)
+  const cameraEnabled = useLiveSessionStore((state) => state.cameraEnabled)
+  const setConnection = useLiveSessionStore((state) => state.setConnection)
+  const setCameraEnabled = useLiveSessionStore((state) => state.setCameraEnabled)
+  const applyTranscriptPartial = useLiveSessionStore((state) => state.applyTranscriptPartial)
+  const applyTranscriptFinal = useLiveSessionStore((state) => state.applyTranscriptFinal)
+  const applyTranslationFinal = useLiveSessionStore((state) => state.applyTranslationFinal)
+  const pushSourceFrame = useLiveSessionStore((state) => state.pushSourceFrame)
+  const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
+  const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
+  const setAssistTerms = useLiveSessionStore((state) => state.setAssistTerms)
+  const hydrateFromSettings = useLiveSessionStore((state) => state.hydrateFromSettings)
+  const resetLiveData = useLiveSessionStore((state) => state.resetLiveData)
+  const autoStartAttemptedRef = useRef(false)
+  const usingMockTransportRef = useRef(false)
+  const chunkIndexRef = useRef(0)
+  const previousConnectionRef = useRef(connection)
+  const lastReconnectToastAtRef = useRef(0)
+  const lastErrorToastAtRef = useRef(0)
+
+  const handleAudioChunk = useCallback((chunk: Blob) => {
+    if (usingMockTransportRef.current) {
+      mockStreamTransport.acceptAudioChunk(chunk)
+      return
+    }
+
+    const chunkIndex = chunkIndexRef.current
+    chunkIndexRef.current += 1
+
+    const startMs = chunkIndex * CHUNK_WINDOW_MS
+    const endMs = startMs + CHUNK_WINDOW_MS
+    const sampleText = DEMO_TRANSCRIPT_SNIPPETS[chunkIndex % DEMO_TRANSCRIPT_SNIPPETS.length]
+    const transcriptText = `${sampleText} (audio:${chunk.size}bytes)`
+
+    void demoApi
+      .ingestSpeechChunk({
+        session_id: sessionId,
+        start_ms: startMs,
+        end_ms: endMs,
+        text: transcriptText,
+        confidence: 0.9,
+        is_final: true,
+        speaker: 'teacher',
+      })
+      .then(async () => {
+        if ((chunkIndex + 1) % SUMMARY_TRIGGER_CHUNK_COUNT === 0) {
+          await demoApi.getLatestSummary(sessionId)
+        }
+      })
+      .catch((error) => {
+        const now = Date.now()
+        if (now - lastErrorToastAtRef.current < ERROR_TOAST_THROTTLE_MS) {
+          return
+        }
+        lastErrorToastAtRef.current = now
+        showToast({
+          variant: 'danger',
+          title: '音声同期エラー',
+          message: getApiErrorMessage(error, '音声チャンクの送信に失敗しました。'),
+        })
+      })
+  }, [sessionId, showToast])
+
+  const { isRecording, audioLevel, lastError, startRecording, stopRecording } =
+    useMicrophoneInput({
+      onChunk: handleAudioChunk,
+    })
+
+  useEffect(() => {
+    hydrateFromSettings({
+      language: userSettings?.language,
+      transcriptDensity: userSettings?.transcriptDensity,
+      autoScrollDefault: userSettings?.autoScrollDefault,
+    })
+  }, [hydrateFromSettings, userSettings])
+
+  useEffect(() => {
+    if (autoStartAttemptedRef.current || isRecording) {
+      return
+    }
+    autoStartAttemptedRef.current = true
+    void startRecording()
+  }, [isRecording, startRecording])
+
+  useEffect(() => {
+    const subscriptions = [
+      streamClient.subscribe('session.status', (event) => {
+        setConnection(event.payload.connection)
+        announceConnection(
+          event.payload.connection === 'degraded' ? 'reconnecting' : event.payload.connection === 'error' ? 'error' : event.payload.connection,
+          'ja'
+        )
+
+        const previous = previousConnectionRef.current
+        const current = event.payload.connection
+        if ((previous === 'reconnecting' || previous === 'error') && current === 'live') {
+          showToast({
+            variant: 'success',
+            title: '接続復帰',
+            message: 'ライブストリームに再接続しました。',
+          })
+        } else if (current === 'reconnecting') {
+          const now = Date.now()
+          if (now - lastReconnectToastAtRef.current >= ERROR_TOAST_THROTTLE_MS) {
+            lastReconnectToastAtRef.current = now
+            showToast({
+              variant: 'warning',
+              title: '再接続中',
+              message: 'ライブストリームの再接続を試行しています。',
+            })
+          }
+        }
+        previousConnectionRef.current = current
+      }),
+      streamClient.subscribe('transcript.partial', (event) => applyTranscriptPartial(event.payload)),
+      streamClient.subscribe('transcript.final', (event) => applyTranscriptFinal(event.payload)),
+      streamClient.subscribe('translation.final', (event) => applyTranslationFinal(event.payload.lineId, event.payload.translatedText)),
+      streamClient.subscribe('source.frame', (event) => pushSourceFrame(event.payload)),
+      streamClient.subscribe('source.ocr', (event) => pushSourceOcr(event.payload)),
+      streamClient.subscribe('assist.summary', (event) => setAssistSummary(event.payload)),
+      streamClient.subscribe('assist.term', (event) => setAssistTerms(event.payload)),
+      streamClient.subscribe('error', (event) => {
+        showToast({
+          variant: event.payload.recoverable ? 'warning' : 'danger',
+          title: 'ライブイベントエラー',
+          message: event.payload.message,
+        })
+      }),
+    ]
+
+    chunkIndexRef.current = 0
+    usingMockTransportRef.current = false
+    streamClient.setTransport(sseStreamTransport)
+
+    streamClient.connect(sessionId).catch((error) => {
+      usingMockTransportRef.current = true
+      streamClient.setTransport(mockStreamTransport)
+      void streamClient.connect(sessionId)
+
+      showToast({
+        variant: 'warning',
+        title: 'SSE接続失敗',
+        message: `${getApiErrorMessage(error, 'ライブストリームを開始できませんでした。')} Mockモードへ切り替えます。`,
+      })
+    })
+
+    return () => {
+      subscriptions.forEach((unsubscribe) => unsubscribe())
+      streamClient.disconnect()
+      stopRecording()
+      resetLiveData()
+    }
+  }, [
+    announceConnection,
+    applyTranscriptFinal,
+    applyTranscriptPartial,
+    applyTranslationFinal,
+    pushSourceFrame,
+    pushSourceOcr,
+    resetLiveData,
+    sessionId,
+    setAssistSummary,
+    setAssistTerms,
+    setConnection,
+    showToast,
+    stopRecording,
+  ])
+
+  useEffect(() => {
+    if (!lastError) {
+      return
+    }
+    showToast({ variant: 'danger', title: 'マイクエラー', message: lastError })
+  }, [lastError, showToast])
 
   return (
-    <div className="h-screen flex flex-col">
-      {/* Top Bar */}
-      <header className="bg-bg-surface border-b border-border px-4 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-semibold truncate">機械学習入門</h1>
-            <span className={cn(
-              'badge badge-danger',
-              !prefersReducedMotion() && 'animate-pulse'
-            )}>
-              <span className="sr-only">講義進行中:</span>LIVE
+    <AppShell
+      topbar={
+        <div className="py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold">{t('live.stream.title')}: {sessionId}</h1>
+            <span className={`badge ${connection === 'live' ? 'badge-success' : connection === 'error' ? 'badge-danger' : 'badge-warning'}`}>
+              {connection}
             </span>
+            <span className="text-sm text-fg-secondary">字幕 {transcriptLagMs}ms</span>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-fg-secondary">字幕 1.2s</span>
-            <select className="input text-sm py-1">
-              <option>日本語</option>
-              <option>English</option>
-            </select>
+          <div className="flex gap-2 items-center">
+            <button
+              type="button"
+              className={`btn ${isRecording ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={() => (isRecording ? stopRecording() : startRecording())}
+            >
+              {isRecording ? t('live.stream.stopRecording') : t('live.stream.startRecording')}
+            </button>
+            <button
+              type="button"
+              className={`btn ${cameraEnabled ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setCameraEnabled(!cameraEnabled)}
+              aria-pressed={cameraEnabled}
+            >
+              {t('live.stream.cameraInput')}: {cameraEnabled ? t('live.stream.cameraOn') : t('live.stream.cameraOff')}
+            </button>
+            <div className="text-xs text-fg-secondary min-w-20">入力 {Math.round(audioLevel * 100)}%</div>
+            <Link to={`/lectures/${sessionId}/review`} className="btn btn-secondary">
+              {t('live.stream.toReview')}
+            </Link>
           </div>
         </div>
-      </header>
-
-      {/* Main Content - 3 Pane Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Pane - Source Panel */}
-        <aside className="w-80 bg-bg-surface border-r border-border p-4 overflow-y-auto">
-          <h2 className="font-semibold mb-4">資料</h2>
-          <div className="card bg-bg-muted aspect-square flex items-center justify-center">
-            <p className="text-fg-secondary text-sm">投影資料スナップショット</p>
-          </div>
-        </aside>
-
-        {/* Center Pane - Transcript Panel */}
-        <main className="flex-1 flex flex-col bg-bg-page">
-          <div className="flex-1 p-4 overflow-y-auto">
-            <div className="max-w-3xl mx-auto space-y-3">
-              {/* Sample Transcript Lines */}
-              {[
-                { time: '10:00', speaker: '先生', text: '皆さん、機械学習について学びましょう', translation: 'Let\'s learn about machine learning' },
-                { time: '10:05', speaker: '先生', text: '機械学習は、データから学習するAIの手法です', translation: 'Machine learning is an AI method that learns from data' },
-                { time: '10:10', speaker: '先生', text: '大きく分けて、教師あり学習と教師なし学習があります', translation: 'There are mainly supervised learning and unsupervised learning' },
-              ].map((line, i) => (
-                <div key={i} className="card p-4 space-y-1">
-                  <div className="flex items-center gap-2 text-xs text-fg-secondary">
-                    <span>{line.time}</span>
-                    <span>•</span>
-                    <span>{line.speaker}</span>
-                  </div>
-                  <p className="text-fg-primary text-lg leading-relaxed">
-                    {line.text}
-                  </p>
-                  <p className="text-fg-secondary text-base">
-                    {line.translation}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Auto-scroll Toggle */}
-          <div className="bg-bg-surface border-t border-border px-4 py-2">
-            <button className="btn btn-primary btn-sm w-full" aria-label="字幕を現在の位置に戻す">
-              現在位置に戻る
-            </button>
-          </div>
-        </main>
-
-        {/* Right Pane - Assist Panel */}
-        <aside className="w-72 bg-bg-surface border-l border-border p-4 overflow-y-auto">
-          <h2 className="font-semibold mb-4">補助</h2>
-
-          {/* Status */}
-          <div className="space-y-2 mb-6">
-            <h3 className="text-sm font-medium">状態</h3>
-            <div className="space-y-1 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-success rounded-full" aria-hidden="true" />
-                <svg className="w-4 h-4 text-success" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                <span>録音中</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-success rounded-full" aria-hidden="true" />
-                <svg className="w-4 h-4 text-success" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                <span>文字起こし中</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Key Points */}
-          <div className="space-y-2 mb-6">
-            <h3 className="text-sm font-medium">要点</h3>
-            <ul className="space-y-2 text-sm text-fg-secondary">
-              <li className="p-2 bg-bg-muted rounded">• 機械学習はデータから学習する</li>
-              <li className="p-2 bg-bg-muted rounded">• 教師あり/なしがある</li>
-            </ul>
-          </div>
-
-          {/* QA Input */}
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">質問</h3>
-            <input
-              type="text"
-              className="input"
-              placeholder="質問を入力..."
-            />
-          </div>
-        </aside>
+      }
+      sidebar={cameraEnabled ? <SourcePanel /> : undefined}
+      rightRail={<AssistPanel onAskMiniQuestion={(q) => showToast({ variant: 'info', title: 'ミニ回答', message: `${q} → 詳細回答はreview画面で確認してください。` })} />}
+    >
+      <div className="h-[calc(100vh-130px)]">
+        <TranscriptPanel />
       </div>
-    </div>
+    </AppShell>
   )
 }

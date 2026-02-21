@@ -30,6 +30,68 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Frontend Demo Simplification & Streaming-Ready UI (2026-02-22)
+
+### Decision Summary
+
+- Removed login-first assumption in frontend flow and unified to demo-start CTA.
+- Kept backend unchanged; frontend uses demo headers (`X-Lecture-Token`, `X-User-Id`) for API calls.
+- Replaced lecture-list server dependency with session-start local persistence for demo stability.
+- Introduced streaming abstraction with transport boundary:
+  - `StreamClient` as UI-facing API
+  - `MockStreamTransport` active implementation for current demo
+  - `WebSocketTransport` and `SseTransport` scaffolds for future backend streaming
+- Added Zustand stores for:
+  - live session UI state
+  - review QA streaming state
+  - microphone input state
+- Implemented microphone input hook (`getUserMedia` + `MediaRecorder`) and chunk handoff interface for future API wiring.
+- Implemented block-based streaming UI:
+  - Live transcript partial/final card progression
+  - Review QA answer chunk-by-chunk append and done finalization
+- Implemented backend SSE endpoint `GET /api/v4/lecture/events/stream` (header-auth protected, session-scoped).
+- Implemented fetch-based `SseTransport` (header-capable) and connected it to `StreamClient` reconnect state machine.
+- Added SSE failure fallback path: live page auto-switches to `MockStreamTransport` for demo continuity.
+
+### Rationale
+
+- Demo reliability improves by eliminating auth UI and non-existent list APIs.
+- Streaming transport isolation minimizes migration cost when moving from mock to real WS/SSE.
+- Block-based progressive rendering improves readability and supports accessibility announcements.
+
+### Compatibility Rules
+
+- UI layer must only depend on `StreamClient`, never transport-specific classes.
+- Event boundaries `qa.answer.chunk` and `qa.answer.done` are contract-stable and must remain unchanged.
+- In development, API base defaults to same-origin (`VITE_API_BASE_URL` unset) so Vite proxy can avoid CORS setup overhead.
+- SSE client must use fetch-stream parsing (not `EventSource`) because auth requires custom headers.
+
+### Review QA Real API Integration (2026-02-21)
+
+#### Decision Summary
+
+- Replaced review-page QA generation from `MockStreamTransport` to real API requests:
+  - `POST /api/v4/lecture/qa/ask`
+  - `POST /api/v4/lecture/qa/followup`
+- Preserved existing block UI by converting each API response into one synthetic stream block pair:
+  - one `qa.answer.chunk`
+  - one `qa.answer.done`
+- Added one-time async warmup call to `POST /api/v4/lecture/qa/index/build` with `rebuild=false`.
+- Follow-up policy is deterministic:
+  - first successful turn uses `ask`
+  - subsequent turns use `followup` with `history_turns=3`.
+- Citation mapping is fixed for this phase:
+  - `speech -> audio`
+  - `visual -> ocr`
+  - citation ID format: `${answerId}::${chunk_id}::${index}`.
+
+#### Compatibility Rules
+
+- Review QA does not require server-side streaming in this phase.
+- `followups` chips remain empty because current QA API response has no follow-up suggestion array.
+- `404` on QA calls is treated as session mismatch and should navigate users back to lecture list.
+- `fallback` responses are rendered as successful answers with low-confidence warning UI.
+
 ### Agent Roles
 
 | Agent | Role | Responsibilities |
@@ -1431,4 +1493,9 @@ npm run build
 | TanStack Virtual for transcript list | Handles thousands of transcript lines without performance degradation | 2026-02-21 |
 | Design tokens via CSS variables | Enables theme switching (light/dark/high-contrast) without rebuilding CSS | 2026-02-21 |
 | i18next for Japanese/English localization | Industry standard with namespace support and interpolation | 2026-02-21 |
-
+| Remove login-first UX for MVP demo and use single demo-start CTA | Keeps demo flow simple and aligns with no-SSO policy in MVP scope | 2026-02-21 |
+| Frontend API auth uses fixed demo headers with env overrides (`X-Lecture-Token`, `X-User-Id`) | Allows login-free real API calls without backend changes while keeping deployment-configurable secrets | 2026-02-21 |
+| SSE stream client uses fetch-based parser with custom headers | Native `EventSource` cannot send required auth headers; fetch-stream keeps existing token contract | 2026-02-21 |
+| Live page sends pseudo transcript chunks to `/api/v4/lecture/speech/chunk` until STT integration lands | Enables real backend-driven stream updates today while preserving transport/API contracts | 2026-02-21 |
+| Lecture list becomes session-driven (`session/start` + localStorage) instead of non-existent `/lectures` API | Removes contract mismatch and keeps demo sessions reproducible in browser without backend list endpoint | 2026-02-21 |
+| Settings sync contract fixed to `GET/POST /api/v4/settings/me` with `{settings: ...}` envelope | Matches backend schema and avoids method/path mismatch (`PUT` removal) | 2026-02-21 |

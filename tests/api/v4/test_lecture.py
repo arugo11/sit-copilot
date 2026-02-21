@@ -32,6 +32,26 @@ OWNER_B_HEADERS = {
 JPEG_BYTES = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
 
 
+def _parse_sse_events(raw_payload: str) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for raw_block in raw_payload.split("\n\n"):
+        if not raw_block or raw_block.startswith(":"):
+            continue
+
+        data_lines = [
+            line[5:].strip()
+            for line in raw_block.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+
+        parsed = json.loads("\n".join(data_lines))
+        if isinstance(parsed, dict):
+            events.append(parsed)
+    return events
+
+
 @pytest.mark.asyncio
 async def test_post_lecture_session_start_returns_200_and_persists(
     async_client: AsyncClient,
@@ -510,6 +530,113 @@ async def test_post_lecture_visual_event_for_other_user_session_returns_404(
 
     assert response.status_code == 404
     assert body["error"]["code"] == "http_error"
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_events_stream_returns_sse_events(
+    async_client: AsyncClient,
+) -> None:
+    """SSE endpoint should stream transcript/source/assist events for a session."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 4000,
+            "text": "講義導入です。",
+            "confidence": 0.91,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    await async_client.post(
+        "/api/v4/lecture/visual/event",
+        data={
+            "session_id": session_id,
+            "timestamp_ms": "3000",
+            "source": "slide",
+            "change_score": "0.42",
+        },
+        files={"image": ("frame.jpg", JPEG_BYTES, "image/jpeg")},
+        headers=AUTH_HEADERS,
+    )
+    await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    response = await async_client.get(
+        "/api/v4/lecture/events/stream",
+        params={"session_id": session_id, "once": "true"},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse_events(response.text)
+
+    event_types = [event.get("type") for event in events]
+    assert "session.status" in event_types
+    assert "transcript.final" in event_types
+    assert "source.frame" in event_types
+    assert "source.ocr" in event_types
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_events_stream_without_token_returns_401(
+    async_client: AsyncClient,
+) -> None:
+    """SSE endpoint should reject unauthenticated requests."""
+    response = await async_client.get(
+        "/api/v4/lecture/events/stream",
+        params={"session_id": "lec_missing"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_events_stream_for_other_user_session_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """SSE endpoint should enforce session ownership before starting stream."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=OWNER_A_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.get(
+        "/api/v4/lecture/events/stream",
+        params={"session_id": session_id},
+        headers=OWNER_B_HEADERS,
+    )
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

@@ -72,11 +72,15 @@ export function useConnectionAnnouncer() {
   const { announce } = useLiveRegion({ throttleMs: 5000 })
 
   const announceConnection = useCallback(
-    (state: 'connecting' | 'live' | 'reconnecting' | 'error', locale: 'ja' | 'en' = 'ja') => {
+    (
+      state: 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error',
+      locale: 'ja' | 'en' = 'ja'
+    ) => {
       const messages: Record<typeof state, { ja: string; en: string }> = {
         connecting: { ja: '接続中', en: 'Connecting' },
         live: { ja: '接続済み', en: 'Connected' },
         reconnecting: { ja: '再接続中', en: 'Reconnecting' },
+        degraded: { ja: '接続が不安定です', en: 'Connection is degraded' },
         error: { ja: 'エラーが発生', en: 'Error occurred' },
       }
 

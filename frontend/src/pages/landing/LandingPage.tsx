@@ -16,7 +16,7 @@ export function LandingPage() {
               講義支援アプリ
             </h1>
             <p className="text-lg text-fg-secondary">
-              外国人留学生、障がいのある学生、日本語話者の学生を含めて、同じ講義を補助付きで受けられるようにします。
+              ログイン不要のデモで、字幕・資料連携・講義後QAの体験をすぐに確認できます。
             </p>
 
             {/* Target Audience */}
@@ -56,17 +56,12 @@ export function LandingPage() {
           <div className="lg:col-span-2 space-y-6">
             <div className="card p-6 space-y-4">
               <h2 className="text-xl font-semibold text-fg-primary text-center">
-                アプリを始める
+                デモを始める
               </h2>
 
-              {/* Login Button */}
-              <button className="btn btn-primary w-full">
-                大学アカウントでログイン
-              </button>
-
-              {/* Demo Mode Button */}
-              <Link to="/lectures" className="btn btn-secondary w-full text-center block">
-                デモを見る
+              {/* Demo Start Button */}
+              <Link to="/lectures" className="btn btn-primary w-full text-center block">
+                デモを開始
               </Link>
 
               {/* Language Selector */}

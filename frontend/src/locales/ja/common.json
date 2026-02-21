@@ -10,9 +10,9 @@
   },
   "landing": {
     "title": "講義支援アプリ",
-    "subtitle": "外国人留学生、障がいのある学生、日本語話者の学生を含めて、同じ講義を補助付きで受けられるようにします。",
-    "login": "大学アカウントでログイン",
-    "demo": "デモを見る",
+    "subtitle": "ログイン不要のデモで、字幕・資料連携・講義後QAをすぐに試せます。",
+    "login": "デモを開始",
+    "demo": "デモ一覧を開く",
     "features": {
       "title": "主な機能",
       "captions": "リアルタイム字幕と翻訳",
@@ -73,10 +73,26 @@
     "scroll": {
       "auto": "自動スクロール",
       "back": "現在位置に戻る"
+    },
+    "stream": {
+      "title": "講義ライブ",
+      "startRecording": "録音開始",
+      "stopRecording": "録音停止",
+      "toReview": "reviewへ",
+      "cameraInput": "カメラ入力",
+      "cameraOn": "ON",
+      "cameraOff": "OFF",
+      "micAutoStartFailed": "マイクの自動開始に失敗しました"
     }
   },
   "review": {
     "title": "レビュー",
+    "actions": {
+      "toLive": "liveへ戻る",
+      "toLectures": "講義一覧",
+      "resume": "再開",
+      "regenerate": "再生成"
+    },
     "qa": {
       "title": "質問する",
       "placeholder": "講義について質問を入力してください...",
