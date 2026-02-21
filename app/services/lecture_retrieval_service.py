@@ -452,7 +452,9 @@ class AzureSearchLectureRetrievalService:
         for idx in sorted(expanded_indices):
             source = timeline_sources[idx]
             expanded_sources.append(
-                source.model_copy(update={"is_direct_hit": source.chunk_id in direct_ids})
+                source.model_copy(
+                    update={"is_direct_hit": source.chunk_id in direct_ids}
+                )
             )
         return expanded_sources
 

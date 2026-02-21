@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
 
 from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -24,6 +25,10 @@ from app.models import (  # noqa: F401  # Ensure model metadata is loaded
     User,
     UserSettings,
     VisualEvent,
+)
+from app.services.lecture_summary_generator_service import (
+    LectureSummaryGeneratorService,
+    LectureSummaryResult,
 )
 
 
@@ -64,6 +69,7 @@ async def db_session(
 @pytest.fixture
 async def async_client(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_summary_generator: MagicMock,
 ) -> AsyncGenerator[AsyncClient]:
     """Async client for testing FastAPI endpoints.
 
@@ -79,9 +85,71 @@ async def async_client(
                 await session.rollback()
                 raise
 
+    # Import here to avoid circular dependency
+    from app.api.v4.lecture import get_lecture_summary_service
+    from app.services.lecture_summary_service import SqlAlchemyLectureSummaryService
+
+    def override_summary_service():
+        return SqlAlchemyLectureSummaryService(
+            db=session_factory(),
+            summary_generator=mock_summary_generator,
+        )
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_lecture_summary_service] = override_summary_service
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_summary_generator() -> LectureSummaryGeneratorService:
+    """Mock Azure OpenAI summary generator for testing."""
+    mock = MagicMock(spec=LectureSummaryGeneratorService)
+
+    async def _generate_summary(speech_events, visual_events, lang_mode):
+        # Return deterministic mock summary
+        speech_text = " ".join([se.text for se in speech_events if se.is_final])
+        visual_text = " ".join([ve.ocr_text for ve in visual_events if ve.ocr_text])
+
+        summary_parts = []
+        if speech_text:
+            summary_parts.append(f"この区間では、{speech_text}")
+        if visual_text:
+            summary_parts.append(f"視覚情報として {visual_text} が確認されました。")
+
+        summary = (
+            " ".join(summary_parts)
+            if summary_parts
+            else "この区間の要約を生成できるデータがありません。"
+        )
+
+        # Truncate to 600 chars
+        if len(summary) > 600:
+            summary = summary[:596] + "..."
+
+        # Build evidence tags (always at least one)
+        evidence_tags = []
+        if speech_text:
+            evidence_tags.append(
+                {"type": "speech", "timestamp": "00:15", "text": speech_text[:50]}
+            )
+        if visual_text:
+            evidence_tags.append(
+                {"type": "visual", "timestamp": "00:20", "text": visual_text[:50]}
+            )
+        if not evidence_tags:
+            evidence_tags.append(
+                {"type": "speech", "timestamp": "00:00", "text": "要約データなし"}
+            )
+
+        return LectureSummaryResult(
+            summary=summary,
+            key_terms=["テスト用語"],
+            evidence_tags=evidence_tags,
+        )
+
+    mock.generate_summary = AsyncMock(side_effect=_generate_summary)
+    return mock

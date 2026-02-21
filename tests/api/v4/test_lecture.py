@@ -1,5 +1,8 @@
 """Integration tests for lecture live API endpoints."""
 
+import json
+from unittest.mock import Mock
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -7,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth import LECTURE_TOKEN_HEADER, USER_ID_HEADER
 from app.core.config import settings
+from app.main import app
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
@@ -635,6 +639,38 @@ async def test_get_lecture_summary_latest_for_other_user_session_returns_404(
 
 
 @pytest.mark.asyncio
+async def test_get_lecture_summary_latest_with_runtime_error_returns_503(
+    async_client: AsyncClient,
+) -> None:
+    """Summary latest should map backend runtime errors to 503."""
+    from app.api.v4.lecture import get_lecture_summary_service
+
+    class FailingSummaryService:
+        async def get_latest_summary(self, session_id: str, user_id: str) -> None:
+            del session_id, user_id
+            raise RuntimeError("summary backend down")
+
+        async def rebuild_windows(self, session_id: str, user_id: str) -> int:
+            del session_id, user_id
+            return 0
+
+    app.dependency_overrides[get_lecture_summary_service] = FailingSummaryService
+    try:
+        response = await async_client.get(
+            "/api/v4/lecture/summary/latest",
+            params={"session_id": "lec_test"},
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        app.dependency_overrides.pop(get_lecture_summary_service, None)
+
+    body = response.json()
+    assert response.status_code == 503
+    assert body["error"]["code"] == "http_error"
+    assert body["error"]["message"] == "Lecture summary backend is unavailable."
+
+
+@pytest.mark.asyncio
 async def test_post_lecture_session_finalize_returns_200_and_stats(
     async_client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -699,6 +735,54 @@ async def test_post_lecture_session_finalize_returns_200_and_stats(
 
     assert finalized_session.status == "finalized"
     assert len(chunks) == body["stats"]["lecture_chunks"]
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_with_runtime_error_returns_503(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize should map summary backend runtime errors to 503."""
+    from app.api.v4.lecture import get_lecture_summary_service
+
+    class FailingSummaryService:
+        async def get_latest_summary(self, session_id: str, user_id: str) -> None:
+            del session_id, user_id
+            raise RuntimeError("summary backend down")
+
+        async def rebuild_windows(self, session_id: str, user_id: str) -> int:
+            del session_id, user_id
+            raise RuntimeError("summary backend down")
+
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    app.dependency_overrides[get_lecture_summary_service] = FailingSummaryService
+    try:
+        response = await async_client.post(
+            "/api/v4/lecture/session/finalize",
+            json={"session_id": session_id, "build_qa_index": False},
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        app.dependency_overrides.pop(get_lecture_summary_service, None)
+
+    body = response.json()
+    assert response.status_code == 503
+    assert body["error"]["code"] == "http_error"
+    assert body["error"]["message"] == "Lecture summary backend is unavailable."
 
 
 @pytest.mark.asyncio
@@ -854,3 +938,184 @@ async def test_post_lecture_session_finalize_with_invalid_status_returns_409(
         headers=AUTH_HEADERS,
     )
     assert response.status_code == 409
+
+
+# ============================================================================
+# Azure OpenAI Summary Integration Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_with_azure_openai_returns_200(
+    async_client: AsyncClient,
+    mocker: Mock,
+) -> None:
+    """Summary endpoint with Azure OpenAI should return LLM-generated summary."""
+    # Mock Azure OpenAI response
+    mock_response = {
+        "choices": [
+            {
+                "message": {
+                    "content": '{"summary": "Azure OpenAI で生成された要約", "key_terms": ["外れ値"], "evidence": []}'
+                }
+            }
+        ]
+    }
+
+    mock_urlopen = mocker.patch("urllib.request.urlopen")
+    http_response = mocker.MagicMock()
+    http_response.read.return_value = json.dumps(mock_response).encode("utf-8")
+    mock_urlopen.return_value.__enter__.return_value = http_response
+
+    # Start session and add events
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "外れ値の確認手順を説明します。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    # Get summary with Azure OpenAI
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert "summary" in body
+    assert "key_terms" in body
+    assert "evidence" in body
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_with_azure_disabled_uses_deterministic(
+    async_client: AsyncClient,
+) -> None:
+    """Summary without Azure OpenAI should use deterministic fallback."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "外れ値の確認手順を説明します。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["summary"] != ""
+    assert body["status"] in ["ok", "no_data"]
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_ownership_enforced_with_azure(
+    async_client: AsyncClient,
+    mocker: Mock,
+) -> None:
+    """Ownership validation should work with Azure OpenAI enabled."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {
+                    "content": '{"summary": "要約", "key_terms": [], "evidence": []}'
+                }
+            }
+        ]
+    }
+
+    mock_urlopen = mocker.patch("urllib.request.urlopen")
+    http_response = mocker.MagicMock()
+    http_response.read.return_value = json.dumps(mock_response).encode("utf-8")
+    mock_urlopen.return_value.__enter__.return_value = http_response
+
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=OWNER_A_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "テスト",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=OWNER_A_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=OWNER_B_HEADERS,
+    )
+
+    assert response.status_code == 404

@@ -7,4 +7,5 @@ __all__ = ["Base"]
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
+
     pass

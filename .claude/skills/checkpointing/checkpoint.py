@@ -16,9 +16,8 @@ Every run does everything:
 import argparse
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 LOG_FILE = PROJECT_ROOT / ".claude" / "logs" / "cli-tools.jsonl"
@@ -64,7 +63,7 @@ def parse_cli_logs(since: str | None = None) -> list[dict]:
     entries = []
     since_dt = None
     if since:
-        since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+        since_dt = datetime.fromisoformat(since).replace(tzinfo=UTC)
 
     with open(LOG_FILE, encoding="utf-8") as f:
         for line in f:
@@ -102,11 +101,13 @@ def get_git_commits(since: str | None = None) -> list[dict]:
             continue
         parts = line.split("|", 2)
         if len(parts) == 3:
-            commits.append({
-                "hash": parts[0][:7],
-                "date": parts[1],
-                "message": parts[2],
-            })
+            commits.append(
+                {
+                    "hash": parts[0][:7],
+                    "date": parts[1],
+                    "message": parts[2],
+                }
+            )
     return commits
 
 
@@ -241,11 +242,13 @@ def collect_work_logs() -> dict[str, list[dict]]:
         for log_file in sorted(team_dir.glob("*.md")):
             try:
                 content = log_file.read_text(encoding="utf-8")
-                team_logs.append({
-                    "teammate": log_file.stem,
-                    "file": str(log_file.relative_to(PROJECT_ROOT)),
-                    "content": content,
-                })
+                team_logs.append(
+                    {
+                        "teammate": log_file.stem,
+                        "file": str(log_file.relative_to(PROJECT_ROOT)),
+                        "content": content,
+                    }
+                )
             except OSError:
                 continue
 
@@ -261,9 +264,22 @@ def get_design_decisions_diff(since: str | None = None) -> str | None:
         return None
 
     if since:
-        args = ["log", "--since", since, "-p", "--", str(DESIGN_FILE.relative_to(PROJECT_ROOT))]
+        args = [
+            "log",
+            "--since",
+            since,
+            "-p",
+            "--",
+            str(DESIGN_FILE.relative_to(PROJECT_ROOT)),
+        ]
     else:
-        args = ["diff", "HEAD~10", "HEAD", "--", str(DESIGN_FILE.relative_to(PROJECT_ROOT))]
+        args = [
+            "diff",
+            "HEAD~10",
+            "HEAD",
+            "--",
+            str(DESIGN_FILE.relative_to(PROJECT_ROOT)),
+        ]
 
     return run_git_command(args)
 
@@ -285,7 +301,7 @@ def generate_checkpoint(
     since: str | None,
 ) -> str:
     """Generate full checkpoint markdown content."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lines: list[str] = []
 
     # Header
@@ -319,8 +335,7 @@ def generate_checkpoint(
     if teams_data:
         total_members = sum(len(t.get("members", [])) for t in teams_data)
         lines.append(
-            f"- **Agent Teams sessions**: {len(teams_data)} "
-            f"({total_members} teammates)"
+            f"- **Agent Teams sessions**: {len(teams_data)} ({total_members} teammates)"
         )
         lines.append(f"- **Tasks**: {completed_tasks}/{total_tasks} completed")
     total_work_logs = sum(len(logs) for logs in work_logs.values())
@@ -377,7 +392,9 @@ def generate_checkpoint(
 
     for entries, name in [(codex_entries, "Codex"), (gemini_entries, "Gemini")]:
         if entries:
-            lines.append(f"### {name} ({len(entries)} {'consultations' if name == 'Codex' else 'researches'})")
+            lines.append(
+                f"### {name} ({len(entries)} {'consultations' if name == 'Codex' else 'researches'})"
+            )
             lines.append("")
             for entry in entries[:15]:
                 status = "✓" if entry.get("success", False) else "✗"
@@ -462,7 +479,8 @@ def generate_checkpoint(
         added_lines = [
             line[1:].strip()
             for line in design_diff.split("\n")
-            if line.startswith("+") and not line.startswith("+++")
+            if line.startswith("+")
+            and not line.startswith("+++")
             and line.strip() not in ("+", "")
         ]
         for added in added_lines[:20]:
@@ -484,7 +502,7 @@ def generate_session_summary(
     teams_data: list[dict],
 ) -> str:
     """Generate concise session summary for CLAUDE.md."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     total_files = sum(len(v) for v in file_changes.values())
     codex_count = sum(1 for e in cli_entries if e.get("tool") == "codex")
     gemini_count = sum(1 for e in cli_entries if e.get("tool") == "gemini")
@@ -522,7 +540,13 @@ def update_claude_md(session_summary: str) -> bool:
         content = content.rstrip() + "\n\n" + session_summary
     else:
         # Create new section
-        content = content.rstrip() + "\n\n" + SESSION_HISTORY_HEADER + "\n\n" + session_summary
+        content = (
+            content.rstrip()
+            + "\n\n"
+            + SESSION_HISTORY_HEADER
+            + "\n\n"
+            + session_summary
+        )
 
     CLAUDE_MD.write_text(content, encoding="utf-8")
     return True
@@ -597,14 +621,16 @@ def main():
     design_diff = get_design_decisions_diff(args.since)
 
     total_logs = sum(len(logs) for logs in work_logs.values())
-    print(f"  Git: {len(commits)} commits, {sum(len(v) for v in file_changes.values())} files")
+    print(
+        f"  Git: {len(commits)} commits, {sum(len(v) for v in file_changes.values())} files"
+    )
     print(f"  CLI: {len(cli_entries)} consultations")
     print(f"  Agent Teams: {len(teams_data)} teams")
     print(f"  Work logs: {total_logs} teammate logs")
 
     # 2. Generate checkpoint
     CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S")
     checkpoint_file = CHECKPOINTS_DIR / f"{timestamp}.md"
 
     checkpoint_content = generate_checkpoint(

@@ -56,6 +56,11 @@ from app.services.lecture_retrieval_service import (
     BM25LectureRetrievalService,
     get_shared_lecture_retrieval_service,
 )
+from app.services.lecture_summary_generator_service import (
+    AzureOpenAILectureSummaryGeneratorService,
+    LectureSummaryGeneratorService,
+    UnavailableLectureSummaryGeneratorService,
+)
 from app.services.lecture_summary_service import (
     LectureSummaryService,
     SqlAlchemyLectureSummaryService,
@@ -92,6 +97,15 @@ def _azure_search_available() -> bool:
     )
 
 
+def _azure_openai_summary_available() -> bool:
+    return (
+        settings.azure_openai_enabled
+        and bool(settings.azure_openai_api_key.strip())
+        and bool(settings.azure_openai_endpoint.strip())
+        and bool(settings.azure_openai_model.strip())
+    )
+
+
 def get_azure_search_service() -> AzureSearchService:
     """Dependency provider for Azure Search service."""
     return get_shared_azure_search_service(
@@ -118,7 +132,21 @@ def get_lecture_summary_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LectureSummaryService:
     """Dependency provider for lecture summary service."""
-    return SqlAlchemyLectureSummaryService(db=db)
+    summary_generator: LectureSummaryGeneratorService
+    if _azure_openai_summary_available():
+        summary_generator = AzureOpenAILectureSummaryGeneratorService(
+            api_key=settings.azure_openai_api_key,
+            endpoint=settings.azure_openai_endpoint,
+            model=settings.azure_openai_model,
+        )
+    else:
+        summary_generator = UnavailableLectureSummaryGeneratorService(
+            reason="azure openai summary backend is unavailable"
+        )
+    return SqlAlchemyLectureSummaryService(
+        db=db,
+        summary_generator=summary_generator,
+    )
 
 
 def get_lecture_index_service(
@@ -278,6 +306,11 @@ async def get_latest_summary(
             status_code=status.HTTP_409_CONFLICT,
             detail="Lecture session is not active.",
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture summary backend is unavailable.",
+        ) from exc
 
 
 @router.post(
@@ -307,4 +340,9 @@ async def finalize_lecture_session(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Lecture session state is invalid.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture summary backend is unavailable.",
         ) from exc

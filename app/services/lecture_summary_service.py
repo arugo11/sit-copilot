@@ -23,6 +23,9 @@ from app.services.lecture_live_service import (
     LectureSessionInactiveError,
     LectureSessionNotFoundError,
 )
+from app.services.lecture_summary_generator_service import (
+    LectureSummaryGeneratorService,
+)
 
 __all__ = ["LectureSummaryService", "SqlAlchemyLectureSummaryService"]
 
@@ -30,6 +33,7 @@ WINDOW_SIZE_MS = 30_000
 LOOKBACK_MS = 60_000
 MAX_SUMMARY_CHARS = 600
 MAX_KEY_TERMS = 5
+MAX_KEY_TERM_EVIDENCE_TAGS = 3
 MAX_EVIDENCE_ITEMS = 6
 EVIDENCE_TAG_ORDER: tuple[LectureEvidenceType, ...] = ("speech", "slide", "board")
 
@@ -55,10 +59,15 @@ class LectureSummaryService(Protocol):
 
 
 class SqlAlchemyLectureSummaryService:
-    """SQLAlchemy-based implementation for deterministic summary generation."""
+    """SQLAlchemy-based implementation for LLM-powered summary generation."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        summary_generator: LectureSummaryGeneratorService,
+    ) -> None:
         self._db = db
+        self._summary_generator = summary_generator
 
     async def get_latest_summary(
         self,
@@ -66,7 +75,7 @@ class SqlAlchemyLectureSummaryService:
         user_id: str,
     ) -> LectureSummaryLatestResponse:
         """Build and return the latest summary window for a session."""
-        await self._get_session_with_ownership(session_id, user_id)
+        session = await self._get_session_with_ownership(session_id, user_id)
 
         max_event_ms = await self._get_max_event_ms(session_id)
         if max_event_ms is None:
@@ -85,6 +94,7 @@ class SqlAlchemyLectureSummaryService:
             session_id=session_id,
             window_end_ms=window_end_ms,
             persist=True,
+            lang_mode=session.lang_mode,
         )
 
     async def rebuild_windows(
@@ -93,7 +103,7 @@ class SqlAlchemyLectureSummaryService:
         user_id: str,
     ) -> int:
         """Rebuild all windows from session start to latest event timestamp."""
-        await self._get_session_with_ownership(session_id, user_id)
+        session = await self._get_session_with_ownership(session_id, user_id)
 
         max_event_ms = await self._get_max_event_ms(session_id)
         if max_event_ms is None:
@@ -107,6 +117,7 @@ class SqlAlchemyLectureSummaryService:
                 session_id=session_id,
                 window_end_ms=window_end_ms,
                 persist=True,
+                lang_mode=session.lang_mode,
             )
 
         return await self._count_summary_windows(session_id)
@@ -117,6 +128,7 @@ class SqlAlchemyLectureSummaryService:
         session_id: str,
         window_end_ms: int,
         persist: bool,
+        lang_mode: str = "ja",
     ) -> LectureSummaryLatestResponse:
         window_start_ms = max(0, window_end_ms - WINDOW_SIZE_MS)
         lookback_start_ms = max(0, window_end_ms - LOOKBACK_MS)
@@ -132,18 +144,38 @@ class SqlAlchemyLectureSummaryService:
             end_ms=window_end_ms,
         )
 
-        summary_text = self._build_summary_text(
+        summary_result = await self._summary_generator.generate_summary(
             speech_events=speech_events,
             visual_events=visual_events,
+            lang_mode=lang_mode,
         )
+        summary_text = summary_result.summary
+
+        # Map evidence tags from generator result to schema format
+        evidence_type_map: dict[str, LectureEvidenceType] = {
+            "speech": "speech",
+            "slide": "slide",
+            "board": "board",
+        }
+
+        key_terms: list[LectureSummaryKeyTerm] = []
+        for term in summary_result.key_terms:
+            term_evidence_tags: list[LectureEvidenceType] = (
+                self._collect_term_evidence_tags(
+                    term=term,
+                    evidence_tags=summary_result.evidence_tags,
+                    evidence_type_map=evidence_type_map,
+                )
+            )
+            # Ensure at least one evidence tag (use "speech" as default)
+            if not term_evidence_tags:
+                term_evidence_tags = ["speech"]
+            key_terms.append(
+                LectureSummaryKeyTerm(term=term, evidence_tags=term_evidence_tags)
+            )
         evidence = self._build_evidence(
             speech_events=speech_events,
             visual_events=visual_events,
-        )
-        key_terms = self._build_key_terms(
-            speech_events=speech_events,
-            visual_events=visual_events,
-            evidence=evidence,
         )
         status = "ok" if evidence else "no_data"
 
@@ -289,28 +321,25 @@ class SqlAlchemyLectureSummaryService:
         return int(count)
 
     @staticmethod
-    def _build_summary_text(
+    def _collect_term_evidence_tags(
         *,
-        speech_events: list[SpeechEvent],
-        visual_events: list[VisualEvent],
-    ) -> str:
-        speech_text = " ".join(
-            event.text.strip() for event in speech_events if event.text.strip()
-        )
-        visual_text = " / ".join(
-            event.ocr_text.strip() for event in visual_events if event.ocr_text.strip()
-        )
+        term: str,
+        evidence_tags: list[dict[str, str]],
+        evidence_type_map: dict[str, LectureEvidenceType],
+    ) -> list[LectureEvidenceType]:
+        tags: list[LectureEvidenceType] = []
+        for tag in evidence_tags:
+            if term not in tag.get("text", ""):
+                continue
 
-        if speech_text and visual_text:
-            summary = f"この区間では、{speech_text}。視覚情報では {visual_text} が確認されました。"
-        elif speech_text:
-            summary = f"この区間では、{speech_text}"
-        elif visual_text:
-            summary = f"この区間では、視覚情報として {visual_text} が確認されました。"
-        else:
-            summary = "この区間の要約を生成できるデータがありません。"
+            evidence_type = evidence_type_map.get(tag.get("type", ""))
+            if evidence_type is None or evidence_type in tags:
+                continue
 
-        return summary[:MAX_SUMMARY_CHARS]
+            tags.append(evidence_type)
+            if len(tags) >= MAX_KEY_TERM_EVIDENCE_TAGS:
+                break
+        return tags
 
     @staticmethod
     def _build_evidence(
@@ -339,47 +368,6 @@ class SqlAlchemyLectureSummaryService:
             )
 
         return evidence[:MAX_EVIDENCE_ITEMS]
-
-    @staticmethod
-    def _build_key_terms(
-        *,
-        speech_events: list[SpeechEvent],
-        visual_events: list[VisualEvent],
-        evidence: list[LectureSummaryEvidence],
-    ) -> list[LectureSummaryKeyTerm]:
-        source_tags: list[LectureEvidenceType] = []
-        for candidate in EVIDENCE_TAG_ORDER:
-            if any(item.type == candidate for item in evidence):
-                source_tags.append(candidate)
-
-        visual_tokens = _tokenize_terms(
-            " ".join(event.ocr_text for event in visual_events if event.ocr_text)
-        )
-        speech_tokens = _tokenize_terms(
-            " ".join(event.text for event in speech_events if event.text)
-        )
-
-        candidates = visual_tokens + speech_tokens
-        unique_terms = _dedupe_terms(candidates)
-
-        if not unique_terms:
-            fallback_text = next(
-                (event.text.strip() for event in speech_events if event.text.strip()),
-                "",
-            )
-            if fallback_text:
-                unique_terms = [fallback_text[:12]]
-
-        terms = []
-        default_tags: list[LectureEvidenceType] = ["speech"]
-        for term in unique_terms[:MAX_KEY_TERMS]:
-            terms.append(
-                LectureSummaryKeyTerm(
-                    term=term,
-                    evidence_tags=source_tags if source_tags else default_tags,
-                )
-            )
-        return terms
 
 
 def _to_window_end(event_ms: int) -> int:

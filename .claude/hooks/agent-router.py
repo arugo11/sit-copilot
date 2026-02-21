@@ -18,62 +18,123 @@ MULTIMODAL_EXTENSIONS = [
     # PDF
     ".pdf",
     # Video
-    ".mp4", ".mov", ".avi", ".mkv", ".webm",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
     # Audio
-    ".mp3", ".wav", ".m4a", ".flac", ".ogg",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".ogg",
     # Image (for detailed analysis — screenshots can be read by Claude directly)
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
 ]
 
 # Pattern to detect file paths with multimodal extensions
 MULTIMODAL_PATTERN = re.compile(
-    r'[\w./\\~-]+\.(?:' +
-    '|'.join(ext.lstrip('.') for ext in MULTIMODAL_EXTENSIONS) +
-    r')(?:\s|$|["\']|,)',
+    r"[\w./\\~-]+\.(?:"
+    + "|".join(ext.lstrip(".") for ext in MULTIMODAL_EXTENSIONS)
+    + r')(?:\s|$|["\']|,)',
     re.IGNORECASE,
 )
 
 # Triggers for Codex (planning, design, debugging, complex implementation)
 CODEX_TRIGGERS = {
     "ja": [
-        "設計", "どう設計", "アーキテクチャ",
-        "計画", "計画を立てて",
-        "なぜ動かない", "エラー", "バグ", "デバッグ",
-        "どちらがいい", "比較して", "トレードオフ",
-        "実装方法", "どう実装",
-        "リファクタリング", "リファクタ",
+        "設計",
+        "どう設計",
+        "アーキテクチャ",
+        "計画",
+        "計画を立てて",
+        "なぜ動かない",
+        "エラー",
+        "バグ",
+        "デバッグ",
+        "どちらがいい",
+        "比較して",
+        "トレードオフ",
+        "実装方法",
+        "どう実装",
+        "リファクタリング",
+        "リファクタ",
         "レビュー",
-        "考えて", "分析して", "深く",
+        "考えて",
+        "分析して",
+        "深く",
         "最適化",
     ],
     "en": [
-        "design", "architecture", "architect",
-        "plan", "planning",
-        "debug", "error", "bug", "not working", "fails",
-        "compare", "trade-off", "tradeoff", "which is better",
-        "how to implement", "implementation", "complex",
-        "refactor", "simplify",
-        "review", "check this",
-        "think", "analyze", "deeply",
-        "optimize", "performance",
+        "design",
+        "architecture",
+        "architect",
+        "plan",
+        "planning",
+        "debug",
+        "error",
+        "bug",
+        "not working",
+        "fails",
+        "compare",
+        "trade-off",
+        "tradeoff",
+        "which is better",
+        "how to implement",
+        "implementation",
+        "complex",
+        "refactor",
+        "simplify",
+        "review",
+        "check this",
+        "think",
+        "analyze",
+        "deeply",
+        "optimize",
+        "performance",
     ],
 }
 
 # Triggers for Gemini research (codebase analysis + external research)
 GEMINI_RESEARCH_TRIGGERS = {
     "ja": [
-        "調べて", "リサーチ", "調査", "サーベイ",
-        "最新", "ドキュメント",
-        "ライブラリ", "パッケージ",
-        "コードベース", "リポジトリ", "全体構造",
-        "理解して", "把握して",
+        "調べて",
+        "リサーチ",
+        "調査",
+        "サーベイ",
+        "最新",
+        "ドキュメント",
+        "ライブラリ",
+        "パッケージ",
+        "コードベース",
+        "リポジトリ",
+        "全体構造",
+        "理解して",
+        "把握して",
     ],
     "en": [
-        "research", "investigate", "look up", "find out", "survey",
-        "latest", "documentation", "docs",
-        "library", "package", "framework",
-        "codebase", "repository", "project structure",
-        "understand", "analyze the code",
+        "research",
+        "investigate",
+        "look up",
+        "find out",
+        "survey",
+        "latest",
+        "documentation",
+        "docs",
+        "library",
+        "package",
+        "framework",
+        "codebase",
+        "repository",
+        "project structure",
+        "understand",
+        "analyze the code",
     ],
 }
 
@@ -82,7 +143,7 @@ def detect_multimodal_files(prompt: str) -> str | None:
     """Detect multimodal file references in the prompt. Returns matched file path or None."""
     match = MULTIMODAL_PATTERN.search(prompt)
     if match:
-        return match.group(0).strip().rstrip('"\',')
+        return match.group(0).strip().rstrip("\"',")
     return None
 
 
@@ -134,7 +195,7 @@ def main():
                         "Pass the file to Gemini with specific extraction instructions: "
                         f'`gemini -p "Extract: {{what to extract}}" < {trigger} 2>/dev/null` '
                         "Do NOT attempt to read this file directly — use Gemini for content extraction."
-                    )
+                    ),
                 }
             }
             print(json.dumps(output))
@@ -149,7 +210,7 @@ def main():
                         "`codex exec --model gpt-5.3-codex --sandbox read-only --full-auto "
                         '"{task description}"` for design decisions, planning, debugging, '
                         "or complex analysis."
-                    )
+                    ),
                 }
             }
             print(json.dumps(output))
@@ -165,7 +226,7 @@ def main():
                         "Use via gemini-explore subagent or direct call: "
                         '`gemini -p "{research/analysis prompt}" 2>/dev/null` '
                         "Save results to .claude/docs/research/."
-                    )
+                    ),
                 }
             }
             print(json.dumps(output))

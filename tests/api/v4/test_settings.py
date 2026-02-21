@@ -56,7 +56,9 @@ async def test_post_settings_creates_settings(async_client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_post_then_get_returns_updated_settings(async_client: AsyncClient) -> None:
+async def test_post_then_get_returns_updated_settings(
+    async_client: AsyncClient,
+) -> None:
     """GET should return latest settings after POST update."""
     # Arrange
     payload = {"settings": {"theme": "light", "font_size": "large"}}

@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from app.schemas.lecture_qa import LectureSource
 
@@ -11,7 +17,10 @@ __all__ = [
     "LectureVerifierService",
     "AzureOpenAILectureVerifierService",
     "LectureVerificationResult",
+    "LectureVerifierError",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,6 +31,10 @@ class LectureVerificationResult:
     summary: str
     unsupported_claims: list[str]
     corrected_answer: str | None = None  # Set if repair was attempted
+
+
+class LectureVerifierError(RuntimeError):
+    """Raised when Azure OpenAI verification call fails."""
 
 
 class LectureVerifierService(Protocol):
@@ -57,6 +70,8 @@ class AzureOpenAILectureVerifierService:
     DEFAULT_MAX_TOKENS = 800
     DEFAULT_TEMPERATURE = 0.3  # Lower for verification
     DEFAULT_TIMEOUT_SECONDS = 30
+    DEFAULT_API_VERSION = "2024-10-21"
+    LOCAL_SNIPPET_WINDOW = 12
 
     def __init__(
         self,
@@ -66,6 +81,7 @@ class AzureOpenAILectureVerifierService:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize Azure OpenAI verifier.
 
@@ -83,6 +99,7 @@ class AzureOpenAILectureVerifierService:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
+        self._api_version = api_version
 
     async def verify(
         self,
@@ -101,21 +118,18 @@ class AzureOpenAILectureVerifierService:
             Verification result with pass/fail status and details
         """
         if not sources:
-            # No sources to verify against
             return LectureVerificationResult(
                 passed=False,
                 summary="検証用のソースがありません。",
                 unsupported_claims=[answer],
             )
 
-        # Build verification prompt
         prompt = self._build_prompt(question, answer, sources)
+        if not self._is_azure_openai_ready():
+            return self._local_verify(answer=answer, sources=sources)
 
-        # Call Azure OpenAI for verification
         verification = await self._call_openai_verification(prompt)
-
-        # Parse verification result
-        return self._parse_verification_result(verification, answer, sources)
+        return self._parse_verification_result(verification, answer)
 
     def _build_prompt(
         self,
@@ -167,30 +181,62 @@ class AzureOpenAILectureVerifierService:
         return "\n".join(lines)
 
     async def _call_openai_verification(self, prompt: str) -> str:
-        """Call Azure OpenAI API for verification.
+        """Call Azure OpenAI API for verification JSON.
 
-        Note: This is a placeholder implementation.
-        Real implementation should use openai.AsyncAzureOpenAI.
+        Raises:
+            LectureVerifierError: If remote call fails.
         """
-        # TODO: Implement real Azure OpenAI call with JSON response
-        # from openai import AsyncAzureOpenAI
-        # client = AsyncAzureOpenAI(...)
-        # response = await client.chat.completions.create(
-        #     model=self._model,
-        #     messages=[{"role": "user", "content": prompt}],
-        #     response_format={"type": "json_object"},
-        #     ...
-        # )
-        # return response.choices[0].message.content
+        url = self._build_chat_completion_url()
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a strict groundedness verifier. Return only JSON."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            url=url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            method="POST",
+        )
 
-        # Placeholder return (simulating successful verification)
-        return '{"passed": true, "summary": "回答は講義資料に基づいています。", "unsupported_claims": []}'
+        def _run_request() -> str:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                return response.read().decode("utf-8")
+
+        try:
+            raw = await asyncio.to_thread(_run_request)
+            response_json = json.loads(raw)
+            return self._extract_content(response_json).strip()
+        except HTTPError as exc:
+            logger.warning(
+                "azure_openai_verify_http_error status=%s",
+                getattr(exc, "code", "unknown"),
+            )
+            raise LectureVerifierError("azure openai verify request failed") from exc
+        except URLError as exc:
+            logger.warning("azure_openai_verify_network_error")
+            raise LectureVerifierError("azure openai verify network failure") from exc
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("azure_openai_verify_parse_error")
+            raise LectureVerifierError("azure openai verify parse failure") from exc
 
     def _parse_verification_result(
         self,
         verification_json: str,
         answer: str,
-        sources: list[LectureSource],
     ) -> LectureVerificationResult:
         """Parse JSON verification result into result object.
 
@@ -202,21 +248,25 @@ class AzureOpenAILectureVerifierService:
         Returns:
             Parsed verification result
         """
-        import json
-
         try:
             data = json.loads(verification_json)
-            passed = data.get("passed", True)
-            summary = data.get("summary", "検証が完了しました。")
-            unsupported = data.get("unsupported_claims", [])
+            if not isinstance(data, dict):
+                raise ValueError("verification result is not a dict")
+            passed_raw = data.get("passed", True)
+            summary_raw = data.get("summary", "検証が完了しました。")
+            unsupported_raw = data.get("unsupported_claims", [])
+            passed = self._parse_passed_flag(passed_raw)
+            summary = str(summary_raw).strip() or "検証が完了しました。"
+            unsupported = self._normalize_unsupported_claims(unsupported_raw)
+            if passed and unsupported:
+                passed = False
 
             return LectureVerificationResult(
                 passed=passed,
                 summary=summary,
                 unsupported_claims=unsupported,
             )
-        except (json.JSONDecodeError, KeyError):
-            # Parse error - conservatively fail
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             return LectureVerificationResult(
                 passed=False,
                 summary="検証結果の解析に失敗しました。",
@@ -244,11 +294,12 @@ class AzureOpenAILectureVerifierService:
         if not sources:
             return None
 
+        if not self._is_azure_openai_ready():
+            return self._local_repair_answer(sources=sources)
+
         prompt = self._build_repair_prompt(
             question, answer, sources, unsupported_claims
         )
-
-        # Call Azure OpenAI for repair
         repaired = await self._call_openai_repair(prompt)
 
         return repaired if repaired else None
@@ -291,9 +342,180 @@ class AzureOpenAILectureVerifierService:
 """
 
     async def _call_openai_repair(self, prompt: str) -> str | None:
-        """Call Azure OpenAI API for answer repair.
+        """Call Azure OpenAI API for answer repair."""
+        url = self._build_chat_completion_url()
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You repair answers by removing unsupported claims and "
+                        "keeping only evidence-backed statements."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            url=url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            method="POST",
+        )
 
-        Note: This is a placeholder implementation.
-        """
-        # TODO: Implement real Azure OpenAI call
+        def _run_request() -> str:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                return response.read().decode("utf-8")
+
+        try:
+            raw = await asyncio.to_thread(_run_request)
+            response_json = json.loads(raw)
+            repaired = self._extract_content(response_json).strip()
+            if not repaired or repaired == "修正不可能":
+                return None
+            return repaired
+        except HTTPError as exc:
+            logger.warning(
+                "azure_openai_repair_http_error status=%s",
+                getattr(exc, "code", "unknown"),
+            )
+            raise LectureVerifierError("azure openai repair request failed") from exc
+        except URLError as exc:
+            logger.warning("azure_openai_repair_network_error")
+            raise LectureVerifierError("azure openai repair network failure") from exc
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("azure_openai_repair_parse_error")
+            raise LectureVerifierError("azure openai repair parse failure") from exc
+
+    def _local_verify(
+        self,
+        *,
+        answer: str,
+        sources: list[LectureSource],
+    ) -> LectureVerificationResult:
+        normalized_answer = self._normalize_text(answer)
+        if not normalized_answer:
+            return LectureVerificationResult(
+                passed=False,
+                summary="回答が空のため検証に失敗しました。",
+                unsupported_claims=[answer],
+            )
+
+        matched = any(
+            self._contains_source_fragment(
+                answer_text=normalized_answer,
+                source_text=self._normalize_text(source.text),
+            )
+            for source in sources
+        )
+        if matched:
+            return LectureVerificationResult(
+                passed=True,
+                summary="ローカル検証で根拠との一致を確認しました。",
+                unsupported_claims=[],
+            )
+
+        return LectureVerificationResult(
+            passed=False,
+            summary="ローカル検証で根拠一致を確認できませんでした。",
+            unsupported_claims=[answer],
+        )
+
+    def _local_repair_answer(self, *, sources: list[LectureSource]) -> str | None:
+        for source in sources:
+            snippet = source.text.strip().replace("\n", " ")
+            if snippet:
+                clipped = snippet[:120]
+                return f"講義資料では「{clipped}」と説明されています。"
         return None
+
+    def _contains_source_fragment(self, *, answer_text: str, source_text: str) -> bool:
+        if not source_text:
+            return False
+        window = min(self.LOCAL_SNIPPET_WINDOW, len(source_text))
+        if window <= 0:
+            return False
+        for start in range(0, len(source_text) - window + 1):
+            fragment = source_text[start : start + window]
+            if fragment and fragment in answer_text:
+                return True
+        return False
+
+    def _normalize_text(self, text: str) -> str:
+        return "".join(text.lower().split())
+
+    def _normalize_unsupported_claims(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        claims: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized:
+                claims.append(normalized)
+        return claims
+
+    def _parse_passed_flag(self, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "true":
+                return True
+            if normalized == "false":
+                return False
+
+        raise ValueError("passed must be a boolean value")
+
+    def _is_azure_openai_ready(self) -> bool:
+        if not self._api_key.strip():
+            return False
+        if not self._endpoint.strip():
+            return False
+        if not self._model.strip():
+            return False
+        return "openai.azure.com" in self._endpoint.lower()
+
+    def _build_chat_completion_url(self) -> str:
+        endpoint = self._endpoint.rstrip("/")
+        deployment = quote(self._model.strip(), safe="")
+        return (
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            f"?api-version={self._api_version}"
+        )
+
+    def _extract_content(self, response_json: dict[str, object]) -> str:
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("missing choices")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValueError("invalid choice payload")
+        first_choice_dict = {str(key): value for key, value in first_choice.items()}
+        message = first_choice_dict.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("missing message")
+        message_dict = {str(key): value for key, value in message.items()}
+        content = message_dict.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                part_dict = {str(key): value for key, value in part.items()}
+                text = part_dict.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text.strip())
+            if text_parts:
+                return "\n".join(text_parts)
+        raise ValueError("missing content")

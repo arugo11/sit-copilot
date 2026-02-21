@@ -109,7 +109,9 @@ async def test_check_matches_english_keywords_case_insensitively() -> None:
 
     response = await service.check(request)
 
-    assert any("前提知識を前提に進む可能性" in point for point in response.difficult_points)
+    assert any(
+        "前提知識を前提に進む可能性" in point for point in response.difficult_points
+    )
     assert any("記述課題の比重が高く" in point for point in response.difficult_points)
     assert "やさしい日本語要約" in response.recommended_settings
     assert "用語説明を詳細表示" in response.recommended_settings

@@ -1839,6 +1839,104 @@ def retrieve_with_context(
   - empty-token provider response branch
   - speech region config validation
 
+## F4 Grounded QA Productionization Planning (2026-02-21)
+
+### Project: `f4-grounded-qa-productionization`
+
+**Goal**: Productionize lecture grounded QA (F4) by hardening runtime integrations, fail-safe groundedness behavior, and audit/observability without breaking existing API consumers.
+
+### Scope
+
+- **Include**
+  - Real Azure OpenAI integration for answer generation, verification, and follow-up rewrite
+  - Deterministic no-source fallback and fail-closed verifier policy hardening
+  - Citation/source integrity checks before response return
+  - Persistence audit semantics (`outcome`/reason alignment)
+  - Grounded QA E2E + failure-path test expansion
+- **Exclude**
+  - Frontend redesign
+  - JWT/auth model redesign in this feature
+  - Large retrieval/ranking redesign beyond BM25 + Azure Search boundaries
+
+### Key Decisions
+
+1. **Keep API contract backward-compatible in this productionization pass**
+   - Existing `/lecture/qa` response fields remain valid.
+   - Any new fields must be additive/optional only.
+
+2. **Groundedness gates are strict and staged**
+   - Pipeline remains `retrieve -> answer -> verify -> persist`.
+   - Verifier parse/runtime failures are fail-closed.
+   - No-source path remains deterministic and low-confidence.
+
+3. **Azure-first runtime, BM25 fallback remains controlled**
+   - Azure Search/Azure OpenAI serve as production-default backends when configured.
+   - BM25 is retained as fallback with explicit durability limitations.
+
+4. **Audit fidelity is a first-class requirement**
+   - QA persistence must distinguish success/no-source/verifier-fail outcomes.
+   - Groundedness SLI signals (fallback/verifier/citation integrity) are observable.
+
+### Merge Gate Status
+
+- Scope Frozen: Ready
+- Evidence Ready: Ready (local codebase analysis + measured quality gates)
+- Interfaces Locked: Ready
+- Quality Gates Defined: Ready
+- Risks Accepted: Ready
+
+## F1 Azure OpenAI Summary Generator Planning (2026-02-21)
+
+### Project: `f1-azure-openai-summary-generator`
+
+**Goal**: Replace deterministic F1 summary text concatenation with Azure OpenAI-powered 30-second summary generation while preserving existing summary API response contract.
+
+### Scope
+
+- **Include**
+  - New `LectureSummaryGeneratorService` interface + Azure OpenAI implementation (`gpt-4o`)
+  - Japanese prompt template for 30-second summary with evidence tags (`speech|slide|board`)
+  - Integration into `SqlAlchemyLectureSummaryService._build_window()` flow
+  - Fail-closed behavior when Azure OpenAI is disabled or unavailable (no deterministic fallback)
+  - Keep `LectureSummaryLatestResponse` payload shape and persistence behavior unchanged
+- **Exclude**
+  - Endpoint contract redesign for `/api/v4/lecture/summary/latest`
+  - Changes to `summary_windows` table schema
+  - QA retrieval/ranking redesign
+
+### Key Decisions
+
+1. **Introduce a dedicated summary generation boundary**
+   - Add `LectureSummaryGeneratorService` protocol with async generation API.
+   - Default implementation: `AzureOpenAILectureSummaryGeneratorService`.
+
+2. **Keep window orchestration in existing summary service**
+   - `SqlAlchemyLectureSummaryService` remains owner of ownership checks, event fetch, window math, and DB upsert.
+   - Only summary synthesis (and optional key-term tag suggestion) moves behind generator boundary.
+
+3. **Fail-closed policy for Azure summary runtime**
+   - If `azure_openai_enabled` is false, credentials/endpoint/model are invalid, or Azure call/parse fails, raise service error.
+   - Do not return deterministic concatenation fallback for non-empty windows.
+   - API layer maps runtime failure to `503` to align with existing QA backend failure semantics.
+
+4. **Preserve response contract and evidence integrity**
+   - Continue returning `LectureSummaryLatestResponse` (`session_id`, `window_*`, `summary`, `key_terms`, `evidence`, `status`).
+   - Evidence refs (`ref_id`) remain DB-derived from `SpeechEvent`/`VisualEvent` IDs to prevent hallucinated references.
+   - Enforce `summary` max length 600 chars server-side regardless of model output.
+
+5. **Japanese structured prompt + strict output validation**
+   - Use Japanese instructions and require JSON output for stable parsing.
+   - Validate tags against allowed enum only (`speech|slide|board`).
+   - On invalid/empty payload, treat as generation failure (no fallback).
+
+### Post-Review Hardening (2026-02-21)
+
+- `SqlAlchemyLectureSummaryService` now propagates `LectureSession.lang_mode` into summary generation for both latest-window and rebuild flows.
+- Added explicit regression coverage for inactive session rejection (`LectureSessionInactiveError`) in summary service tests.
+- Added explicit English-mode coverage:
+  - service integration test verifies `lang_mode="en"` is passed to generator
+  - generator unit test verifies `lang_mode="en"` successful response handling
+
 ## TODO
 
 - [ ] Test Agent Teams workflow end-to-end with a real project
@@ -1864,6 +1962,10 @@ def retrieve_with_context(
 
 | Date | Changes |
 |------|---------|
+| 2026-02-21 | Fixed review findings for lecture summary/QA hardening: gated summary DI to Azure-available runtime with explicit unavailable generator, mapped lecture summary/finalize runtime failures to `503`, capped and deduplicated summary key-term evidence tags to schema limit, and made verifier `passed` parsing strict/fail-closed (`"true"/"false"` only for string normalization) with regression tests |
+| 2026-02-21 | Applied F1 summary review follow-ups: propagated `session.lang_mode` into summary generation, added inactive-session error-path test, and added explicit English-mode tests in summary service/generator |
+| 2026-02-21 | Added F1 Azure summary generator design: `LectureSummaryGeneratorService` boundary, Japanese structured prompt, fail-closed Azure policy (no deterministic fallback), and `LectureSummaryLatestResponse` compatibility constraints |
+| 2026-02-21 | Added `/startproject` plan for `f4-grounded-qa-productionization`: locked backward-compatible `/lecture/qa` interfaces, fail-closed grounded QA policy, Azure runtime hardening scope, audit reason-code persistence requirement, and approval-ready Merge Gate |
 | 2026-02-21 | Applied team-review hardening for `f1-speech-token-issuance` (Medium/Low): speech-token rate limit + telemetry, `azure_speech_region` format validation, stricter requester typing, and additional DI/rate-limit/empty-token/config tests |
 | 2026-02-20 | Implemented `f1-speech-token-issuance`: added authenticated `GET /api/v4/auth/speech-token`, Azure Speech STS issuance service, speech token schema, and schema/service/API tests |
 | 2026-02-20 | Added `/startproject` design for `f1-speech-token-issuance`: backend-only Azure Speech STS token exchange, `GET /api/v4/auth/speech-token` interface lock, lecture-token auth alignment, and `503`-mapped failure policy |

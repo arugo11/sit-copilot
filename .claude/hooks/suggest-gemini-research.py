@@ -90,7 +90,7 @@ def main():
                         "subagent (Task tool with subagent_type='gemini-explore'). "
                         "Gemini can gather and organize findings more efficiently. "
                         "Save results to .claude/docs/research/."
-                    )
+                    ),
                 }
             }
             print(json.dumps(output))

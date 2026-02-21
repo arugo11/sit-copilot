@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +21,10 @@ __all__ = [
     "LectureFollowupService",
     "SqlAlchemyLectureFollowupService",
     "FollowupResolution",
+    "LectureFollowupError",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,6 +33,10 @@ class FollowupResolution:
 
     standalone_query: str  # Rewritten query without context dependence
     history_context: str  # Formatted conversation history
+
+
+class LectureFollowupError(RuntimeError):
+    """Raised when follow-up rewrite call fails."""
 
 
 class LectureFollowupService(Protocol):
@@ -46,6 +59,7 @@ class SqlAlchemyLectureFollowupService:
     DEFAULT_HISTORY_TURNS = 3
     DEFAULT_REWRITE_MODEL = "gpt-4o"
     DEFAULT_TIMEOUT_SECONDS = 20
+    DEFAULT_API_VERSION = "2024-10-21"
 
     def __init__(
         self,
@@ -54,6 +68,7 @@ class SqlAlchemyLectureFollowupService:
         openai_endpoint: str = "",
         model: str = DEFAULT_REWRITE_MODEL,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize follow-up service.
 
@@ -69,6 +84,7 @@ class SqlAlchemyLectureFollowupService:
         self._openai_endpoint = openai_endpoint
         self._model = model
         self._timeout_seconds = timeout_seconds
+        self._api_version = api_version
 
     async def resolve_query(
         self,
@@ -173,16 +189,20 @@ class SqlAlchemyLectureFollowupService:
             Standalone query that can be understood without context
         """
         if not history:
-            # No history - return as-is
             return question
 
-        if not self._openai_api_key:
-            # No OpenAI configured - use simple heuristic
+        if not self._is_azure_openai_ready():
             return self._simple_rewrite(question, history)
 
-        # Use LLM for rewrite
         prompt = self._build_rewrite_prompt(question, history)
-        return await self._call_openai_rewrite(prompt)
+        try:
+            rewritten = await self._call_openai_rewrite(prompt)
+            if rewritten.strip():
+                return rewritten.strip()
+        except LectureFollowupError:
+            logger.warning("lecture_followup_rewrite_failed_use_simple_rewrite")
+
+        return self._simple_rewrite(question, history)
 
     def _simple_rewrite(self, question: str, history: str) -> str:
         """Simple heuristic-based rewrite without LLM.
@@ -233,16 +253,102 @@ class SqlAlchemyLectureFollowupService:
 書き換えた質問:"""
 
     async def _call_openai_rewrite(self, prompt: str) -> str:
-        """Call Azure OpenAI API for query rewrite.
+        """Call Azure OpenAI API for follow-up rewrite."""
+        url = self._build_chat_completion_url()
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Rewrite follow-up questions into standalone questions "
+                        "without adding external facts."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 256,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            url=url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._openai_api_key,
+            },
+            method="POST",
+        )
 
-        Note: This is a placeholder implementation.
-        Real implementation should use openai.AsyncAzureOpenAI.
-        """
-        # TODO: Implement real Azure OpenAI call
-        # from openai import AsyncAzureOpenAI
-        # client = AsyncAzureOpenAI(...)
-        # response = await client.chat.completions.create(...)
-        # return response.choices[0].message.content.strip()
+        def _run_request() -> str:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                return response.read().decode("utf-8")
 
-        # Placeholder - return simple rewrite
-        return self._simple_rewrite(prompt, "")
+        try:
+            raw = await asyncio.to_thread(_run_request)
+            response_json = json.loads(raw)
+            rewritten = self._extract_content(response_json).strip()
+            return rewritten
+        except HTTPError as exc:
+            logger.warning(
+                "azure_openai_followup_http_error status=%s",
+                getattr(exc, "code", "unknown"),
+            )
+            raise LectureFollowupError(
+                "azure openai follow-up rewrite request failed"
+            ) from exc
+        except URLError as exc:
+            logger.warning("azure_openai_followup_network_error")
+            raise LectureFollowupError(
+                "azure openai follow-up rewrite network failure"
+            ) from exc
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("azure_openai_followup_parse_error")
+            raise LectureFollowupError(
+                "azure openai follow-up rewrite parse failure"
+            ) from exc
+
+    def _is_azure_openai_ready(self) -> bool:
+        if not self._openai_api_key.strip():
+            return False
+        if not self._openai_endpoint.strip():
+            return False
+        if not self._model.strip():
+            return False
+        return "openai.azure.com" in self._openai_endpoint.lower()
+
+    def _build_chat_completion_url(self) -> str:
+        endpoint = self._openai_endpoint.rstrip("/")
+        deployment = quote(self._model.strip(), safe="")
+        return (
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            f"?api-version={self._api_version}"
+        )
+
+    def _extract_content(self, response_json: dict[str, object]) -> str:
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("missing choices")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValueError("invalid choice payload")
+        first_choice_dict = {str(key): value for key, value in first_choice.items()}
+        message = first_choice_dict.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("missing message")
+        message_dict = {str(key): value for key, value in message.items()}
+        content = message_dict.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                part_dict = {str(key): value for key, value in part.items()}
+                text = part_dict.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text.strip())
+            if text_parts:
+                return "\n".join(text_parts)
+        raise ValueError("missing content")

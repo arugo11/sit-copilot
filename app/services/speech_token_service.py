@@ -117,7 +117,9 @@ class AzureSpeechTokenService:
 
         normalized_token = token.strip()
         if not normalized_token:
-            raise SpeechTokenProviderError("Speech token provider returned empty token.")
+            raise SpeechTokenProviderError(
+                "Speech token provider returned empty token."
+            )
 
         return SpeechTokenResponse(
             token=normalized_token,

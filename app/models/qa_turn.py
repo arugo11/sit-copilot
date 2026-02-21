@@ -44,6 +44,11 @@ class QATurn(Base):
         nullable=False,
         default=False,
     )
+    outcome_reason: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="unspecified",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

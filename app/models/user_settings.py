@@ -21,9 +21,7 @@ class UserSettings(Base):
     """
 
     __tablename__ = "user_settings"
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_user_settings_user_id"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_settings_user_id"),)
 
     # Primary key - UUID string
     id: Mapped[str] = mapped_column(

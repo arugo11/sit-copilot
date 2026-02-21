@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from dataclasses import dataclass
 from typing import Literal, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from app.schemas.lecture_qa import LectureSource
 
@@ -11,7 +17,10 @@ __all__ = [
     "LectureAnswererService",
     "AzureOpenAILectureAnswererService",
     "LectureAnswerDraft",
+    "LectureAnswererError",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -21,6 +30,10 @@ class LectureAnswerDraft:
     answer: str
     confidence: Literal["high", "medium", "low"]
     action_next: str
+
+
+class LectureAnswererError(RuntimeError):
+    """Raised when Azure OpenAI answer generation fails."""
 
 
 class LectureAnswererService(Protocol):
@@ -44,6 +57,12 @@ class AzureOpenAILectureAnswererService:
     DEFAULT_MAX_TOKENS = 1000
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_TIMEOUT_SECONDS = 30
+    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_ACTION_NEXT = "他にご質問があればどうぞ。"
+    NO_SOURCE_ANSWER = "該当する情報が見つかりませんでした。"
+    NO_SOURCE_ACTION = "別の質問をしてください。"
+    LOCAL_FALLBACK_PREFIX = "講義資料では"
+    LOCAL_SNIPPET_MAX_CHARS = 120
 
     def __init__(
         self,
@@ -53,6 +72,7 @@ class AzureOpenAILectureAnswererService:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize Azure OpenAI answerer.
 
@@ -70,6 +90,7 @@ class AzureOpenAILectureAnswererService:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
+        self._api_version = api_version
 
     async def answer(
         self,
@@ -90,26 +111,30 @@ class AzureOpenAILectureAnswererService:
             Draft answer with confidence and action next
         """
         if not sources:
-            # No sources - return low confidence fallback
             return LectureAnswerDraft(
-                answer="該当する情報が見つかりませんでした。",
+                answer=self.NO_SOURCE_ANSWER,
                 confidence="low",
-                action_next="別の質問をしてください。",
+                action_next=self.NO_SOURCE_ACTION,
             )
 
-        # Build prompt with sources
         prompt = self._build_prompt(question, lang_mode, sources, history)
-
-        # Call Azure OpenAI (placeholder - real implementation uses openai library)
-        answer = await self._call_openai(prompt)
-
-        # Calculate confidence based on sources
         confidence = self._calculate_confidence(sources)
+
+        if not self._is_azure_openai_ready():
+            return LectureAnswerDraft(
+                answer=self._build_local_fallback_answer(sources),
+                confidence=confidence,
+                action_next=self.DEFAULT_ACTION_NEXT,
+            )
+
+        answer = await self._call_openai(prompt)
+        if not answer.strip():
+            raise LectureAnswererError("empty answer from Azure OpenAI")
 
         return LectureAnswerDraft(
             answer=answer,
             confidence=confidence,
-            action_next="他にご質問があればどうぞ。",
+            action_next=self.DEFAULT_ACTION_NEXT,
         )
 
     def _build_prompt(
@@ -150,19 +175,126 @@ class AzureOpenAILectureAnswererService:
         return "\n".join(lines)
 
     async def _call_openai(self, prompt: str) -> str:
-        """Call Azure OpenAI API.
+        """Call Azure OpenAI chat completion endpoint.
 
-        Note: This is a placeholder implementation.
-        Real implementation should use openai.AsyncAzureOpenAI.
+        Raises:
+            LectureAnswererError: If the Azure OpenAI call fails.
         """
-        # TODO: Implement real Azure OpenAI call
-        # from openai import AsyncAzureOpenAI
-        # client = AsyncAzureOpenAI(...)
-        # response = await client.chat.completions.create(...)
-        # return response.choices[0].message.content
+        url = self._build_chat_completion_url()
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a grounded lecture QA assistant. "
+                        "Answer only with provided lecture evidence."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            url=url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            method="POST",
+        )
 
-        # Placeholder return
-        return "講義資料に基づくと、このトピックについて説明があります。"
+        def _run_request() -> str:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                return response.read().decode("utf-8")
+
+        try:
+            raw = await asyncio.to_thread(_run_request)
+            response_json = json.loads(raw)
+            return self._extract_content(response_json).strip()
+        except HTTPError as exc:
+            logger.warning(
+                "azure_openai_answer_http_error status=%s",
+                getattr(exc, "code", "unknown"),
+            )
+            raise LectureAnswererError("azure openai answer request failed") from exc
+        except URLError as exc:
+            logger.warning("azure_openai_answer_network_error")
+            raise LectureAnswererError("azure openai answer network failure") from exc
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("azure_openai_answer_parse_error")
+            raise LectureAnswererError("azure openai answer parse failure") from exc
+
+    def _is_azure_openai_ready(self) -> bool:
+        """Return whether Azure OpenAI runtime call should be attempted."""
+        if not self._api_key.strip():
+            return False
+        if not self._endpoint.strip():
+            return False
+        if not self._model.strip():
+            return False
+        # Keep runtime deterministic in non-Azure OpenAI endpoint configurations.
+        return "openai.azure.com" in self._endpoint.lower()
+
+    def _build_chat_completion_url(self) -> str:
+        endpoint = self._endpoint.rstrip("/")
+        deployment = quote(self._model.strip(), safe="")
+        return (
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            f"?api-version={self._api_version}"
+        )
+
+    def _extract_content(self, response_json: dict[str, object]) -> str:
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("missing choices")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValueError("invalid choice payload")
+        first_choice_dict = {str(key): value for key, value in first_choice.items()}
+        message = first_choice_dict.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("missing message")
+        message_dict = {str(key): value for key, value in message.items()}
+        content = message_dict.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                part_dict = {str(key): value for key, value in part.items()}
+                text = part_dict.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text.strip())
+            if text_parts:
+                return "\n".join(text_parts)
+        raise ValueError("missing content")
+
+    def _build_local_fallback_answer(self, sources: list[LectureSource]) -> str:
+        evidence = [source for source in sources if source.is_direct_hit] or sources
+        snippets = [
+            self._sanitize_snippet(source.text)
+            for source in evidence[:2]
+            if source.text.strip()
+        ]
+        if not snippets:
+            return self.NO_SOURCE_ANSWER
+        if len(snippets) == 1:
+            return f"{self.LOCAL_FALLBACK_PREFIX}「{snippets[0]}」と説明されています。"
+        return (
+            f"{self.LOCAL_FALLBACK_PREFIX}「{snippets[0]}」および「{snippets[1]}」"
+            "の内容が関連しています。"
+        )
+
+    def _sanitize_snippet(self, text: str) -> str:
+        snippet = text.strip().replace("\n", " ")
+        if len(snippet) <= self.LOCAL_SNIPPET_MAX_CHARS:
+            return snippet
+        return f"{snippet[: self.LOCAL_SNIPPET_MAX_CHARS]}..."
 
     def _calculate_confidence(
         self, sources: list[LectureSource]

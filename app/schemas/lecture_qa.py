@@ -96,7 +96,9 @@ class LectureFollowupRequest(BaseModel):
     retrieval_mode: RetrievalMode = "source-only"
     top_k: int = Field(default=5, ge=1, le=20)
     context_window: int = Field(default=1, ge=0, le=5)
-    history_turns: int = Field(default=3, ge=1, le=10)  # Number of previous turns to include
+    history_turns: int = Field(
+        default=3, ge=1, le=10
+    )  # Number of previous turns to include
 
     @field_validator("session_id")
     @classmethod

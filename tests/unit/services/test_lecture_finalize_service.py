@@ -19,6 +19,24 @@ from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_summary_service import SqlAlchemyLectureSummaryService
 
 
+@pytest.fixture
+def mock_summary_generator():
+    """Mock summary generator for finalize tests."""
+    from app.services.lecture_summary_generator_service import LectureSummaryResult
+
+    class MockGenerator:
+        async def generate_summary(self, speech_events, visual_events, lang_mode):
+            return LectureSummaryResult(
+                summary="Mock summary",
+                key_terms=["test"],
+                evidence_tags=[
+                    {"type": "speech", "timestamp": "00:00", "text": "test"}
+                ],
+            )
+
+    return MockGenerator()
+
+
 class SuccessfulIndexService:
     """Stub index service that always succeeds."""
 
@@ -53,6 +71,7 @@ class FailingIndexService:
 @pytest.mark.asyncio
 async def test_finalize_active_session_generates_artifacts(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Finalize should create summary/chunk artifacts and mark session finalized."""
     session = LectureSession(
@@ -94,7 +113,9 @@ async def test_finalize_active_session_generates_artifacts(
     )
     await db_session.flush()
 
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
@@ -130,6 +151,7 @@ async def test_finalize_active_session_generates_artifacts(
 @pytest.mark.asyncio
 async def test_finalize_is_idempotent_for_finalized_session(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Repeated finalize should not duplicate lecture chunks."""
     session = LectureSession(
@@ -159,7 +181,9 @@ async def test_finalize_is_idempotent_for_finalized_session(
     )
     await db_session.flush()
 
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
@@ -178,9 +202,12 @@ async def test_finalize_is_idempotent_for_finalized_session(
 @pytest.mark.asyncio
 async def test_finalize_unknown_session_raises_not_found(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Finalize should reject unknown sessions."""
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
@@ -195,6 +222,7 @@ async def test_finalize_unknown_session_raises_not_found(
 @pytest.mark.asyncio
 async def test_finalize_rejects_error_status_session(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Finalize should reject sessions in error status."""
     session = LectureSession(
@@ -213,7 +241,9 @@ async def test_finalize_rejects_error_status_session(
     db_session.add(session)
     await db_session.flush()
 
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
@@ -228,6 +258,7 @@ async def test_finalize_rejects_error_status_session(
 @pytest.mark.asyncio
 async def test_finalize_handles_index_failure_as_false_flag(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Finalize should continue when optional index build fails."""
     session = LectureSession(
@@ -257,7 +288,9 @@ async def test_finalize_handles_index_failure_as_false_flag(
     )
     await db_session.flush()
 
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
@@ -277,6 +310,7 @@ async def test_finalize_handles_index_failure_as_false_flag(
 @pytest.mark.asyncio
 async def test_finalize_keeps_existing_qa_index_true_when_rebuild_fails(
     db_session: AsyncSession,
+    mock_summary_generator,
 ) -> None:
     """Finalize should not regress qa_index_built from true to false."""
     session = LectureSession(
@@ -296,7 +330,9 @@ async def test_finalize_keeps_existing_qa_index_true_when_rebuild_fails(
     db_session.add(session)
     await db_session.flush()
 
-    summary_service = SqlAlchemyLectureSummaryService(db_session)
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
     service = SqlAlchemyLectureFinalizeService(
         db=db_session,
         user_id="demo_user",
