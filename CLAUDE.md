@@ -497,3 +497,15 @@ tests/unit/services/
 | Use real LectureBM25Store in tests | Pure in-memory operations, no external dependencies |
 | AsyncMock for AsyncSession | Followup service loads history from DB |
 | Test concurrent access with asyncio.gather | Verify thread-safety of lock management |
+
+### 2026-02-21
+
+- 17 commits, 100 files changed
+- Codex: 2 consultations
+- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
+- Agent Teams: f1-azure-openai-summary-impl (0 teammates, 8/12 tasks)
+- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
+- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
+- Agent Teams: frontend-impl (5 teammates, 16/27 tasks)
+- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
+- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
