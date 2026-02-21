@@ -12,6 +12,10 @@ from app.services.lecture_followup_service import (
     SqlAlchemyLectureFollowupService,
 )
 
+# Test configuration constants
+DISABLED_AZURE_OPENAI = ""  # Explicitly disabled for testing
+TEST_AZURE_OPENAI_KEY = "TEST_AZURE_OPENAI_KEY_DO_NOT_USE_IN_PROD"
+
 
 @pytest.fixture
 def mock_db_session():
@@ -123,7 +127,7 @@ async def test_resolve_query_with_pronoun_prefix(mock_db_session, sample_qa_turn
 
     service = SqlAlchemyLectureFollowupService(
         db=mock_db_session,
-        openai_api_key="",  # Use simple rewrite
+        openai_api_key=DISABLED_AZURE_OPENAI,  # Use simple rewrite
     )
 
     # Test "それは" pattern
@@ -133,6 +137,7 @@ async def test_resolve_query_with_pronoun_prefix(mock_db_session, sample_qa_turn
         question="それはどういう意味ですか？",
     )
 
+    # Simple rewrite should either resolve pronoun or keep context
     assert (
         "BM25アルゴリズム" in result.standalone_query
         or "それ" in result.standalone_query
@@ -144,7 +149,7 @@ async def test_simple_rewrite_no_history():
     """Simple rewrite with no history returns original question."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     result = service._simple_rewrite(  # noqa: SLF001 - testing private method
@@ -160,7 +165,7 @@ async def test_simple_rewrite_with_pronoun():
     """Simple rewrite with Japanese pronoun pattern."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     history = """会話履歴:
@@ -181,7 +186,7 @@ async def test_simple_rewrite_unknown_prefix():
     """Simple rewrite with unknown prefix returns original."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     history = """会話履歴:
@@ -202,7 +207,7 @@ async def test_azure_openai_rewrite_success(mock_db_session):
     """Azure OpenAI rewrite with successful API call."""
     service = SqlAlchemyLectureFollowupService(
         db=mock_db_session,
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -240,7 +245,7 @@ async def test_azure_openai_rewrite_falls_back_to_simple(mock_db_session):
     """Azure OpenAI rewrite error falls back to simple rewrite."""
     service = SqlAlchemyLectureFollowupService(
         db=mock_db_session,
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -274,7 +279,7 @@ def test_format_history_empty():
     """Format empty history returns empty string."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     result = service._format_history([])  # noqa: SLF001 - testing private method
@@ -286,7 +291,7 @@ def test_format_history_with_turns(sample_qa_turns):
     """Format history with QA turns."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     result = service._format_history(sample_qa_turns)  # noqa: SLF001 - testing private method
@@ -313,7 +318,7 @@ def test_is_azure_openai_ready_invalid_endpoint():
     """Azure OpenAI readiness check with invalid endpoint."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://api.openai.com/",  # Not azure
     )
 
@@ -326,7 +331,7 @@ def test_is_azure_openai_ready_valid_config():
     """Azure OpenAI readiness check with valid config."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com",
     )
 
@@ -340,7 +345,7 @@ async def test_extract_content_various_formats():
     """Extract content from various response formats."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -373,7 +378,7 @@ async def test_extract_content_malformed_responses():
     """Extract content handles malformed responses."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -450,7 +455,7 @@ async def test_azure_openai_rewrite_network_error():
     """Azure OpenAI rewrite with network error falls back to simple."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -478,7 +483,7 @@ async def test_azure_openai_rewrite_json_error():
     """Azure OpenAI rewrite with JSON parse error falls back."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
     )
 
@@ -507,7 +512,7 @@ def test_build_rewrite_prompt_structure():
     """Build rewrite prompt has correct structure."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
     )
 
     question = "それはどういう意味ですか？"
@@ -554,7 +559,7 @@ async def test_rewrite_to_standalone_with_no_history():
     """Rewrite to standalone with no history returns original question."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     result = await service._rewrite_to_standalone(  # noqa: SLF001 - testing private method
@@ -590,7 +595,7 @@ def test_simple_rewrite_all_pronoun_prefixes():
     """Simple rewrite handles all Japanese pronoun prefixes."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="",
+        openai_api_key=DISABLED_AZURE_OPENAI,
     )
 
     history = """会話履歴:
@@ -610,7 +615,7 @@ def test_build_chat_completion_url():
     """Build chat completion URL has correct format."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",
         model="gpt-4o",
     )
@@ -628,7 +633,7 @@ def test_build_chat_completion_url_with_trailing_slash():
     """Build chat completion URL handles trailing slash."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
-        openai_api_key="test-key",
+        openai_api_key=TEST_AZURE_OPENAI_KEY,
         openai_endpoint="https://test.openai.azure.com/",  # Trailing slash
         model="gpt-4o",
     )

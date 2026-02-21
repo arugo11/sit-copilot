@@ -10,6 +10,10 @@ from app.services.lecture_verifier_service import (
     AzureOpenAILectureVerifierService,
 )
 
+# Test configuration constants
+DISABLED_AZURE_OPENAI = ""  # Explicitly disabled for testing
+TEST_AZURE_OPENAI_KEY = "TEST_AZURE_OPENAI_KEY_DO_NOT_USE_IN_PROD"
+
 # =============================================================================
 # Helper function to create valid LectureSource for testing
 # =============================================================================
@@ -34,7 +38,7 @@ def _make_source(text: str, timestamp: str = "10:00") -> LectureSource:
 def test_parse_verification_result_handles_string_false_as_false() -> None:
     """String 'false' must not be treated as truthy pass."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -50,7 +54,7 @@ def test_parse_verification_result_handles_string_false_as_false() -> None:
 def test_parse_verification_result_rejects_non_boolean_passed() -> None:
     """Invalid passed type should fail closed via parse error handling."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -72,7 +76,7 @@ def test_parse_verification_result_rejects_non_boolean_passed() -> None:
 async def test_verify_with_no_sources() -> None:
     """Empty sources should return deterministic failure result."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -95,7 +99,7 @@ async def test_verify_with_no_sources() -> None:
 async def test_verify_with_azure_openai_success() -> None:
     """Successful Azure OpenAI verification should return parsed result."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -121,7 +125,7 @@ async def test_verify_with_azure_openai_success() -> None:
 async def test_verify_with_azure_openai_fails_verification() -> None:
     """Azure OpenAI verification that fails should return failed result."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -152,7 +156,7 @@ async def test_verify_with_azure_openai_fails_verification() -> None:
 async def test_verify_with_http_error_429() -> None:
     """HTTPError with 429 status should raise LectureVerifierError."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -180,7 +184,7 @@ async def test_verify_with_http_error_429() -> None:
 async def test_verify_with_http_error_500() -> None:
     """HTTPError with 500 status should raise LectureVerifierError."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -213,7 +217,7 @@ async def test_verify_with_http_error_500() -> None:
 async def test_verify_with_network_error() -> None:
     """URLError should raise LectureVerifierError with network message."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -240,8 +244,8 @@ async def test_verify_with_network_error() -> None:
 async def test_local_verify_with_matching_content() -> None:
     """Local fallback should pass when answer contains source content."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",  # Empty triggers local fallback
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,  # Empty triggers local fallback
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.verify(
@@ -258,8 +262,8 @@ async def test_local_verify_with_matching_content() -> None:
 async def test_local_verify_with_no_match() -> None:
     """Local fallback should fail when answer doesn't contain source content."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",  # Empty triggers local fallback
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,  # Empty triggers local fallback
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.verify(
@@ -276,8 +280,8 @@ async def test_local_verify_with_no_match() -> None:
 async def test_local_verify_with_empty_answer() -> None:
     """Local fallback should fail with empty answer."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.verify(
@@ -298,7 +302,7 @@ async def test_local_verify_with_empty_answer() -> None:
 async def test_repair_answer_with_sources() -> None:
     """Repair should return repaired answer from Azure OpenAI."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -323,7 +327,7 @@ async def test_repair_answer_with_sources() -> None:
 async def test_repair_answer_returns_none_on_impossible() -> None:
     """Repair should return None when Azure OpenAI returns '修正不可能'."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -348,7 +352,7 @@ async def test_repair_answer_returns_none_on_impossible() -> None:
 async def test_repair_answer_with_empty_response() -> None:
     """Repair should return None when Azure OpenAI returns empty content."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -371,7 +375,7 @@ async def test_repair_answer_with_empty_response() -> None:
 async def test_repair_answer_with_no_sources() -> None:
     """Repair should return None when sources list is empty."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -388,8 +392,8 @@ async def test_repair_answer_with_no_sources() -> None:
 async def test_repair_answer_local_fallback_with_sources() -> None:
     """Local repair should return snippet from sources."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",  # Empty triggers local fallback
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,  # Empty triggers local fallback
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.repair_answer(
@@ -406,7 +410,7 @@ async def test_repair_answer_local_fallback_with_sources() -> None:
 async def test_repair_answer_http_error() -> None:
     """Repair should raise LectureVerifierError on HTTPError."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -440,7 +444,7 @@ async def test_repair_answer_http_error() -> None:
 async def test_extract_content_from_list_format() -> None:
     """Extract content when Azure OpenAI returns content as list (multimodal)."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -466,7 +470,7 @@ async def test_extract_content_from_list_format() -> None:
 async def test_extract_content_from_string_format() -> None:
     """Extract content when Azure OpenAI returns content as string."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -494,7 +498,7 @@ async def test_extract_content_from_string_format() -> None:
 async def test_parse_verification_result_malformed_json() -> None:
     """Malformed JSON from Azure OpenAI should return safe default."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -520,7 +524,7 @@ async def test_parse_verification_result_malformed_json() -> None:
 async def test_parse_verification_result_empty_json() -> None:
     """Empty JSON object should return safe default."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -548,7 +552,7 @@ async def test_parse_verification_result_empty_json() -> None:
 def test_normalize_unsupported_claims_filters_non_strings() -> None:
     """Non-string items should be filtered from unsupported_claims."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -562,7 +566,7 @@ def test_normalize_unsupported_claims_filters_non_strings() -> None:
 def test_normalize_unsupported_claims_with_empty_list() -> None:
     """Empty list should return empty list."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -574,7 +578,7 @@ def test_normalize_unsupported_claims_with_empty_list() -> None:
 def test_normalize_unsupported_claims_with_non_list() -> None:
     """Non-list input should return empty list."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -586,7 +590,7 @@ def test_normalize_unsupported_claims_with_non_list() -> None:
 def test_parse_passed_flag_with_boolean_true() -> None:
     """Boolean true should return true."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -598,7 +602,7 @@ def test_parse_passed_flag_with_boolean_true() -> None:
 def test_parse_passed_flag_with_boolean_false() -> None:
     """Boolean false should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -610,7 +614,7 @@ def test_parse_passed_flag_with_boolean_false() -> None:
 def test_parse_passed_flag_with_string_true() -> None:
     """String 'true' should return true."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -622,7 +626,7 @@ def test_parse_passed_flag_with_string_true() -> None:
 def test_parse_passed_flag_with_string_false() -> None:
     """String 'false' should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -634,7 +638,7 @@ def test_parse_passed_flag_with_string_false() -> None:
 def test_parse_passed_flag_with_invalid_type() -> None:
     """Non-boolean, non-string value should raise ValueError."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -645,7 +649,7 @@ def test_parse_passed_flag_with_invalid_type() -> None:
 def test_is_azure_openai_ready_with_missing_api_key() -> None:
     """Empty api_key should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",
+        api_key=DISABLED_AZURE_OPENAI,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -655,8 +659,8 @@ def test_is_azure_openai_ready_with_missing_api_key() -> None:
 def test_is_azure_openai_ready_with_missing_endpoint() -> None:
     """Empty endpoint should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
-        endpoint="",
+        api_key=TEST_AZURE_OPENAI_KEY,
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     assert service._is_azure_openai_ready() is False  # noqa: SLF001
@@ -665,7 +669,7 @@ def test_is_azure_openai_ready_with_missing_endpoint() -> None:
 def test_is_azure_openai_ready_with_invalid_endpoint() -> None:
     """Non-Azure endpoint should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://api.openai.com/",
     )
 
@@ -675,7 +679,7 @@ def test_is_azure_openai_ready_with_invalid_endpoint() -> None:
 def test_contains_source_fragment_with_exact_match() -> None:
     """Fragment matching should detect overlapping content when answer directly contains source text."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -690,7 +694,7 @@ def test_contains_source_fragment_with_exact_match() -> None:
 def test_contains_source_fragment_with_no_match() -> None:
     """No fragment match should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -705,7 +709,7 @@ def test_contains_source_fragment_with_no_match() -> None:
 def test_contains_source_fragment_with_empty_source() -> None:
     """Empty source text should return false."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -720,7 +724,7 @@ def test_contains_source_fragment_with_empty_source() -> None:
 def test_normalize_text_removes_whitespace_and_lowercases() -> None:
     """Text normalization should remove whitespace and lowercase."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -737,7 +741,7 @@ def test_normalize_text_removes_whitespace_and_lowercases() -> None:
 async def test_verify_with_passed_true_but_unsupported_claims() -> None:
     """Verification with passed=true but unsupported_claims populated should fail."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -763,8 +767,8 @@ async def test_verify_with_passed_true_but_unsupported_claims() -> None:
 async def test_local_repair_answer_with_empty_source() -> None:
     """Local repair should return None when source text is empty."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.repair_answer(
@@ -780,8 +784,8 @@ async def test_local_repair_answer_with_empty_source() -> None:
 async def test_local_repair_answer_with_newline_in_source() -> None:
     """Local repair should convert newlines to spaces."""
     service = AzureOpenAILectureVerifierService(
-        api_key="",
-        endpoint="",
+        api_key=DISABLED_AZURE_OPENAI,
+        endpoint=DISABLED_AZURE_OPENAI,
     )
 
     result = await service.repair_answer(
@@ -803,7 +807,7 @@ async def test_local_repair_answer_with_newline_in_source() -> None:
 async def test_repair_answer_with_network_error() -> None:
     """Repair should raise LectureVerifierError on network error."""
     service = AzureOpenAILectureVerifierService(
-        api_key="test-key",
+        api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://test.openai.azure.com/",
     )
 
@@ -821,5 +825,3 @@ async def test_repair_answer_with_network_error() -> None:
                 sources=[_make_source("講義資料")],
                 unsupported_claims=["不明な主張"],
             )
-
-

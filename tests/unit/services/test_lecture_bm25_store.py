@@ -7,6 +7,9 @@ import pytest
 
 from app.services.lecture_bm25_store import LectureBM25Store
 
+# Test configuration constants
+LOCK_TEST_DELAY_MS = 10  # Delay in milliseconds for serialization tests
+
 
 class TestLectureBM25StoreBasicOperations:
     """Tests for basic put/get/delete/has operations."""
@@ -204,17 +207,19 @@ class TestLectureBM25StoreLockManagement:
         store = LectureBM25Store()
         execution_order = []
 
-        async def modify_with_lock(session_id: str, delay: float) -> None:
+        async def modify_with_lock(
+            session_id: str, delay_ms: int = LOCK_TEST_DELAY_MS
+        ) -> None:
             lock = await store.acquire_lock(session_id)
             async with lock:
                 execution_order.append(f"start-{session_id}")
-                await asyncio.sleep(delay)
+                await asyncio.sleep(delay_ms / 1000)
                 execution_order.append(f"end-{session_id}")
 
         # Run concurrent operations on same session
         await asyncio.gather(
-            modify_with_lock("session-1", 0.01),
-            modify_with_lock("session-1", 0.01),
+            modify_with_lock("session-1"),
+            modify_with_lock("session-1"),
         )
 
         # Should be serialized (start-end-start-end, not start-start-end-end)
@@ -224,6 +229,35 @@ class TestLectureBM25StoreLockManagement:
             "start-session-1",
             "end-session-1",
         ]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_put_same_session_serializes(self) -> None:
+        """Concurrent puts to same session should be serialized by lock."""
+        store = LectureBM25Store()
+        execution_order = []
+
+        async def put_with_version(version: int) -> None:
+            await store.put(
+                "session-1",
+                [{"id": f"chunk-{version}", "text": f"Data {version}"}],
+                [[f"token-{version}"]],
+                f"v{version}",
+            )
+            execution_order.append(version)
+
+        # Concurrent puts to same session
+        await asyncio.gather(
+            put_with_version(1),
+            put_with_version(2),
+            put_with_version(3),
+        )
+
+        # All puts should complete (serialized)
+        assert len(execution_order) == 3
+        # Last write should win (deterministic due to lock)
+        index = await store.get("session-1")
+        assert index is not None
+        assert index.index_version == "v3"
 
 
 class TestLectureBM25StoreChunkMap:
