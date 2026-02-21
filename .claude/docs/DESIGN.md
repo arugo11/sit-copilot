@@ -1077,967 +1077,358 @@ app/
 
 ---
 
-## Sprint4 F4 Lecture QA Architecture (2026-02-21)
+## Frontend Architecture (2026-02-21)
 
-### Project: F4 Lecture QA (講義後QA)
+### Project: React 18 + TypeScript Frontend for SIT Copilot
 
-**Goal**: Implement lecture-based question answering using BM25 local search + Azure OpenAI for answer generation and citation verification.
+**Goal**: Create an accessible, real-time lecture assistance frontend that integrates with the existing FastAPI backend.
 
-### Scope
+### Tech Stack
 
-- **Include**:
-  - `POST /api/v4/lecture/qa/ask` - Question answering with follow-up support
-  - `POST /api/v4/lecture/qa/index/build` - Search index builder from SpeechEvents
-  - Local BM25 search using `rank-bm25` library
-  - Two retrieval modes: `source-only` and `source-plus-context`
-  - LLM-based Verifier for citation validation
-  - Follow-up question handling with conversation context
-- **Exclude**:
-  - Azure AI Search integration (future)
-  - Real-time OCR integration (handled by F1)
+| Category | Technology | Rationale |
+|----------|------------|-----------|
+| Framework | React 18 + TypeScript | Industry standard, strong ecosystem, type safety |
+| Build | Vite | Fast HMR, optimized builds, native ESM |
+| Styling | Tailwind CSS | Utility-first, matches design token system |
+| Components | shadcn/ui + Radix UI | Accessible primitives, customizable, headless |
+| Data Fetching | TanStack Query | Server state management, caching, background refetches |
+| Virtualization | TanStack Virtual | Efficient transcript rendering (thousands of lines) |
+| Tables | TanStack Table | Sortable/filterable source lists |
+| State | Zustand | Lightweight for ephemeral UI state (panel mode, autoscroll, stream lag) |
+| Routing | react-router | Declarative routing, nested routes |
+| Forms | react-hook-form + zod | Type-safe form validation |
+| i18n | i18next | Japanese/English localization |
+| Animation | Framer Motion | Accessible motion (respects prefers-reduced-motion) |
+| Real-time | WebSocket (Native) | Live transcript/streaming with SSE fallback |
 
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         API Layer                                    │
-│  POST /api/v4/lecture/qa/index/build                                │
-│  POST /api/v4/lecture/qa/ask                                         │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Service Layer                                   │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│  │ LectureQAService │  │ LectureIndexSvc  │  │  LectureFollowup │  │
-│  │   (Orchestrator) │  │  (Index Builder) │  │     Service      │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘  │
-│           │                     │                      │             │
-│           ▼                     ▼                      ▼             │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│  │ LectureRetrieval │  │  LectureAnswerer │  │ LectureVerifier  │  │
-│  │    Service       │  │     Service      │  │     Service      │  │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘  │
-│           │                     │                      │             │
-│           ▼                     ▼                      ▼             │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│  │  BM25Store       │  │   Azure OpenAI   │  │   Azure OpenAI   │  │
-│  │ (In-Memory Cache)│  │   (Answer Gen)   │  │  (Verification)  │  │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       Data Layer                                     │
-│  LectureSession (qa_index_built flag)                               │
-│  SpeechEvent (text chunks with timestamps)                          │
-│  QATurn (conversation history with feature=lecture_qa)              │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Module Structure
-
-| Module | File | Responsibility |
-|--------|------|----------------|
-| API Routes | `app/api/v4/lecture_qa.py` | HTTP endpoints, auth, DI wiring |
-| Schemas | `app/schemas/lecture_qa.py` | Request/response models |
-| QA Orchestrator | `app/services/lecture_qa_service.py` | retrieve → answer → verify → persist |
-| Index Builder | `app/services/lecture_index_service.py` | SpeechEvents → BM25 index |
-| BM25 Cache | `app/services/lecture_bm25_store.py` | In-memory index storage with lock |
-| Retrieval | `app/services/lecture_retrieval_service.py` | BM25 search + context expansion |
-| Follow-up | `app/services/lecture_followup_service.py` | History load + query rewrite |
-| Answerer | `app/services/lecture_answerer_service.py` | Azure OpenAI answer generation |
-| Verifier | `app/services/lecture_verifier_service.py` | Citation validation |
-
-### Key Interfaces
-
-```python
-# LectureIndexService
-class LectureIndexService(Protocol):
-    async def build_index(
-        self, session_id: str, user_id: str, rebuild: bool = False
-    ) -> LectureQAIndexBuildResponse: ...
-
-# LectureRetrievalService
-class LectureRetrievalService(Protocol):
-    async def retrieve(
-        self,
-        session_id: str,
-        query: str,
-        mode: RetrievalMode,  # "source-only" | "source-plus-context"
-        top_k: int,
-        context_window: int,  # Number of neighboring chunks
-    ) -> list[LectureSource]: ...
-
-# LectureFollowupService
-class LectureFollowupService(Protocol):
-    async def resolve_query(
-        self, session_id: str, user_id: str, question: str, history_turns: int
-    ) -> FollowupResolution:  # standalone_query + history context
-        ...
-
-# LectureAnswererService
-class LectureAnswererService(Protocol):
-    async def answer(
-        self, question: str, lang_mode: str, sources: list[LectureSource], history: str
-    ) -> LectureAnswerDraft: ...
-
-# LectureVerifierService
-class LectureVerifierService(Protocol):
-    async def verify(
-        self, question: str, answer: str, sources: list[LectureSource]
-    ) -> LectureVerificationResult: ...
-```
-
-### Data Flow: Index Build
+### Project Structure
 
 ```
-Client
-  POST /api/v4/lecture/qa/index/build
-    {session_id, user_id, rebuild: false}
-    │
-    ▼
-LectureIndexService.build_index()
-  │
-  ├─→ Validate session ownership
-  │
-  ├─→ Check if qa_index_built (skip if true and !rebuild)
-  │
-  ├─→ SELECT SpeechEvent WHERE session_id AND is_final=true ORDER BY start_ms
-  │
-  ├─→ Normalize text + tokenize (Japanese tokenizer)
-  │
-  ├─→ BM25Okapi.build_index(corpus) [asyncio.to_thread]
-  │
-  ├─→ BM25Store.put(session_id, index, chunk_map, metadata)
-  │
-  └─→ UPDATE LectureSession SET qa_index_built = true
-    │
-    ▼
-Response {index_version, chunk_count, built_at}
+sit-copilot/
+├── app/                          # Existing FastAPI backend
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── providers/        # QueryProvider, I18nProvider, ThemeProvider, A11yProvider
+│   │   │   ├── router/
+│   │   │   │   ├── index.tsx     # react-router config
+│   │   │   │   └── guards.tsx    # Auth guards, live session guards
+│   │   │   └── AppShell.tsx      # TopBar, live region, toast container
+│   │   ├── pages/
+│   │   │   ├── LandingPage.tsx               # /
+│   │   │   ├── LectureListPage.tsx           # /lectures
+│   │   │   ├── LectureLivePage.tsx           # /lectures/:id/live
+│   │   │   ├── LectureReviewPage.tsx         # /lectures/:id/review
+│   │   │   ├── LectureSourcesPage.tsx        # /lectures/:id/sources
+│   │   │   ├── SettingsSheetRoute.tsx        # /settings
+│   │   │   └── OperatorSessionPage.tsx       # /operator/session
+│   │   ├── features/
+│   │   │   ├── lectures/                     # Lecture card, list, filters
+│   │   │   ├── live-transcript/              # TanStack Virtual list + live region
+│   │   │   ├── live-sources/                 # Source frame cards, OCR display
+│   │   │   ├── live-assist/                  # Status pills, key terms, QA chips
+│   │   │   ├── review-qa/                    # QA input, streaming answer, citation chips
+│   │   │   ├── settings/                     # Settings form, LocalStorage sync
+│   │   │   └── operator/                     # Demo operator controls
+│   │   ├── components/
+│   │   │   ├── ui/                           # shadcn/ui generated components
+│   │   │   ├── common/                       # AppShell, EmptyState, Skeleton, ErrorBoundary
+│   │   │   ├── feedback/                     # Toast, InlineMessage, LiveStatusPill
+│   │   │   └── a11y/                         # LiveRegionAnnouncer, FocusTrap, SkipLink
+│   │   ├── lib/
+│   │   │   ├── api/                          # baseClient, query keys, endpoint adapters
+│   │   │   ├── stream/                       # WS/SSE client, reconnect state machine
+│   │   │   ├── i18n/                         # i18next config, ja/en namespaces
+│   │   │   ├── forms/                        # react-hook-form schemas, validators
+│   │   │   └── utils/                        # formatters, cn(), date/intl helpers
+│   │   ├── stores/                           # Zustand slices (ephemeral UI/session state)
+│   │   │   ├── liveSession.ts                # Connection state, panel mode, autoscroll
+│   │   │   ├── settings.ts                   # Theme, language, reduced motion
+│   │   │   └── transcript.ts                 # Virtual list state, scroll position
+│   │   ├── styles/
+│   │   │   ├── tokens.css                    # Design tokens (CSS variables)
+│   │   │   └── globals.css                   # Global styles, Tailwind directives
+│   │   ├── locales/
+│   │   │   ├── ja/                           # Japanese translations
+│   │   │   └── en/                           # English translations
+│   │   └── types/
+│   │       ├── lecture.ts                    # Lecture domain types
+│   │       ├── transcript.ts                 # Transcript types
+│   │       ├── qa.ts                         # QA domain types
+│   │       └── api.ts                        # API response types
+│   ├── staticwebapp.config.json              # Azure SWA config
+│   ├── vite.config.ts
+│   ├── tailwind.config.ts
+│   ├── components.json                       # shadcn config
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   └── package.json
+└── .claude/docs/DESIGN.md
 ```
 
-### Data Flow: Ask Question
+### Key Architectural Decisions
 
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **Monorepo + `frontend/` directory** | API/UI contract co-evolution, single CI/CD visibility, shared docs |
+| 2 | **API client via `/api` facade** | Frontend calls `/api/*`; dev proxy rewrites to `/api/v4/*`; Azure SWA handles production routing |
+| 3 | **Typed stream boundary** | `StreamClient` abstraction with WebSocket-first and SSE fallback behind same event interface |
+| 4 | **Reconnect state machine** | Bounded backoff (1s/2s/5s/10s), heartbeat, resumable subscription; exposes `connecting/live/reconnecting/degraded/error` to UI |
+| 5 | **State split: TanStack Query for server, Zustand for ephemeral** | TanStack Query handles caching/invalidation; Zustand holds transient UI state (panel mode, autoscroll, stream lag) |
+| 6 | **Hybrid `pages/` + `features/` structure** | Routes stay thin in `pages/`; feature modules in `features/` own hooks/components/store/types |
+| 7 | **Cross-cutting foundations first** | WCAG 2.2 AA (live regions, focus, keyboard), i18n (ja/en), token-driven themes (light/dark/high-contrast), transcript virtualization |
+
+### API Client Architecture
+
+```typescript
+// lib/api/baseClient.ts
+import axios from 'axios';
+
+export const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Auth interceptor (will be wired to real auth)
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 ```
-Client
-  POST /api/v4/lecture/qa/ask
-    {session_id, user_id, question, retrieval_mode}
-    │
-    ▼
-LectureQAService.ask()
-  │
-  ├─→ Validate session ownership + qa_index_built
-  │
-  ├─→ FollowupService.resolve_query()
-  │     ├─→ Load recent QATurns (feature=lecture_qa)
-  │     └─→ Rewrite to standalone query using history
-  │
-  ├─→ RetrievalService.retrieve(standalone_query, mode)
-  │     ├─→ BM25Store.get(session_id)
-  │     ├─→ BM25.get_top_n(tokens, documents, top_k)
-  │     └─→ if source-plus-context: expand with neighbors + dedupe
-  │
-  ├─→ If no sources → return fallback
-  │
-  ├─→ AnswererService.answer(question, sources, history)
-  │     └─→ Azure OpenAI grounded generation
-  │
-  ├─→ VerifierService.verify(answer, sources)
-  │     ├─→ Azure OpenAI citation check
-  │     ├─→ If failed: constrained repair (once)
-  │     └─→ If still failed: low-confidence fallback
-  │
-  └─→ Persist QATurn(
-        feature=lecture_qa,
-        citations_json=sources,
-        verifier_supported=true
-      )
-    │
-    ▼
-Response {
-  answer,
-  confidence,
-  sources: LectureSource[],
-  verification_summary
+
+### TanStack Query Configuration
+
+```typescript
+// app/providers/QueryProvider.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60, // 1 minute
+      gcTime: 1000 * 60 * 5, // 5 minutes (formerly cacheTime)
+      refetchOnWindowFocus: false,
+      retry: (failureCount, error) => {
+        // Don't retry 4xx errors
+        if (error && 'status' in error && typeof error.status === 'number') {
+          return error.status >= 500 && failureCount < 3;
+        }
+        return failureCount < 3;
+      },
+    },
+  },
+});
+```
+
+### WebSocket Stream Architecture
+
+```typescript
+// lib/stream/StreamClient.ts
+type ConnectionState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error';
+
+interface StreamClientConfig {
+  wsUrl: string;
+  heartbeatInterval: number;
+  reconnectDelays: number[]; // [1000, 2000, 5000, 10000]
+}
+
+class StreamClient {
+  private ws: WebSocket | null = null;
+  private reconnectAttempts = 0;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  connect(sessionId: string): void {
+    // Connect, send subscription message, start heartbeat
+  }
+
+  disconnect(): void {
+    // Clean close, cancel timers
+  }
+
+  on<Event>(event: Event, handler: (payload: any) => void): Unsubscribe {
+    // Event subscription
+  }
 }
 ```
 
-### Error Handling
+### Domain Types
 
-| Domain Exception | HTTP Status | Condition |
-|------------------|-------------|-----------|
-| `LectureSessionNotFoundError` | 404 | Session not found |
-| `LectureSessionInactiveError` | 409 | Session not active |
-| `LectureQAIndexNotBuiltError` | 409 | Index not built yet |
-| `LectureQAIndexBuildInProgressError` | 409 | Index build in progress |
-| `AzureOpenAITimeoutError` | 503 | Azure call timeout |
+```typescript
+// types/lecture.ts
+export type LangMode = 'ja' | 'easy-ja' | 'en';
+export type ThemeMode = 'light' | 'dark' | 'high-contrast';
+export type LectureStatus = 'upcoming' | 'live' | 'ended';
 
-### Design Decisions
+export interface LectureListItem {
+  id: string;
+  courseName: string;
+  instructor: string;
+  room: string;
+  startAt: string; // ISO 8601
+  endAt: string;
+  status: LectureStatus;
+  langMode: LangMode;
+  accessibilityTags: string[];
+}
 
-| Decision | Rationale |
-|----------|-----------|
-| BM25 in-memory cache per session | Low latency for active sessions; simple scaling model |
-| SpeechEvent rows as BM25 chunks | Reuses finalized subtitle data without schema churn |
-| source-plus-context expansion | Improves answer quality by including surrounding context |
-| Follow-up query rewrite | Improves retrieval for pronoun/ellipsis references |
-| Verifier repair strategy | Single repair attempt for cost control; fallback on failure |
-| Feature-based QATurn partitioning | Keeps lecture/procedure QA history unified but queryable |
+// types/transcript.ts
+export interface TranscriptLine {
+  eventId: string;
+  sessionId: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+  translatedText?: string;
+  confidence: number;
+  speaker: 'teacher' | 'unknown';
+  isFinal: boolean;
+}
 
-### Dependencies to Add
+// types/qa.ts
+export interface LectureSource {
+  chunk_id: string;
+  type: 'speech' | 'visual';
+  text: string;
+  timestamp?: string;
+  start_ms?: number;
+  end_ms?: number;
+  speaker?: string;
+  bm25_score: number;
+  is_direct_hit: boolean;
+}
 
-```toml
-[project]
-dependencies = [
-    "rank-bm25>=0.2",           # BM25 local search
-    "openai>=1.0",              # Azure OpenAI client
-    "sudachipy>=0.6",           # Japanese tokenizer
-]
+export interface LectureAskResponse {
+  answer: string;
+  confidence: 'high' | 'medium' | 'low';
+  sources: LectureSource[];
+  verification_summary?: string;
+  action_next: string;
+  fallback?: string;
+}
 ```
 
-### Source Format with Timestamps
+### Design Token Integration
 
-```python
-# LectureSource for speech events
-LectureSource(
-    chunk_id=speech_event.id,
-    type="speech",
-    text=speech_event.text,
-    timestamp=format_ms_to_mmss(speech_event.start_ms),  # "05:23"
-    start_ms=speech_event.start_ms,
-    end_ms=speech_event.end_ms,
-    speaker=speech_event.speaker,
-    bm25_score=score,
-)
+```css
+/* styles/tokens.css */
+:root {
+  /* color - light theme defaults */
+  --bg-page: 248 250 252;
+  --bg-surface: 255 255 255;
+  --bg-muted: 241 245 249;
+  --fg-primary: 15 23 42;
+  --fg-secondary: 71 85 105;
+  --accent: 37 99 235;
 
-# Format for Azure OpenAI prompt
-def format_source_for_llm(source: LectureSource) -> str:
-    if source.type == "speech":
-        return f"[SPEECH: {source.timestamp}] {source.text}"
-    else:  # visual
-        return f"[VISUAL] {source.text}"
+  /* radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* spacing (4px base scale) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+
+  /* motion */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-theme="dark"] {
+  --bg-page: 15 23 42;
+  --bg-surface: 30 41 59;
+  --fg-primary: 248 250 252;
+}
+
+[data-theme="high-contrast"] {
+  --bg-page: 0 0 0;
+  --bg-surface: 0 0 0;
+  --fg-primary: 255 255 255;
+  --accent: 255 255 255;
+}
 ```
 
-### Confidence Scoring Formula
+### Accessibility Strategy
 
-```python
-def calculate_confidence(
-    bm25_scores: list[float],
-    source_count: int,
-    verification_passed: bool,
-) -> Literal["high", "medium", "low"]:
-    # Normalize BM25 score (0-1)
-    max_score = max(bm25_scores) if bm25_scores else 0
-    normalized_bm25 = min(max_score / 10.0, 1.0)
+1. **Live Regions**: `AppShell` contains a visually-hidden `div` with `aria-live="polite"` for status announcements
+2. **Focus Management**: `useFocusTrap` hook for modals/side-sheets; `useRestoreFocus` for returning focus after close
+3. **Keyboard Navigation**: All interactive elements are keyboard-accessible; Arrow keys for tabs/lists
+4. **Reduced Motion**: `useReducedMotion()` hook; Framer Motion respects `prefers-reduced-motion`
+5. **Screen Reader**: Semantic HTML; ARIA labels on icon-only buttons; descriptive link text
 
-    # Source count factor (0-1, capped at 5)
-    source_factor = min(source_count / 5.0, 1.0)
+### Implementation Roadmap
 
-    # Verification score (0 or 1)
-    verification_score = 1.0 if verification_passed else 0.0
+| Step | Deliverable | Dependencies |
+|------|-------------|--------------|
+| 1 | Create `frontend/` app (Vite+React+TS), path aliases, lint/test base | None |
+| 2 | Add Tailwind + shadcn/ui + Radix setup | 1 |
+| 3 | Add design tokens + theme engine (light/dark/high-contrast) | 2 |
+| 4 | Add i18next (`ja/en`) and translation namespace structure | 1 |
+| 5 | Build API layer (`baseClient`, auth headers, query key factory, QueryClient defaults) | 1 |
+| 6 | Build Stream layer (`StreamClient`, WS adapter, SSE fallback, reconnect policy) | 5 |
+| 7 | Configure router + all route shells + settings side-sheet route behavior | 1, 4 |
+| 8 | Implement lecture list/sources/review pages with TanStack Query/Table | 5, 7 |
+| 9 | Implement live lecture page (3 panels, virtual transcript, live regions, keyboard nav) | 6, 7 |
+| 10 | Azure SWA deploy config, env strategy, a11y/perf tests, operator page hardening | 3, 8, 9 |
 
-    # Weighted combination
-    confidence = (
-        0.4 * normalized_bm25 +
-        0.3 * source_factor +
-        0.3 * verification_score
-    )
+### Development Workflow
 
-    if confidence > 0.7:
-        return "high"
-    elif confidence > 0.4:
-        return "medium"
-    return "low"
+```bash
+# Install dependencies
+cd frontend && uv sync  # or npm install
+
+# Dev server with API proxy
+npm run dev  # Vite proxies /api -> http://localhost:8000/api/v4
+
+# Type check
+npm run type-check
+
+# Lint
+npm run lint
+
+# Test
+npm run test
+
+# Build for production
+npm run build
 ```
 
-### Verifier Prompt Pattern (Claim-by-Claim)
+### Azure Static Web Apps Configuration
 
-```python
-VERIFIER_PROMPT = """
-Given an answer and source documents, verify each factual claim.
-
-Answer: {answer}
-
-Sources:
-{sources_formatted}
-
-Task: For each claim in the answer:
-1. Extract the claim
-2. Check if it's supported by sources
-3. Mark: SUPPORTED | PARTIAL | NOT_SUPPORTED
-4. If NOT_SUPPORTED, provide correction
-
-Return JSON format with verification summary.
-"""
+```json
+{
+  "platform": "node",
+  "appName": "sit-copilot-frontend",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "api": "app/main.py",
+  "routes": [
+    { "route": "/api/*", "methods": ["GET", "POST", "PUT", "DELETE"], "allowedRoles": ["anonymous"] },
+    { "route": "/*", "rewrite": "/index.html" }
+  ]
+}
 ```
 
-### Multi-Field Score Fusion (Future Enhancement)
+### Frontend Key Decisions
+
+| Decision | Rationale | Date |
+|----------|-----------|------|
+| Monorepo structure with `frontend/` directory | Single repository simplifies API/UI contract evolution and CI/CD | 2026-02-21 |
+| API facade with `/api` prefix in frontend | Dev proxy rewrites to `/api/v4/*`; production routing handled by Azure SWA | 2026-02-21 |
+| WebSocket-first with SSE fallback for live streams | WebSocket provides bidirectional low-latency communication; SSE as fallback for restrictive networks | 2026-02-21 |
+| TanStack Query for server state, Zustand for ephemeral UI state | Clear separation: Query handles caching/invalidation; Zustand holds transient state | 2026-02-21 |
+| shadcn/ui + Radix UI for component primitives | Accessible, unstyled components that can be customized via Tailwind and design tokens | 2026-02-21 |
+| TanStack Virtual for transcript list | Handles thousands of transcript lines without performance degradation | 2026-02-21 |
+| Design tokens via CSS variables | Enables theme switching (light/dark/high-contrast) without rebuilding CSS | 2026-02-21 |
+| i18next for Japanese/English localization | Industry standard with namespace support and interpolation | 2026-02-21 |
 
-For speech + visual content (future OCR integration):
-
-```python
-class LectureRetrievalService:
-    async def retrieve_with_fusion(
-        self,
-        session_id: str,
-        query: str,
-        speech_weight: float = 0.7,
-        visual_weight: float = 0.3,
-    ) -> list[LectureSource]:
-        speech_scores = self._bm25_speech.get_scores(query)
-        visual_scores = self._bm25_visual.get_scores(query)
-
-        # Weighted fusion
-        combined = (
-            speech_weight * speech_scores +
-            visual_weight * visual_scores
-        )
-
-        top_indices = np.argsort(combined)[::-1][:top_k]
-        return [self._all_sources[i] for i in top_indices]
-```
-
-### Thread-Safe BM25 Pattern (CRITICAL)
-
-**⚠️ rank-bm25 is NOT thread-safe**
-
-Must create new BM25Okapi instance per request:
-
-```python
-class LectureBM25Index:
-    """Thread-safe BM25 index with cached tokenization."""
-
-    def __init__(self):
-        self._chunks: list[dict] = []
-        self._tokenized_corpus: list[list[str]] = []  # Cache tokenization
-        self._tokenizer = dictionary.Dictionary().create()
-        self._mode = tokenizer.Tokenizer.SplitMode.C  # Preserve compounds
-
-    def add_speech_events(self, events: list[SpeechEvent]):
-        """Add events and update tokenized corpus."""
-        for event in events:
-            self._chunks.append({
-                "id": event.id,
-                "text": event.text,
-                "start_ms": event.start_ms,
-                "type": "speech",
-            })
-            # Tokenize once, store for reuse
-            tokens = [m.surface() for m in self._tokenizer.tokenize(event.text, self._mode)]
-            self._tokenized_corpus.append(tokens)
-
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 5,
-        mode: Literal["source-only", "source-plus-context"] = "source-only",
-        context_window: int = 1,
-    ) -> list[dict]:
-        """Thread-safe retrieval with context expansion."""
-        # Create BM25 instance per request (safe for concurrent use)
-        bm25 = BM25Okapi(self._tokenized_corpus, k1=1.2, b=0.5)
-
-        # Tokenize query
-        query_tokens = [m.surface() for m in self._tokenizer.tokenize(query, self._mode)]
-
-        # Get top-k indices
-        top_indices = bm25.get_top_n(query_tokens, list(range(len(self._chunks))), n=top_k)
-
-        # Expand context if requested
-        if mode == "source-plus-context" and context_window > 0:
-            expanded_indices = set()
-            for idx in top_indices:
-                for offset in range(-context_window, context_window + 1):
-                    neighbor_idx = idx + offset
-                    if 0 <= neighbor_idx < len(self._chunks):
-                        expanded_indices.add(neighbor_idx)
-            top_indices = sorted(expanded_indices)
-
-        return [self._chunks[i] for i in top_indices]
-```
-
-### SudachiPy Configuration
-
-```python
-# Module-level singleton (FastAPI startup)
-_tokenizer: tokenizer.Tokenizer | None = None
-
-def get_tokenizer() -> tokenizer.Tokenizer:
-    global _tokenizer
-    if _tokenizer is None:
-        _tokenizer = dictionary.Dictionary().create()
-    return _tokenizer
-
-# Mode C for lecture content (preserves compound terms)
-MODE_C = tokenizer.Tokenizer.SplitMode.C
-```
-
-### Context Expansion Pattern
-
-```python
-def retrieve_with_context(
-    chunks: list[dict],
-    top_indices: list[int],
-    context_window: int = 1,
-) -> list[dict]:
-    """Post-retrieval expansion with deduplication."""
-    expanded_indices = set()
-    for idx in top_indices:
-        for offset in range(-context_window, context_window + 1):
-            neighbor_idx = idx + offset
-            if 0 <= neighbor_idx < len(chunks):
-                expanded_indices.add(neighbor_idx)
-    return [chunks[i] for i in sorted(expanded_indices)]
-```
-
-### BM25 Parameters for Japanese
-
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| `k1` | 1.2-1.5 | Japanese text has shorter terms, lower saturation |
-| `b` | 0.5-0.75 | Lecture chunks are similar length, less normalization |
-| `top_k` | 5-10 | Balance context vs. noise |
-| `context_window` | 0-2 | 0 for source-only, 1-2 for expanded context |
-| Sudachi mode | C | Preserve compound terms (e.g., "国家公務員") |
-
-### Implementation Task Breakdown
-
-| ID | Task | Dependencies |
-|----|------|--------------|
-| 1 | Add dependencies (rank-bm25, openai, sudachipy) | None |
-| 2 | Create schemas/lecture_qa.py | 1 |
-| 3 | Create lecture_bm25_store.py (cache + lock) | 1 |
-| 4 | Create lecture_index_service.py | 2, 3 |
-| 5 | Create lecture_followup_service.py | 2 |
-| 6 | Create lecture_retrieval_service.py | 3 |
-| 7 | Create lecture_answerer_service.py | 2 |
-| 8 | Create lecture_verifier_service.py | 2 |
-| 9 | Create lecture_qa_service.py (orchestrator) | 4, 5, 6, 7, 8 |
-| 10 | Create api/v4/lecture_qa.py + DI wiring | 9 |
-| 11 | Write unit tests | Parallel with 4-10 |
-| 12 | Write integration tests | 10 |
-
-### Success Criteria
-
-- `pytest` passes
-- Index build creates BM25 index from SpeechEvents
-- Ask returns grounded answers with sources
-- Follow-up questions use conversation context
-- Verifier validates citations and falls back gracefully
-- `source-plus-context` mode includes neighboring chunks
-
-## F1 OCR Event Persistence Planning (2026-02-20)
-
-### Project: F1 Step 4 (`f1-ocr-event-persistence`)
-
-**Goal**: Add OCR visual-event ingestion and persistence to lecture live flow (`/api/v4/lecture/visual/event` + `visual_events` table), while preserving existing ownership checks and fallback-safe behavior.
-
-### Scope
-
-- **Include**
-  - Multipart visual event ingest endpoint (`session_id`, `timestamp_ms`, `source`, `change_score`, `image`)
-  - OCR result persistence with `quality` classification (`good|warn|bad`)
-  - Session ownership and active-status enforcement
-  - Schema/service/API test coverage for success + failure paths
-- **Exclude**
-  - 30-second summary generation
-  - session finalize workflow
-  - lecture index build/search extension
-  - frontend camera capture implementation
-
-### Planned Architecture
-
-- Extend existing lecture vertical slice:
-  - `app/api/v4/lecture.py` (thin route + DI)
-  - `app/services/lecture_live_service.py` (business policy + persistence)
-  - `app/models/visual_event.py` (new ORM model)
-  - `app/schemas/lecture.py` (visual ingest response contract)
-- Introduce OCR adapter boundary:
-  - `app/services/vision_ocr_service.py` (protocol + swappable implementation)
-  - keep tests deterministic with non-networked fake/stub path
-
-### Key Decisions
-
-1. **Persist-first fallback policy**
-   - OCR failure should not hard-fail the lecture flow.
-   - Persist event with degraded quality (`quality=bad`) and safe defaults.
-
-2. **Privacy-safe default**
-   - Do not persist raw image bytes in DB.
-   - Keep `blob_path` nullable for later storage integration.
-
-3. **Error semantics aligned with existing lecture APIs**
-   - Unknown/other-user session: `404`
-   - Non-active session: `409`
-   - Request validation failure: existing `400 validation_error` contract
-
-4. **Scope freeze to F1 step-4**
-   - No summary/finalize/index side expansion in this feature.
-
-## F1 OCR Event Persistence Implementation (2026-02-20)
-
-### Implemented Scope
-
-- Added `POST /api/v4/lecture/visual/event` multipart endpoint under lecture router.
-- Added `visual_events` persistence model and `LectureSession` relationship.
-- Extended lecture live service with OCR visual ingest orchestration.
-- Added OCR adapter boundary (`VisionOCRService`) with deterministic default implementation (`NoopVisionOCRService`).
-- Enforced ownership/active-session guards consistent with existing lecture endpoints.
-- Enforced JPEG-only upload validation at schema validation layer for MVP.
-- Added fallback-safe behavior: OCR provider errors still persist event with `quality=bad`.
-
-### Delivered Files
-
-- `app/models/visual_event.py`
-- `app/services/vision_ocr_service.py`
-- `app/api/v4/lecture.py`
-- `app/services/lecture_live_service.py`
-- `app/schemas/lecture.py`
-- `tests/api/v4/test_lecture.py`
-- `tests/unit/services/test_lecture_live_service.py`
-- `tests/unit/schemas/test_lecture_schemas.py`
-- wiring updates:
-  - `app/models/lecture_session.py`
-  - `app/models/__init__.py`
-  - `app/main.py`
-  - `tests/conftest.py`
-  - `app/services/__init__.py`
-  - `app/schemas/__init__.py`
-  - `pyproject.toml` (`python-multipart` added)
-
-### Verification Results
-
-- Changed-scope checks:
-  - `uv run ruff check <changed files>`: pass
-  - `uv run ruff format --check <changed files>`: pass
-  - `uv run ty check app/`: pass
-  - `uv run pytest tests/unit/schemas/test_lecture_schemas.py tests/unit/services/test_lecture_live_service.py tests/api/v4/test_lecture.py -q`: pass (38 passed)
-- Full-suite checks:
-  - `uv run pytest -v`: pass (122 passed, 1 skipped)
-  - `uv run ruff check .`: fails on pre-existing unrelated files under `.claude/hooks`, `.claude/skills`, and `tests/unit/services/test_lecture_qa_service.py`
-  - `uv run ruff format --check .`: fails on pre-existing unrelated files under `.claude/hooks` and others
-
-### Post-Review Hardening (High/Medium Findings Fixed)
-
-- Added bounded-read upload guard for visual ingest to prevent unbounded memory growth:
-  - configurable max via `lecture_visual_max_image_bytes`
-  - read limit enforced before validation
-- Added JPEG signature verification in addition to MIME header checks.
-- Added OCR failure observability:
-  - introduced `VisionOCRServiceError`
-  - fallback path now records warning logs with error type before degrading to `quality=bad`
-- Added authorization regression coverage for visual path:
-  - cross-user session ownership rejection tests at service and API layers
-- Added upload-hardening regression coverage:
-  - invalid JPEG signature rejection test
-  - oversized upload rejection test
-
-## F1 Summary + Finalize Planning (2026-02-20)
-
-### Project: F1 Step 5-6 (`f1-summary-and-finalize`)
-
-**Goal**: Add live summary retrieval and session finalize orchestration to complete F1 step-5/6 backend scope.
-
-### Scope
-
-- **Include**
-  - `GET /api/v4/lecture/summary/latest?session_id=...`
-  - `POST /api/v4/lecture/session/finalize`
-  - `summary_windows` persistence
-  - `lecture_chunks` persistence
-  - finalize idempotency (`active -> finalized`, re-call safe)
-  - optional local BM25 build trigger when `build_qa_index=true`
-- **Exclude**
-  - Azure AI Search push for `lecture_index`
-  - real Azure OpenAI summarizer runtime
-  - frontend polling/UI changes
-
-### Planned Architecture
-
-- Add two dedicated services to keep lecture route thin:
-  - `lecture_summary_service.py`
-  - `lecture_finalize_service.py`
-- Keep existing auth/ownership guard patterns from lecture live endpoints.
-- Use deterministic summary generation in MVP to keep testability and avoid runtime external dependency coupling.
-- Persist artifacts required by SPEC step-6:
-  - summary windows (30s windows, 60s lookback)
-  - lecture chunks (`speech|visual|merged`)
-
-### Key Decisions
-
-1. **Finalize is idempotent by contract**
-   - First call finalizes active session and generates artifacts.
-   - Subsequent calls return stable stats without duplicate records.
-
-2. **Summary generation uses deterministic baseline first**
-   - MVP keeps stable behavior without requiring real LLM runtime.
-   - Optional AI summarizer integration remains a later, additive enhancement.
-
-3. **`build_qa_index` integrates with existing local BM25 builder**
-   - Reuses current `lecture_index_service` without introducing Azure Search coupling in this sprint.
-
-4. **Artifact persistence precedes external indexing**
-   - `summary_windows` + `lecture_chunks` are persisted locally now.
-   - Azure AI Search push is deferred to dedicated next feature.
-
-## Lecture Index Azure Search Integration Planning (2026-02-20)
-
-### Project: `lecture-index-azure-search-integration`
-
-**Goal**: Push finalized lecture chunks to Azure AI Search `lecture_index` and enable session-scoped lecture QA retrieval from Azure Search, while preserving BM25 fallback for local/dev reliability.
-
-### Scope
-
-- **Include**
-  - Azure Search settings (`enabled`, `endpoint`, `api_key`, `index_name`)
-  - Azure Search index lifecycle and document upsert service
-  - finalize/index-build integration to sync `lecture_chunks` into Azure
-  - update `lecture_chunks.indexed_to_search` based on indexing result
-  - Azure retrieval adapter for `/lecture/qa/ask` + `/followup` with mandatory `session_id` filter
-  - BM25 fallback path when Azure Search is disabled/unavailable
-- **Exclude**
-  - frontend changes
-  - large ranking redesign outside current QA contract
-  - full alias-based zero-downtime migration workflow in this sprint
-
-### Key Decisions
-
-1. **Finalize remains authoritative index sync point**
-   - `finalize`/index-build path is the single source of truth for Azure index synchronization.
-
-2. **Canonical source = local `lecture_chunks`**
-   - Azure documents are derived from `lecture_chunks` + `lecture_sessions` metadata.
-
-3. **State consistency contract**
-   - `qa_index_built=true` only when Azure index sync succeeds (or explicit fallback policy is met).
-   - `indexed_to_search` is updated per successfully indexed chunk.
-
-4. **Safe migration strategy**
-   - Keep current BM25 retrieval available as fallback behind config toggle for local/dev and rollback safety.
-
-5. **Session isolation is non-negotiable**
-   - Azure retrieval must enforce `session_id` filtering in all lecture QA queries.
-
-## F0 Readiness Check Planning (2026-02-20)
-
-### Project: `f0-readiness-check`
-
-**Goal**: Add `POST /api/v4/course/readiness/check` with deterministic, rule-based readiness guidance that returns the full response contract within the F0 latency target.
-
-### Scope
-
-- **Include**
-  - readiness endpoint + DI wiring
-  - strict request/response schemas for readiness contract
-  - deterministic readiness scoring (0-100 clamp)
-  - auth guard using existing token pattern
-  - API + service + schema tests
-- **Exclude**
-  - blob/PDF content parsing from `first_material_blob_path`
-  - external LLM/OpenAI dependency for score generation
-  - DB persistence for readiness results in this phase
-
-### Key Decisions
-
-1. **Deterministic scoring is the source of truth**
-   - Score computation is fully rule-based and does not depend on external model outputs.
-
-2. **Use current backend layering and feature module structure**
-   - Implement with `app/api/v4/readiness.py`, `app/schemas/readiness.py`, `app/services/readiness_service.py`.
-
-3. **Auth alignment with lecture-side protected routes**
-   - Require `X-Lecture-Token` for readiness check to match existing protected API baseline.
-
-4. **No persistence in F0 baseline**
-   - Keep readiness check stateless to reduce migration and regression risk for the initial delivery.
-
-## F1 Speech Token Issuance Planning (2026-02-20)
-
-### Project: `f1-speech-token-issuance`
-
-**Goal**: Add `GET /api/v4/auth/speech-token` that securely issues short-lived Azure Speech SDK tokens from backend without exposing long-lived subscription keys to clients.
-
-### Scope
-
-- **Include**
-  - `GET /api/v4/auth/speech-token` route
-  - server-side Azure Speech STS exchange (`/sts/v1.0/issueToken`)
-  - typed response contract: `token`, `region`, `expires_in_sec`
-  - speech settings wiring (`azure_speech_key`, `azure_speech_region`)
-  - schema/service/API tests for success + failure paths
-- **Exclude**
-  - frontend Speech SDK integration/refresh loop
-  - Entra ID migration for speech auth
-  - issuance audit persistence
-  - performance cache optimization in first implementation
-
-### Key Decisions
-
-1. **Backend-only secret boundary**
-   - Speech subscription key remains server-side only; frontend receives short-lived token + region.
-
-2. **Auth alignment with lecture-protected endpoints**
-   - Speech token endpoint requires `X-Lecture-Token` to avoid anonymous token minting.
-
-3. **Conservative client refresh metadata**
-   - Return `expires_in_sec=540` while Azure token lifetime is 600 seconds to reduce expiry-race risk on clients.
-
-4. **Deterministic failure mapping**
-   - Speech STS/config failures are mapped to `503` so clients can retry safely without exposing internal details.
-
-5. **MVP issues token per request**
-   - Do not add server-side token cache in first implementation; optimize only if measured traffic needs it.
-
-## F1 Speech Token Issuance Implementation (2026-02-20)
-
-### Implemented Scope
-
-- Added `GET /api/v4/auth/speech-token` under an authenticated `auth` router.
-- Added backend Azure Speech STS exchange service (`/sts/v1.0/issueToken`) with:
-  - strict configuration validation (`azure_speech_key`, `azure_speech_region`)
-  - deterministic provider/config error mapping for API safety
-  - conservative TTL metadata response (`expires_in_sec=540`)
-- Added speech token response schema contract and unit/API tests.
-- Wired route registration into app bootstrap (`app/main.py`, `app/api/v4/__init__.py`).
-
-### Delivered Files
-
-- `app/api/v4/auth.py`
-- `app/services/speech_token_service.py`
-- `app/schemas/speech_token.py`
-- `tests/api/v4/test_auth.py`
-- `tests/unit/services/test_speech_token_service.py`
-- `tests/unit/schemas/test_speech_token_schemas.py`
-- wiring updates:
-  - `app/core/config.py`
-  - `app/main.py`
-  - `app/api/v4/__init__.py`
-  - `app/services/__init__.py`
-  - `app/schemas/__init__.py`
-
-### Verification Results
-
-- Lane-scope checks (new feature scope):
-  - `uv run ruff check <speech-token changed files>`: pass
-  - `uv run ty check app/`: pass
-  - `uv run pytest tests/unit/schemas/test_speech_token_schemas.py tests/unit/services/test_speech_token_service.py tests/api/v4/test_auth.py -q`: pass
-- Global checks:
-  - `uv run ty check app/`: pass
-  - `uv run pytest -v`: pass (`190 passed`)
-  - `uv run ruff check .`: fails on pre-existing unrelated `.claude/hooks/*` and `.claude/skills/checkpointing/checkpoint.py`
-  - `uv run ruff format --check .`: fails on pre-existing unrelated `.claude/hooks/*` and existing non-feature files
-
-### Post-Review Hardening (Medium/Low Findings Fixed)
-
-- Added in-memory rate limit guard + issuance telemetry hooks on speech-token endpoint.
-- Added config-level speech region format validation with normalization.
-- Added configurable speech token TTL + STS timeout knobs via settings and DI wiring.
-- Tightened STS requester typing contract (`Protocol`-based callable signature).
-- Added test coverage for:
-  - real DI factory path (settings + requester wiring)
-  - rate-limit rejection (`429`)
-  - empty-token provider response branch
-  - speech region config validation
-
-## F4 Grounded QA Productionization Planning (2026-02-21)
-
-### Project: `f4-grounded-qa-productionization`
-
-**Goal**: Productionize lecture grounded QA (F4) by hardening runtime integrations, fail-safe groundedness behavior, and audit/observability without breaking existing API consumers.
-
-### Scope
-
-- **Include**
-  - Real Azure OpenAI integration for answer generation, verification, and follow-up rewrite
-  - Deterministic no-source fallback and fail-closed verifier policy hardening
-  - Citation/source integrity checks before response return
-  - Persistence audit semantics (`outcome`/reason alignment)
-  - Grounded QA E2E + failure-path test expansion
-- **Exclude**
-  - Frontend redesign
-  - JWT/auth model redesign in this feature
-  - Large retrieval/ranking redesign beyond BM25 + Azure Search boundaries
-
-### Key Decisions
-
-1. **Keep API contract backward-compatible in this productionization pass**
-   - Existing `/lecture/qa` response fields remain valid.
-   - Any new fields must be additive/optional only.
-
-2. **Groundedness gates are strict and staged**
-   - Pipeline remains `retrieve -> answer -> verify -> persist`.
-   - Verifier parse/runtime failures are fail-closed.
-   - No-source path remains deterministic and low-confidence.
-
-3. **Azure-first runtime, BM25 fallback remains controlled**
-   - Azure Search/Azure OpenAI serve as production-default backends when configured.
-   - BM25 is retained as fallback with explicit durability limitations.
-
-4. **Audit fidelity is a first-class requirement**
-   - QA persistence must distinguish success/no-source/verifier-fail outcomes.
-   - Groundedness SLI signals (fallback/verifier/citation integrity) are observable.
-
-### Merge Gate Status
-
-- Scope Frozen: Ready
-- Evidence Ready: Ready (local codebase analysis + measured quality gates)
-- Interfaces Locked: Ready
-- Quality Gates Defined: Ready
-- Risks Accepted: Ready
-
-## F4 Lecture QA Test Architecture Expansion (2026-02-21)
-
-### Goal
-
-- Raise test coverage from `81%` to `85%+` by targeting low-coverage lecture QA services:
-  - `app/services/lecture_bm25_store.py`
-  - `app/services/lecture_verifier_service.py`
-  - `app/services/lecture_followup_service.py`
-
-### Test Design Decisions
-
-1. **Service-first unit testing before endpoint expansion**
-   - Prioritize deterministic unit tests at service boundaries to close branch gaps quickly.
-   - Reuse existing API/integration tests only for critical wiring checks.
-
-2. **Standardize Azure OpenAI HTTP mocking pattern**
-   - Follow existing `urlopen` patch pattern (`@patch("app.services.<module>.urlopen")`).
-   - Use deterministic response payload builders for success, parse failure, HTTPError, URLError.
-
-3. **Follow pytest composition style used in current codebase**
-   - Prefer fixture composition and helper builders over test-class inheritance.
-   - Keep fake dependency classes local to test files (same pattern as `FakeAzureSearchService` and QA mocks).
-
-4. **Coverage gate by branch families (not only line count)**
-   - Gate additions by behavior families:
-     - local fallback paths
-     - remote Azure success/failure paths
-     - parser/normalization fail-closed paths
-     - DB history ordering and ownership filtering
-     - lock/cache lifecycle correctness
-
-### Planned Deliverables
-
-- New: `tests/unit/services/test_lecture_bm25_store.py`
-- Expand: `tests/unit/services/test_lecture_verifier_service.py`
-- New: `tests/unit/services/test_lecture_followup_service.py`
-- Coverage verification command set for focused QA services and global threshold regression check.
-
-## F1 Azure OpenAI Summary Generator Planning (2026-02-21)
-
-### Project: `f1-azure-openai-summary-generator`
-
-**Goal**: Replace deterministic F1 summary text concatenation with Azure OpenAI-powered 30-second summary generation while preserving existing summary API response contract.
-
-### Scope
-
-- **Include**
-  - New `LectureSummaryGeneratorService` interface + Azure OpenAI implementation (`gpt-4o`)
-  - Japanese prompt template for 30-second summary with evidence tags (`speech|slide|board`)
-  - Integration into `SqlAlchemyLectureSummaryService._build_window()` flow
-  - Fail-closed behavior when Azure OpenAI is disabled or unavailable (no deterministic fallback)
-  - Keep `LectureSummaryLatestResponse` payload shape and persistence behavior unchanged
-- **Exclude**
-  - Endpoint contract redesign for `/api/v4/lecture/summary/latest`
-  - Changes to `summary_windows` table schema
-  - QA retrieval/ranking redesign
-
-### Key Decisions
-
-1. **Introduce a dedicated summary generation boundary**
-   - Add `LectureSummaryGeneratorService` protocol with async generation API.
-   - Default implementation: `AzureOpenAILectureSummaryGeneratorService`.
-
-2. **Keep window orchestration in existing summary service**
-   - `SqlAlchemyLectureSummaryService` remains owner of ownership checks, event fetch, window math, and DB upsert.
-   - Only summary synthesis (and optional key-term tag suggestion) moves behind generator boundary.
-
-3. **Fail-closed policy for Azure summary runtime**
-   - If `azure_openai_enabled` is false, credentials/endpoint/model are invalid, or Azure call/parse fails, raise service error.
-   - Do not return deterministic concatenation fallback for non-empty windows.
-   - API layer maps runtime failure to `503` to align with existing QA backend failure semantics.
-
-4. **Preserve response contract and evidence integrity**
-   - Continue returning `LectureSummaryLatestResponse` (`session_id`, `window_*`, `summary`, `key_terms`, `evidence`, `status`).
-   - Evidence refs (`ref_id`) remain DB-derived from `SpeechEvent`/`VisualEvent` IDs to prevent hallucinated references.
-   - Enforce `summary` max length 600 chars server-side regardless of model output.
-
-5. **Japanese structured prompt + strict output validation**
-   - Use Japanese instructions and require JSON output for stable parsing.
-   - Validate tags against allowed enum only (`speech|slide|board`).
-   - On invalid/empty payload, treat as generation failure (no fallback).
-
-### Post-Review Hardening (2026-02-21)
-
-- `SqlAlchemyLectureSummaryService` now propagates `LectureSession.lang_mode` into summary generation for both latest-window and rebuild flows.
-- Added explicit regression coverage for inactive session rejection (`LectureSessionInactiveError`) in summary service tests.
-- Added explicit English-mode coverage:
-  - service integration test verifies `lang_mode="en"` is passed to generator
-  - generator unit test verifies `lang_mode="en"` successful response handling
-
-## TODO
-
-- [ ] Test Agent Teams workflow end-to-end with a real project
-- [ ] Update hooks for Agent Teams quality gates
-- [ ] Evaluate optimal team size for /team-implement
-- [ ] Implement Sprint0 backend following this design
-- [ ] Validate AsyncClient approach with actual pytest run
-- [ ] Implement lecture QA index build endpoint (`/api/v4/lecture/qa/index/build`) and BM25 in-memory store
-- [ ] Implement lecture QA ask endpoint with follow-up rewrite, retrieval modes, Azure answerer, and verifier pipeline
-- [ ] Add lecture QA unit/integration tests for verifier-fail fallback, no-source fallback, and context-expansion behavior
-- [x] Implement F0 `f0-readiness-check` from approved `/startproject` plan
-- [x] Implement Sprint4 step-4 `f1-ocr-event-persistence` from approved startproject plan
-- [x] Implement Sprint3 `sprint3-f1-speech-events-and-subtitles` from approved startproject plan
-- [x] Implement Sprint2 procedure-qa-minimal from approved startproject plan
-
-## Open Questions
-
-- [ ] Optimal team size for /team-implement (2-3 vs 4-5 teammates)?
-- [ ] Should /team-review be mandatory or optional?
-- [ ] How to handle Compaction in long Agent Teams sessions?
-
-## Changelog
-
-| Date | Changes |
-|------|---------|
-| 2026-02-21 | Added F4 lecture QA test-architecture expansion plan for `lecture_bm25_store`, `lecture_verifier_service`, and `lecture_followup_service`, including service-first unit strategy, standardized Azure OpenAI mock approach, branch-family coverage gates, and target deliverables to raise overall coverage to 85%+ |
-| 2026-02-21 | Completed F4 QA test completion architecture: detailed test design for bm25_store (0%→95%+), verifier (49%→85%+), followup (35%→85%+), mock strategy for Azure OpenAI and BM25, 8-step implementation plan with dependencies, and test case checklists for each service |
-| 2026-02-21 | Fixed review findings for lecture summary/QA hardening: gated summary DI to Azure-available runtime with explicit unavailable generator, mapped lecture summary/finalize runtime failures to `503`, capped and deduplicated summary key-term evidence tags to schema limit, and made verifier `passed` parsing strict/fail-closed (`"true"/"false"` only for string normalization) with regression tests |
-| 2026-02-21 | Applied F1 summary review follow-ups: propagated `session.lang_mode` into summary generation, added inactive-session error-path test, and added explicit English-mode tests in summary service/generator |
-| 2026-02-21 | Added F1 Azure summary generator design: `LectureSummaryGeneratorService` boundary, Japanese structured prompt, fail-closed Azure policy (no deterministic fallback), and `LectureSummaryLatestResponse` compatibility constraints |
-| 2026-02-21 | Added `/startproject` plan for `f4-grounded-qa-productionization`: locked backward-compatible `/lecture/qa` interfaces, fail-closed grounded QA policy, Azure runtime hardening scope, audit reason-code persistence requirement, and approval-ready Merge Gate |
-| 2026-02-21 | Applied team-review hardening for `f1-speech-token-issuance` (Medium/Low): speech-token rate limit + telemetry, `azure_speech_region` format validation, stricter requester typing, and additional DI/rate-limit/empty-token/config tests |
-| 2026-02-20 | Implemented `f1-speech-token-issuance`: added authenticated `GET /api/v4/auth/speech-token`, Azure Speech STS issuance service, speech token schema, and schema/service/API tests |
-| 2026-02-20 | Added `/startproject` design for `f1-speech-token-issuance`: backend-only Azure Speech STS token exchange, `GET /api/v4/auth/speech-token` interface lock, lecture-token auth alignment, and `503`-mapped failure policy |
-| 2026-02-20 | Implemented F0 `f0-readiness-check`: added authenticated `POST /api/v4/course/readiness/check`, strict readiness schemas, deterministic readiness scoring service, and API/schema/service tests |
-| 2026-02-20 | Added `/startproject` design for `f0-readiness-check`: deterministic readiness scoring, `/api/v4/course/readiness/check` interface lock, `X-Lecture-Token` auth alignment, and stateless (no-persistence) F0 scope freeze |
-| 2026-02-20 | Applied post-review hardening for `lecture-index-azure-search-integration`: Azure retrieval now supports `source-plus-context` expansion, Azure Search service is process-shared for schema-cache stability, read path no longer performs schema management, skip logic checks remote session documents, and lecture QA endpoints map backend runtime failures to `503` |
-| 2026-02-20 | Added `/startproject` design for `lecture-index-azure-search-integration`: Azure Search-backed lecture index sync from `lecture_chunks`, session-filtered lecture QA retrieval, `indexed_to_search` consistency contract, and BM25 fallback strategy |
-| 2026-02-20 | Added Sprint5 `/startproject` plan for `f1-summary-and-finalize`: `summary/latest` + `session/finalize`, `summary_windows`/`lecture_chunks` persistence, idempotent finalize contract, and optional local BM25 build trigger |
-| 2026-02-20 | Applied team-review hardening for `f1-ocr-event-persistence` (High/Medium): bounded upload read/size limits, JPEG signature validation, OCR failure observability (`VisionOCRServiceError` + warning logs), and cross-user + oversized/invalid-signature regression tests |
-| 2026-02-20 | Implemented Sprint4 `f1-ocr-event-persistence`: added `/api/v4/lecture/visual/event`, `visual_events` model, OCR adapter boundary, fallback-safe persistence (`quality=bad` on OCR failure), and schema/service/API tests |
-| 2026-02-20 | Added Sprint4 `/startproject` plan for `f1-ocr-event-persistence`: visual OCR ingest endpoint, `visual_events` persistence, OCR adapter boundary, and fallback-safe quality policy (`quality=bad` on OCR failure) |
-| 2026-02-20 | Added three Codex-native skills from checkpoint pattern mining: `planning-research-merge-gate`, `owner-lane-team-implement`, and `grounded-qa-service-playbook`; enabled all in `.codex/config.toml` |
-| 2026-02-20 | Wired lecture QA Azure dependencies to runtime settings: added `AZURE_OPENAI_*` and `LECTURE_QA_RETRIEVAL_LIMIT` config fields, switched `lecture_qa` DI to use settings-backed credentials/model, and extended settings loading to include `.env.azure.generated` with `extra=ignore` |
-| 2026-02-20 | Hardened Critical/High findings: added `.env.azure.generated.example` template and `.gitignore` protection for `.env.azure.generated`/env artifacts, switched lecture QA retrieval dependency to a shared in-process BM25 store, and enforced authenticated per-user `/api/v4/settings/me` access (`X-Lecture-Token` + `X-User-Id`) |
-| 2026-02-20 | Added Lecture QA architecture design: BM25 index build from `SpeechEvent`, `source-only`/`source-plus-context` retrieval modes, Azure OpenAI answer+verification pipeline, and follow-up context strategy |
-| 2026-02-20 | Recorded Azure MVP provisioning: created RG + Key Vault/Storage/Search/Speech/Vision/OpenAI/App Insights in `japaneast`, stored service secrets in Key Vault, and generated local bootstrap file `.env.azure.generated` |
-| 2026-02-20 | Hardened Sprint3 High/Medium findings: added lecture auth/user-context guards, ownership-aware ingestion query, ROI geometry validation, and new `401`/`409`/cross-user regression tests |
-| 2026-02-20 | Implemented Sprint3 `sprint3-f1-speech-events-and-subtitles`: added lecture session start/speech chunk APIs, `lecture_sessions` + `speech_events` persistence, lecture live service, and full schema/service/API tests |
-| 2026-02-20 | Added Sprint3 `/startproject` plan for `sprint3-f1-speech-events-and-subtitles`: session start + finalized speech chunk persistence, backend subtitle acknowledgement contract, and strict step-3 scope boundaries |
-| 2026-02-20 | Implemented Sprint1 settings-api-and-db foundation: `/api/v4/settings/me` GET/POST, SQLite async session wiring, `users` + `user_settings` models, and common 400 validation error response |
-| 2026-02-20 | Rewrote Codex skills to be Claude-independent: native workflows for `/startproject`, `/team-implement`, `/team-review`, `/checkpointing`, and alias `/checkpoining` |
-| 2026-02-20 | Added Codex skill bridges for `/checkpointing` and `/checkpoining` (alias) via `.codex/skills/checkpointing` and `.codex/skills/checkpoining` |
-| 2026-02-20 | Added Codex skill bridges for `/startproject`, `/team-implement`, `/team-review` via `.codex/skills/*` and project skill registration in `.codex/config.toml` |
-| 2026-02-20 | Prioritized next feature implementation as F2 Procedure QA after confirming current backend health + settings foundation status (`15/15` tests passing) |
-| 2026-02-20 | Added Sprint2 `/startproject` plan for `procedure-qa-minimal`: fake retriever/answerer interfaces, rootless-answer fallback guard, and `qa_turns` persistence-first architecture |
-| 2026-02-20 | Implemented Sprint2 `procedure-qa-minimal`: `/api/v4/procedure/ask`, fake retriever/answerer interfaces, deterministic no-source fallback policy, and `qa_turns` persistence with passing tests |
-| 2026-02-20 | Fixed Sprint2 medium review findings: added procedure auth guard, moved procedure knobs to settings, switched to DI-based service wiring, and expanded validation/persistence tests |
-| 2026-02-21 | Updated Sprint1 design with Researcher validation: `flag_modified()` requirement for JSON mutations, aiosqlite>=0.21.0, auto-commit session pattern |
-| 2026-02-20 | Added Sprint1 Settings API & SQLite Persistence: detailed architecture, data model, service layer, API contract, TDD implementation plan |
-| 2026-02-20 | Added Settings API design: SQLite JSON settings model, SQLAlchemy 2.0 async session pattern, service-layer boundary for `/api/v4/settings/me` |
-| 2026-02-21 | Added Sprint0 backend architecture: FastAPI + AsyncClient + layered design |
-| 2026-02-19 | Context-aware redesign: Claude=200K, Gemini=1M (codebase+research+multimodal), all subagents/teams→Opus |
-| 2026-02-17 | Role clarification: Gemini → multimodal only, Codex → planning + complex code, Subagents → external research |
-| 2026-02-08 | Major redesign for Opus 4.6: 1M context, Agent Teams, skill pipeline |
-| | Initial |
