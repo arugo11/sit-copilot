@@ -21,13 +21,13 @@ AZURE_OPENAI_ACCOUNT_NAME=your-resource-name
 
 # Azure OpenAI Model Deployment Name
 # Must match the deployment name in Azure Portal
-# Common deployments: gpt-4o, gpt-4, gpt-4.1
-AZURE_OPENAI_MODEL=gpt-4.1
+# Common deployments: gpt-5-nano, gpt-4o
+AZURE_OPENAI_MODEL=gpt-5-nano
 
 # Azure OpenAI API Version
 # Required for Cognitive Services endpoints
-# Recommended: 2024-02-15-preview
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
+# Recommended: 2024-05-01-preview
+AZURE_OPENAI_API_VERSION=2024-05-01-preview
 
 # Enable Azure OpenAI
 AZURE_OPENAI_ENABLED=true
@@ -48,11 +48,11 @@ AZURE_SEARCH_INDEX_NAME=lecture_index
 ### Example 1: Cognitive Services (Japan East)
 
 ```bash
-AZURE_OPENAI_API_KEY=da99c9b9bdc94fc58e5a152340e68878
-AZURE_OPENAI_ENDPOINT=https://japaneast.api.cognitive.microsoft.com
+AZURE_OPENAI_API_KEY=<SET_IN_KEY_VAULT>
+AZURE_OPENAI_ENDPOINT=https://aoai-sitc-02210594.cognitiveservices.azure.com
 AZURE_OPENAI_ACCOUNT_NAME=aoai-sitc-02210594
-AZURE_OPENAI_MODEL=gpt-4.1
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
+AZURE_OPENAI_MODEL=gpt-5-nano
+AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_ENABLED=true
 ```
 
@@ -123,7 +123,7 @@ az cognitiveservices account deployment list \
 
 **Cause**: API version incompatible with endpoint type
 
-**Solution**: 
+**Solution**:
 - For Cognitive Services: Use `AZURE_OPENAI_API_VERSION=2024-02-15-preview`
 - For standard OpenAI: Use `AZURE_OPENAI_API_VERSION=2024-10-21`
 
@@ -166,4 +166,4 @@ az provider register --namespace Microsoft.CognitiveServices
 
 ---
 **Last Updated**: 2026-02-22
-**Status**: ✅ Tested and working with gpt-4.1 (Japan East)
+**Status**: ✅ Tested and working with gpt-5-nano

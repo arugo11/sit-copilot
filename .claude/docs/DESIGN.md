@@ -1577,11 +1577,11 @@ Configured Azure OpenAI Service (Cognitive Services - Japan East region) for RAG
 
 | Setting | Value | Notes |
 |----------|-------|-------|
-| **API Key** | `da99c9b9bdc94fc58e5a152340e68878` | Stored in `.env.azure.generated` |
-| **Endpoint** | `https://japaneast.api.cognitive.microsoft.com` | Region-based Cognitive Services endpoint |
+| **API Key** | `<SET_IN_KEY_VAULT>` | Stored in `.env.azure.generated` |
+| **Endpoint** | `https://aoai-sitc-02210594.cognitiveservices.azure.com` | Azure OpenAI endpoint |
 | **Account Name** | `aoai-sitc-02210594` | Resource identifier |
-| **Model** | `gpt-4.1` | Deployment name in Azure OpenAI |
-| **API Version** | `2024-02-15-preview` | Required for Cognitive Services compatibility |
+| **Model** | `gpt-5-nano` | Deployment name in Azure OpenAI |
+| **API Version** | `2024-05-01-preview` | Required for Cognitive Services compatibility |
 | **Enabled** | `true` | Controlled via `AZURE_OPENAI_ENABLED` |
 
 ### Key Implementation Details
@@ -1593,7 +1593,7 @@ Configured Azure OpenAI Service (Cognitive Services - Japan East region) for RAG
 
 Example:
 ```
-https://japaneast.api.cognitive.microsoft.com/openai/deployments/gpt-4.1/chat/completions?api-version=2024-02-15-preview
+https://aoai-sitc-02210594.cognitiveservices.azure.com/openai/deployments/gpt-5-nano/chat/completions?api-version=2024-05-01-preview
 ```
 
 **Error Handling Pattern:**
@@ -1697,3 +1697,107 @@ Applies patches for:
 - Rotate keys if compromised
 - Use Key Vault for production deployments
 | Settings sync contract fixed to `GET/POST /api/v4/settings/me` with `{settings: ...}` envelope | Matches backend schema and avoids method/path mismatch (`PUT` removal) | 2026-02-21 |
+
+---
+
+## WandB Weave Observer Architecture (2026-02-22)
+
+### Overview
+
+Introduce Protocol-based observer integration for lecture flows so that LLM calls, QA orchestration, OCR, and summary generation are traced without affecting request success paths.
+
+### Architecture
+
+```
+FastAPI Route (Depends)
+  -> Observed*Service wrappers (QA / Answerer / Summary / OCR / Live / Finalize)
+      -> Existing core services (SqlAlchemy*, AzureOpenAI*, AzureVision*)
+      -> WeaveObserverService (Protocol)
+            -> Async observer dispatcher (queue + background workers)
+                  -> Weave client adapter
+                        -> Local mode (dev) or Cloud mode (prod)
+```
+
+### Key Decisions
+
+| Decision | Rationale | Date |
+|----------|-----------|------|
+| Use `WeaveObserverService` Protocol + wrapper decorators | Matches existing service architecture and keeps business logic clean | 2026-02-22 |
+| Provide `NoopWeaveObserverService` and `UnavailableWeaveObserverService` | Follows existing Noop/fail-safe patterns and keeps behavior deterministic | 2026-02-22 |
+| Observer dispatch is fire-and-forget (`create_task`) with bounded queue | Observer failures/latency must never block API flow | 2026-02-22 |
+| Build session trace hierarchy using `session_id` as stable trace key | Enables cross-request trace continuity from lecture start to end | 2026-02-22 |
+| Capture prompt/response behind dedicated flags + truncation controls | Meets observability requirements while controlling payload size/privacy risk | 2026-02-22 |
+
+### Implementation Plan
+
+1. Add observer modules:
+   - `app/services/observability/weave_observer_service.py`
+   - `app/services/observability/weave_dispatcher.py`
+   - `app/services/observability/weave_context.py`
+2. Add wrappers:
+   - `ObservedLectureQAService`
+   - `ObservedLectureAnswererService`
+   - `ObservedLectureSummaryService`
+   - `ObservedLectureSummaryGeneratorService`
+   - `ObservedVisionOCRService`
+   - `ObservedLectureLiveService`
+   - `ObservedLectureFinalizeService`
+3. Add settings in `app/core/config.py`:
+   - `weave_observer_enabled`
+   - `weave_mode` (`local` / `cloud`)
+   - `weave_project`, `weave_entity`
+   - `weave_capture_prompts`, `weave_capture_responses`
+   - queue/timeout tuning fields
+4. Initialize in `app/main.py` lifespan:
+   - startup: create/start observer and store singleton handle
+   - shutdown: drain queue with timeout and close observer client
+5. Wire dependencies in `app/api/v4/lecture.py` and `app/api/v4/lecture_qa.py` so providers return observed wrappers.
+
+### Trace Structure
+
+- Trace root: `lecture.session` (keyed by `session_id`)
+- Child spans:
+  - `lecture.start`
+  - `qa.ask` / `qa.followup`
+    - `retrieval.search`
+    - `llm.answer.generate`
+    - `verifier.verify`
+    - `verifier.repair` (optional)
+  - `summary.latest` / `summary.rebuild`
+    - `llm.summary.generate`
+  - `ocr.extract_text`
+  - `lecture.end`
+
+### Testing Strategy (TDD)
+
+1. Unit tests for observer config/factory fallback behavior.
+2. Unit tests for dispatcher non-blocking guarantees (queue full, timeout, exceptions).
+3. Unit tests for each observed wrapper (success/error paths, attributes, latency capture).
+4. API tests verifying feature-flag dependency wiring in `lecture.py` / `lecture_qa.py`.
+5. Integration test with in-memory observer sink for full session flow:
+   `start -> ask/followup -> summary -> finalize`.
+
+### Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Observer queue overflow under burst traffic | Bounded queue + drop policy + dropped-count metric |
+| Sensitive prompt/response leakage | Default capture off in prod; explicit flags and truncation |
+| SDK/network instability | Worker-level timeout, retry budget, and silent isolation from request path |
+| Multi-instance trace continuity gaps | Stable `session_id` trace key and explicit trace attributes |
+
+### Async Integration Risk Matrix (2026-02-22)
+
+| Risk | Likelihood | Impact | Concrete Mitigation |
+|------|------------|--------|---------------------|
+| Performance overhead (`@weave.op` wrapping, payload serialization, cloud publish latency) | Medium | High | Keep observer off request critical path (`put_nowait` to bounded async queue), initialize Weave once at startup, run any sync SDK calls via worker/threadpool, and sample/truncate payload fields by default. |
+| Memory leaks (unclosed spans, never-drained queue, orphan background tasks) | Medium | High | Enforce `try/finally` span closing, track worker tasks and remove on completion, cap queue size with explicit drop policy, and add lifespan shutdown hooks to flush with timeout then cancel workers. |
+| Error isolation failure (observer exceptions bubbling into business flow) | Medium | High | Wrap all observer writes in broad `try/except`, never re-raise from observer layer, add `NoopWeaveObserverService` fallback + circuit-breaker disable flag after repeated failures, and expose health counters for disabled/dropped events. |
+| Azure deployment mismatch (egress limits, auth, env drift across slots) | High | High | Store `WANDB_API_KEY` in Key Vault (not env files), use Managed Identity to resolve secrets at startup, validate required Weave/Azure settings on boot, and degrade to Noop mode when Weave connectivity/auth fails. |
+| Testing complexity (async timing, background worker behavior, SDK mocking) | High | Medium | Use Protocol-based fake observer + in-memory sink for unit tests, add failure-injection tests (timeout/network/queue-full), ensure `pytest-asyncio` cleanup of worker tasks per test, and run one integration test with real queue + fake transport. |
+| Data privacy leakage (PII in prompts/responses and trace attributes) | High | High | Default `capture_prompts/responses=false` in production, apply allowlist-based payload capture, redact known PII patterns before enqueue, hash user/session identifiers, and define retention/deletion policy aligned to compliance requirements. |
+
+### Changelog
+
+- 2026-02-22: Added WandB Weave observer architecture for FastAPI with Protocol/Noop patterns, async isolation, local/cloud support, and TDD-first rollout.
+- 2026-02-22: Added Weave async risk matrix (likelihood/impact + concrete mitigations) for performance, memory, isolation, Azure deployment, testing, and privacy.

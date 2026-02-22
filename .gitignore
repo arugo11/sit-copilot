@@ -8,15 +8,47 @@
 # Python bytecode / caches
 __pycache__/
 *.py[cod]
+*.pyo
 
 # Test and tooling caches
 .coverage
 coverage.xml
+htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+/.ty_cache/
 *.cover
 *,cover
 
 # Virtual environment
 .venv/
+venv/
+
+# Frontend build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local databases and logs
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite3
+*.backup
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Agent runtime outputs
+.claude/logs/
+.claude/checkpoints/

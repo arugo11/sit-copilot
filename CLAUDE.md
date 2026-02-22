@@ -42,6 +42,13 @@ Claude Code が全体統括し、Codex CLI（計画・難実装）と Gemini CLI
 
 ## Quick Reference
 
+### 運用ルール（このリポジトリ）
+
+- バックエンド/フロントエンドに修正を加えた後は、**必ずサーバを再起動**してから動作確認する。
+- 特に SQLite 利用時は、古いワーカープロセスが `database is locked` を誘発するため、
+  検証前に既存サーバープロセスを停止してクリーン起動する。
+- デモ前確認は「開始 → 終了」を1回実行して正常応答を確認する。
+
 ### Codex を使う時
 
 - **計画・設計**（「どう実装？」「アーキテクチャ」「計画を立てて」）
@@ -171,111 +178,13 @@ Claude Code (Opus 4.6) のコンテキストは **200K トークン**（実質 *
 
 ---
 
-## Current Project: F4 Lecture QA (講義後QA)
+## Current Project: Sprint1 Settings API & Database
 
 ### Context
-- **Goal**: 講義後に実際の講義発言・板書・スライドを根拠として質問に答えるF4機能を実装する
+- **Goal**: SQLite永続化とユーザー設定API（GET/POST /api/v4/settings/me）を実装し、以後の全機能の土台を作る
 - **Python Version**: 3.11
-- **Approach**: F4.1 ローカル検索（BM25）のみ、source-only + source-plus-context モード、完全版 LLM検証
-
-### Key Files
-```
-app/
-├── api/v4/
-│   └── lecture_qa.py        # NEW: /qa/index/build, /qa/ask, /qa/followup
-├── schemas/
-│   └── lecture_qa.py        # NEW: QA request/response schemas
-├── services/
-│   ├── lecture_qa_service.py         # NEW: Orchestrator (retrieve->answer->verify)
-│   ├── lecture_retrieval_service.py  # NEW: BM25-based retrieval
-│   ├── lecture_index_service.py      # NEW: Index builder from SpeechEvents
-│   ├── lecture_answerer_service.py   # NEW: Azure OpenAI answer generation
-│   ├── lecture_verifier_service.py   # NEW: LLM-based citation verification
-│   └── lecture_followup_service.py   # NEW: Follow-up context handling
-tests/
-├── api/v4/
-│   └── test_lecture_qa.py   # NEW: QA API tests
-└── unit/
-    ├── schemas/
-    │   └── test_lecture_qa_schemas.py   # NEW: Schema tests
-    └── services/
-        └── test_lecture_qa_service.py   # NEW: Service tests
-```
-
-### Dependencies
-```toml
-[project]
-dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.32",
-    "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite>=0.21.0",
-    "rank-bm25>=0.2.2",        # NEW: Local BM25 search
-    "openai>=1.0",             # NEW: Azure OpenAI integration
-]
-```
-
-### Architecture
-```
-POST /api/v4/lecture/qa/index/build
-  -> LectureIndexService.build_index()
-     -> Fetch SpeechEvents (is_final=True) from DB
-     -> Build BM25 index (tokenized corpus)
-
-POST /api/v4/lecture/qa/ask
-  -> LectureQAService.ask()
-     -> LectureFollowupService.rewrite_question()  # Resolve pronouns/context
-     -> LectureRetrievalService.retrieve()         # BM25 search
-     -> LectureAnswererService.generate_answer()   # Azure OpenAI
-     -> LectureVerifierService.verify()            # LLM-based verification
-     -> Persist QATurn (feature=lecture_qa)
-```
-
-### Library Constraints
-**rank-bm25**:
-- No incremental updates → rebuild entire index when new chunks added
-- No built-in tokenization → implement preprocessing (lowercase, split)
-- Use `k1=1.2-1.5, b=0.5-0.75` for Japanese shorter documents
-- CPU-bound → use `asyncio.to_thread()` for BM25 operations
-
-**Azure OpenAI**:
-- **API Version**: `2024-02-15-preview` (required for Cognitive Services endpoints)
-- **Endpoint Format**: `https://japaneast.api.cognitive.microsoft.com` (region-based)
-- **Deployment Name**: Must match deployed model name (e.g., `gpt-4.1`)
-- Source-only constraint: "Use ONLY information from the sources"
-- Citation format: `{"type": "speech|visual", "timestamp": "...", "text": "..."}`
-- Verifier pattern: claim-by-claim validation with fallback
-- Error handling: `LectureAnswererError` → local grounded response (graceful degradation)
-
-**SpeechEvent as Chunk**:
-- Primary source unit = one `SpeechEvent` row (`chunk_id = speech_event.id`)
-- Preserves timestamp precision for citations
-- Filter by `is_final=True` only
-
-### Decisions
-| Decision | Rationale |
-|----------|-----------|
-| BM25 index in process-local cache | Low latency for active sessions; no persistence needed |
-| SpeechEvent rows as chunk units | Reuses existing data; preserves timestamp precision |
-| source-only + source-plus-context modes | Matches SPEC §5.3.2; supports future expansion |
-| LLM-based Verifier | Ensures citation-grounded answers; SPEC §11.5 requirement |
-| Follow-up rewrite before retrieval | Improves recall for pronoun/ellipsis queries |
-
-### Success Criteria
-- `uv run pytest -q` passes (green)
-- POST /api/v4/lecture/qa/index/build builds BM25 index from SpeechEvents
-- POST /api/v4/lecture/qa/ask returns answer with citations
-- No sources → deterministic fallback
-- Verifier fails → repair or fallback
-- Follow-up questions resolve context correctly
-- `uv run ruff check .` passes
-- `uv run ty check app/` passes
-
----
-
-## Previous Project: Sprint1 Settings API & Database (Completed)
-
-Sprint1 successfully implemented SQLite persistence and user settings API.
+- **Structure**: モジュラー構造 + DB層（app/models/, app/db/, app/services/）
+- **TDD**: すべてTDDで実行
 
 ### Key Files
 ```
@@ -388,6 +297,78 @@ dev = [
 
 Sprint0 successfully implemented FastAPI backend foundation with `/api/v4/health` endpoint returning 200.
 
+---
+
+## Current Project: WandB Weave Integration (2026-02-23)
+
+### Context
+- **Goal**: Integrate WandB Weave for LLM and session observability
+- **Mode**: Demo (all data capture enabled including images)
+- **Key files**:
+  - `app/services/observability/` - Observer infrastructure
+  - `app/services/observability/weave_observer_service.py` - Protocol + implementations
+  - `app/services/observability/weave_dispatcher.py` - Non-blocking dispatcher
+  - `app/services/observability/weave_context.py` - Session context manager
+  - `app/main.py` - Weave initialization in lifespan
+
+### Architecture
+- Protocol-based `WeaveObserverService` with Noop and WandB implementations
+- Async dispatcher with fire-and-forget pattern (queue + workers)
+- Multimodal support: `weave.Image.from_bytes()` for slides/OCR
+- Audio tracked as metadata only (Azure Blob URLs)
+
+### Trace Structure
+```
+lecture.session:{session_id}
+  ├─ qa.ask/followup
+  │   ├─ retrieval.search (BM25 or Azure AI Search)
+  │   └─ llm.answer.generate (Azure OpenAI)
+  ├─ ocr.extract_text (with image preview via weave.Image)
+  ├─ live.slide_change (with slide thumbnail)
+  └─ live.speech_chunk (audio metadata, not raw audio)
+```
+
+### Configuration (Environment Variables)
+```bash
+# Enable/disable Weave
+WEAVE_ENABLED=true                    # Default: true (demo mode)
+WEAVE_MODE=local                      # local | cloud
+WEAVE_PROJECT=sit-copilot-demo        # Project name in Weave
+
+# Data capture (demo: all enabled)
+WEAVE_CAPTURE_PROMPTS=true            # Capture LLM prompts
+WEAVE_CAPTURE_RESPONSES=true          # Capture LLM responses
+WEAVE_CAPTURE_IMAGES=true             # Embed images in traces
+WEAVE_MAX_IMAGE_SIZE_BYTES=10485760   # 10MB limit per image
+
+# Performance tuning
+WEAVE_QUEUE_MAXSIZE=1000              # Observation queue size
+WEAVE_WORKER_COUNT=2                  # Background worker count
+WEAVE_TIMEOUT_MS=5000                 # Operation timeout
+WEAVE_SAMPLE_RATE=1.0                 # Sampling rate (0-1)
+```
+
+### Decisions
+| Decision | Rationale |
+|----------|-----------|
+| Protocol-based observer | Enables testing with noop implementation; zero overhead when disabled |
+| Fire-and-forget dispatcher | Observability failures never impact request latency |
+| weave.Image.from_bytes() | Native Weave support for image visualization in UI |
+| Audio as metadata only | Audio files too large for traces; Azure Blob provides storage |
+| Queue overflow = drop | Better to lose traces than block requests or crash |
+
+### Documentation
+- `.claude/docs/weave-implementation.md` - Implementation guide and architecture
+- `.claude/docs/weave-multimodal.md` - Multimodal features (images, audio)
+- `.claude/docs/weave-deployment.md` - Azure deployment with Weave Cloud
+
+### Success Criteria
+- Unit tests pass: `uv run pytest tests/unit/services/test_weave_*.py -v`
+- Integration tests pass: `uv run pytest tests/integration/test_weave_integration.py -v`
+- Weave UI displays traces (local mode: http://localhost:8080)
+- Images visible in OCR and slide transition traces
+- No performance impact on request handlers
+
 ## Session History
 
 ### 2026-02-20
@@ -400,132 +381,3 @@ Sprint0 successfully implemented FastAPI backend foundation with `/api/v4/health
 
 ## Azure Service
 Azure関係で操作が必要になったばあい, Azure CLIの使い方について調べてAzure CLIで解決してください.
-
-### 2026-02-20
-
-- 0 commits, 0 files changed
-- Codex: 1 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
-### 2026-02-20
-
-- 0 commits, 0 files changed
-- Codex: 1 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
-### 2026-02-20
-
-- 2 commits, 0 files changed
-- Codex: 1 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
-### 2026-02-20
-
-- 5 commits, 0 files changed
-- Codex: 1 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
-### 2026-02-21
-
-- 8 commits, 0 files changed
-- Codex: 1 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
----
-
-## Current Project: F4 QA Test Completion
-
-### Context
-- Goal: Improve test coverage for F4 Lecture QA services from 81% → 85%+
-- Target services:
-  1. `app/services/lecture_bm25_store.py` (0% → 80%+)
-  2. `app/services/lecture_verifier_service.py` (49% → 80%+)
-  3. `app/services/lecture_followup_service.py` (35% → 80%+)
-- Python Version: 3.11
-- Approach: Add comprehensive unit tests following existing patterns
-
-### Key Files
-```
-tests/unit/services/
-├── test_lecture_bm25_store.py       # NEW: BM25 store tests
-├── test_lecture_verifier_service.py  # EXPAND: Azure OpenAI verification tests
-└── test_lecture_followup_service.py  # NEW: Follow-up resolution tests
-```
-
-### Test Patterns (from Research)
-- **rank-bm25**: NOT thread-safe, use concurrent `asyncio.gather()` tests
-- **Azure OpenAI**: Patch `urllib.request.urlopen` wrapped in `asyncio.to_thread()`
-- **SQLAlchemy AsyncSession**: Use `AsyncMock` or real in-memory SQLite from conftest
-- **pytest-asyncio**: `asyncio_mode = "auto"` already configured
-
-### Test Coverage Goals
-| Service | Current | Target | Key Cases |
-|---------|---------|--------|-----------|
-| lecture_bm25_store.py | 0% | 80%+ | concurrent access, lock management |
-| lecture_verifier_service.py | 49% | 80%+ | Azure OpenAI mocks, local fallback |
-| lecture_followup_service.py | 35% | 80%+ | AsyncSession mocks, rewrite patterns |
-
-### Success Criteria
-- [ ] `test_lecture_bm25_store.py` created and passing
-- [ ] `test_lecture_verifier_service.py` expanded to 80%+
-- [ ] `test_lecture_followup_service.py` created and passing
-- [ ] Overall coverage 85%+
-- [ ] `uv run pytest -q` passes (green)
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run ty check app/` passes
-
-### Decisions
-| Decision | Rationale |
-|----------|-----------|
-| Mock urlopen for Azure OpenAI | Services use `asyncio.to_thread(urlopen)` - mock sync function |
-| Use real LectureBM25Store in tests | Pure in-memory operations, no external dependencies |
-| AsyncMock for AsyncSession | Followup service loads history from DB |
-| Test concurrent access with asyncio.gather | Verify thread-safety of lock management |
-
-### 2026-02-21
-
-- 17 commits, 100 files changed
-- Codex: 2 consultations
-- Agent Teams: sprint0-review (4 teammates, 0/3 tasks)
-- Agent Teams: f1-azure-openai-summary-impl (0 teammates, 8/12 tasks)
-- Agent Teams: sprint1-implement (4 teammates, 2/8 tasks)
-- Agent Teams: auc-095-phase1-oof-ensemble (3 teammates, 0/2 tasks)
-- Agent Teams: frontend-impl (5 teammates, 16/27 tasks)
-- Agent Teams: auc-0-95-improvement (3 teammates, 2/8 tasks)
-- Agent Teams: f4-lecture-qa-implement (6 teammates, 3/7 tasks)
-
-### 2026-02-22
-
-- 0 commits (uncommitted changes), 24 files changed (+1784, -137)
-- Codex: 2 consultations (Azure CLI research, RAG error handling debug)
-- Gemini: 1 research (codebase analysis)
-- Agent Teams: rag-error-handling-fix (2 teammates, 6/6 tasks completed)
-- **RAG Error Handling Fixed**: Implemented graceful degradation on Azure OpenAI failures (HTTP 200 with local fallback instead of HTTP 503)
-- **Azure OpenAI Integration Completed**: Configured Cognitive Services endpoint with gpt-4.1 deployment (Japan East)
-- **API Version Fix**: Discovered `2024-02-15-preview` required for Cognitive Services endpoints
-- **Test Coverage**: All 345 tests passing (86% coverage)
-- **Documentation Updated**: DESIGN.md + azure-openai-config-template.md + CLAUDE.md
-- **Key Patterns Discovered**:
-  - LLM Error Handling with Graceful Degradation (Confidence: 0.95)
-  - Safe Wrapper for LLM Verification (Confidence: 0.90)
-- **Azure CLI Setup**: Installed via uv tool with Python 3.10, created patched wrapper for compatibility
