@@ -28,7 +28,7 @@ export class StreamClient {
     this.sessionId = sessionId
     this.shouldReconnect = true
     this.clearReconnectTimer()
-    await this.connectWithTransport()
+    await this.connectWithTransport(true)
   }
 
   disconnect(): void {
@@ -65,7 +65,7 @@ export class StreamClient {
     }
   }
 
-  private async connectWithTransport(): Promise<void> {
+  private async connectWithTransport(propagateError = false): Promise<void> {
     if (!this.sessionId || this.isConnecting) {
       return
     }
@@ -94,9 +94,12 @@ export class StreamClient {
     try {
       await this.transport.connect(this.sessionId)
       this.reconnectAttempt = 0
-    } catch {
+    } catch (error) {
       this.emit({ type: 'session.status', payload: { connection: 'reconnecting' } })
       this.scheduleReconnect()
+      if (propagateError) {
+        throw error
+      }
     } finally {
       this.isConnecting = false
     }

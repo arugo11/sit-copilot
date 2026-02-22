@@ -257,7 +257,7 @@ export function LectureReviewPage() {
       topbar={
         <div className="py-3 flex items-center justify-between gap-3">
           <h1 className="text-lg font-semibold">
-            {t('review.title')}: {sessionId}
+            {t('review.title')}: {sessionId.length > 8 ? `${sessionId.slice(0, 8)}…` : sessionId}
           </h1>
           <div className="flex gap-2">
             <Link to={`/lectures/${sessionId}/live`} className="btn btn-secondary">
@@ -286,15 +286,14 @@ export function LectureReviewPage() {
               {t('review.qa.submit')}
             </button>
             <span
-              className={`badge ${
-                qaStatus === 'streaming'
+              className={`badge ${qaStatus === 'streaming'
                   ? 'badge-warning'
                   : qaStatus === 'error'
                     ? 'badge-danger'
                     : 'badge-success'
-              }`}
+                }`}
             >
-              {qaStatus}
+              {({ idle: '待機中', streaming: '回答生成中…', error: 'エラー', done: '完了' } as Record<string, string>)[qaStatus] ?? qaStatus}
             </span>
           </div>
         </form>

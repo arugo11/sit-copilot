@@ -10,14 +10,13 @@ export function TranscriptPanel() {
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
   const density = useLiveSessionStore((state) => state.transcriptDensity)
   const setAutoScroll = useLiveSessionStore((state) => state.setAutoScroll)
-  const setSelectedLanguage = useLiveSessionStore((state) => state.setSelectedLanguage)
+  const switchLanguage = useLiveSessionStore((state) => state.switchLanguage)
   const setTranscriptDensity = useLiveSessionStore((state) => state.setTranscriptDensity)
 
   const sortedLines = useMemo(
     () => [...transcriptLines].sort((a, b) => a.tsStartMs - b.tsStartMs),
     [transcriptLines]
   )
-
   useEffect(() => {
     if (!autoScroll || !panelRef.current) {
       return
@@ -47,9 +46,13 @@ export function TranscriptPanel() {
         <SegmentedControl
           ariaLabel="language"
           value={selectedLanguage}
-          onChange={(value) => setSelectedLanguage(value as 'ja' | 'en')}
+          onChange={(value) => {
+            const mode = value as 'ja' | 'easy-ja' | 'en'
+            void switchLanguage(mode)
+          }}
           options={[
             { value: 'ja', label: '日本語表示' },
+            { value: 'easy-ja', label: 'やさしい日本語' },
             { value: 'en', label: 'English view' },
           ]}
         />
@@ -86,9 +89,27 @@ export function TranscriptPanel() {
                 {line.speakerLabel ? <span>• {line.speakerLabel}</span> : null}
                 {line.isPartial ? <span className="badge badge-warning">partial</span> : <span className="badge badge-success">final</span>}
               </div>
-              <p className="text-fg-primary leading-relaxed">{line.sourceLangText}</p>
-              {line.translatedText && (
-                <p className="text-fg-secondary mt-1 leading-relaxed">{line.translatedText}</p>
+              {selectedLanguage === 'ja' ? (
+                <>
+                  <p className="text-fg-primary leading-relaxed">{line.sourceLangText}</p>
+                  {line.correctionStatus === 'pending' && (
+                    <p className="text-xs text-fg-secondary mt-1">日本語補正中（原文表示）</p>
+                  )}
+                  {line.correctionStatus === 'review_failed' && (
+                    <p className="text-xs text-warning mt-1">日本語補正失敗（原文表示）</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-fg-primary leading-relaxed">
+                    {line.translatedLangMode === selectedLanguage
+                      ? line.translatedText
+                      : line.sourceLangText}
+                  </p>
+                  {line.translatedLangMode !== selectedLanguage && (
+                    <p className="text-xs text-fg-secondary mt-1">翻訳生成待機中（原文表示）</p>
+                  )}
+                </>
               )}
             </article>
           ))

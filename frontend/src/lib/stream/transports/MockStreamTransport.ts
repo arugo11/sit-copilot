@@ -3,18 +3,18 @@ import type { StreamTransport, WsEvent } from '../types'
 const SAMPLE_TEXT = [
   {
     speaker: '先生',
-    ja: '今日は機械学習の過学習について説明します。',
-    en: 'Today we will explain overfitting in machine learning.',
+    ja: 'これはデモ文です（リアルタイム字幕サンプル1）。',
+    en: 'This is demo text (realtime subtitle sample 1).',
   },
   {
     speaker: '先生',
-    ja: '訓練データでは高精度でも未知データで性能が落ちる状態です。',
-    en: 'It means high accuracy on training data but poor performance on unseen data.',
+    ja: 'これはデモ文です（リアルタイム字幕サンプル2）。',
+    en: 'This is demo text (realtime subtitle sample 2).',
   },
   {
     speaker: '先生',
-    ja: '対策として正則化と検証データの監視が重要です。',
-    en: 'Regularization and validation monitoring are key countermeasures.',
+    ja: 'これはデモ文です（リアルタイム字幕サンプル3）。',
+    en: 'This is demo text (realtime subtitle sample 3).',
   },
 ]
 
@@ -63,8 +63,8 @@ export class MockStreamTransport implements StreamTransport {
     const answerId = `qa_${Date.now()}`
     const chunks = [
       `質問「${question}」への回答です。`,
-      '過学習は学習データに適合しすぎて汎化性能が下がる状態を指します。',
-      '講義では正則化と検証データ監視が対策として説明されました。',
+      'これはデモ文です（QAストリームサンプル1）。',
+      'これはデモ文です（QAストリームサンプル2）。',
     ]
 
     let chunkIndex = 0
@@ -80,7 +80,7 @@ export class MockStreamTransport implements StreamTransport {
           type: 'qa.answer.done',
           payload: {
             answerId,
-            followups: ['正則化の具体例は？', '検証データはどう分割する？'],
+            followups: ['これはデモ文です（フォローアップ1）', 'これはデモ文です（フォローアップ2）'],
           },
         })
         return
@@ -201,7 +201,7 @@ export class MockStreamTransport implements StreamTransport {
           frameId: `frame_board_${lineId}`,
           source: 'board',
           timestampMs: this.currentMs,
-          text: '正則化 (L2) + 検証データで過学習を検知',
+          text: 'これはデモ文です（OCRイベント）',
         },
       })
 
@@ -210,8 +210,8 @@ export class MockStreamTransport implements StreamTransport {
         payload: {
           timestampMs: this.currentMs,
           points: [
-            '過学習は未知データで性能が落ちる',
-            '正則化と検証データ監視が対策',
+            'これはデモ文です（要約ポイント1）',
+            'これはデモ文です（要約ポイント2）',
           ],
         },
       })
@@ -219,8 +219,8 @@ export class MockStreamTransport implements StreamTransport {
       this.emit({
         type: 'assist.term',
         payload: [
-          { term: '過学習', explanation: '学習データへ過度適合した状態', translation: 'Overfitting' },
-          { term: '正則化', explanation: 'モデル複雑さを抑える手法', translation: 'Regularization' },
+          { term: 'デモ用語1', explanation: 'これはデモ文です', translation: 'Demo Term 1' },
+          { term: 'デモ用語2', explanation: 'これはデモ文です', translation: 'Demo Term 2' },
         ],
       })
 

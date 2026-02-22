@@ -1,36 +1,26 @@
-/**
- * Lecture QA Page
- * Simplified QA interface for lecture questions
- */
-
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
+
 import { AppShell } from '@/components/common/AppShell'
 import { useToast } from '@/components/common/Toast'
 import { QAStreamBlocks } from '@/features/review/components/QAStreamBlocks'
 import {
-  mapLectureQaResponseToChunk,
-  mapLectureQaResponseToDone,
-} from '@/features/review/qaResponseMapper'
-import {
-  createReviewAnswerId,
-  requestReviewQaAnswer,
-  warmupReviewQaIndex,
-} from '@/features/review/reviewQaApi'
+  mapProcedureQaResponseToChunk,
+  mapProcedureQaResponseToDone,
+} from '@/features/procedure/procedureQaMapper'
+import { requestProcedureQaAnswer } from '@/features/procedure/procedureQaApi'
+import { createReviewAnswerId } from '@/features/review/reviewQaApi'
 import { useQaAnnouncer } from '@/hooks/useLiveRegion'
 import { ApiError, getApiErrorMessage } from '@/lib/api/client'
 import { useUserSettings } from '@/lib/api/hooks'
 import { useReviewQaStore } from '@/stores/reviewQaStore'
 
-export function LectureQAPage() {
-  const navigate = useNavigate()
-  const { id, session_id } = useParams<{ id?: string; session_id?: string }>()
-  const sessionId = session_id ?? id ?? 'demo-session'
-
+export function ProcedurePage() {
   const { showToast } = useToast()
   const { announceQaStatus } = useQaAnnouncer()
   const { data: userSettings } = useUserSettings()
+
   const [question, setQuestion] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -43,34 +33,12 @@ export function LectureQAPage() {
   const retryAnswer = useReviewQaStore((state) => state.retryAnswer)
   const reset = useReviewQaStore((state) => state.reset)
 
-  const indexWarmupAttemptedRef = useRef(false)
-  const successfulTurnCountRef = useRef(0)
-
   useEffect(() => {
     reset()
-    indexWarmupAttemptedRef.current = false
-    successfulTurnCountRef.current = 0
     return () => {
       reset()
     }
-  }, [reset, sessionId])
-
-  const warmupQaIndex = useCallback(() => {
-    if (indexWarmupAttemptedRef.current) {
-      return
-    }
-    indexWarmupAttemptedRef.current = true
-    void warmupReviewQaIndex(sessionId).catch((error) => {
-      showToast({
-        variant: 'warning',
-        title: 'QA索引の事前構築に失敗しました',
-        message: getApiErrorMessage(
-          error,
-          '質問時に必要な索引を作成できませんでした。'
-        ),
-      })
-    })
-  }, [sessionId, showToast])
+  }, [reset])
 
   const executeQuestion = useCallback(
     async (
@@ -92,23 +60,19 @@ export function LectureQAPage() {
       } else {
         submitQuestion(normalizedQuestion, answerId)
       }
-      announceQaStatus('generating', 'ja')
-      warmupQaIndex()
+      announceQaStatus('generating', userSettings?.language === 'en' ? 'en' : 'ja')
 
       try {
-        const response = await requestReviewQaAnswer({
-          sessionId,
-          question: normalizedQuestion,
+        const response = await requestProcedureQaAnswer({
+          query: normalizedQuestion,
           language: userSettings?.language,
-          hasSuccessfulTurn: successfulTurnCountRef.current > 0,
         })
 
-        applyChunk(mapLectureQaResponseToChunk(answerId, response))
-        applyDone(mapLectureQaResponseToDone(answerId))
-        successfulTurnCountRef.current += 1
-        announceQaStatus('done', 'ja')
+        applyChunk(mapProcedureQaResponseToChunk(answerId, response))
+        applyDone(mapProcedureQaResponseToDone(answerId, response))
+        announceQaStatus('done', userSettings?.language === 'en' ? 'en' : 'ja')
 
-        if (response.fallback) {
+        if (response.fallback.trim()) {
           showToast({
             variant: 'warning',
             title: '根拠が不足している回答です',
@@ -117,32 +81,13 @@ export function LectureQAPage() {
         }
       } catch (error) {
         failAnswer(answerId)
-        announceQaStatus('error', 'ja')
+        announceQaStatus('error', userSettings?.language === 'en' ? 'en' : 'ja')
 
         if (error instanceof ApiError && error.status === 401) {
           showToast({
             variant: 'danger',
             title: '認証エラー',
-            message:
-              'デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。',
-          })
-          return
-        }
-        if (error instanceof ApiError && error.status === 404) {
-          showToast({
-            variant: 'danger',
-            title: 'セッションが見つかりません',
-            message: '講義一覧へ戻ります。',
-          })
-          navigate('/lectures')
-          return
-        }
-        if (error instanceof ApiError && error.status === 503) {
-          showToast({
-            variant: 'danger',
-            title: 'QAバックエンド利用不可',
-            message:
-              '現在は回答生成サービスを利用できません。しばらくして再試行してください。',
+            message: 'デモトークン設定を確認してください (X-Procedure-Token)。',
           })
           return
         }
@@ -152,7 +97,7 @@ export function LectureQAPage() {
           title: '回答の取得に失敗しました',
           message: getApiErrorMessage(
             error,
-            '回答生成中にエラーが発生しました。'
+            '手続きQAの回答生成中にエラーが発生しました。'
           ),
         })
       } finally {
@@ -165,13 +110,10 @@ export function LectureQAPage() {
       applyDone,
       failAnswer,
       isSubmitting,
-      navigate,
       retryAnswer,
-      sessionId,
       showToast,
       submitQuestion,
       userSettings?.language,
-      warmupQaIndex,
     ]
   )
 
@@ -213,8 +155,8 @@ export function LectureQAPage() {
     (citationId: string) => {
       showToast({
         variant: 'info',
-        title: '引用情報',
-        message: `引用ID: ${citationId}`,
+        title: '参照ソース',
+        message: `ソースID: ${citationId}`,
       })
     },
     [showToast]
@@ -224,15 +166,16 @@ export function LectureQAPage() {
     <AppShell
       topbar={
         <div className="py-3 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold">
-            講義QA: {sessionId.length > 8 ? `${sessionId.slice(0, 8)}…` : sessionId}
-          </h1>
+          <h1 className="text-lg font-semibold">学内手続きQA</h1>
           <div className="flex gap-2">
-            <Link to={`/lectures/${sessionId}/review`} className="btn btn-secondary">
-              レビュー
-            </Link>
             <Link to="/lectures" className="btn btn-secondary">
               講義一覧
+            </Link>
+            <Link to="/settings" className="btn btn-secondary">
+              設定
+            </Link>
+            <Link to="/" className="btn btn-secondary">
+              ホーム
             </Link>
           </div>
         </div>
@@ -240,26 +183,27 @@ export function LectureQAPage() {
     >
       <div className="max-w-4xl mx-auto space-y-4">
         <form className="card p-4 space-y-3" onSubmit={handleSubmit}>
-          <h2 className="font-semibold">質問を入力してください</h2>
+          <h2 className="font-semibold">手続きに関する質問を入力してください</h2>
           <textarea
             className="input min-h-24"
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
-            placeholder="講義内容について質問してください..."
+            placeholder="例: 在留カード更新のときに必要な提出書類は？"
           />
           <div className="flex gap-2 items-center">
             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
               {isSubmitting ? '送信中...' : '送信'}
             </button>
             <span
-              className={`badge ${qaStatus === 'streaming'
+              className={`badge ${
+                qaStatus === 'streaming'
                   ? 'badge-warning'
                   : qaStatus === 'error'
                     ? 'badge-danger'
                     : 'badge-success'
-                }`}
+              }`}
             >
-              {({ idle: '待機中', streaming: '回答生成中…', error: 'エラー', done: '完了' } as Record<string, string>)[qaStatus] ?? qaStatus}
+              {qaStatus}
             </span>
           </div>
         </form>

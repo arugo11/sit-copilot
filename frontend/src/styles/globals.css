@@ -103,7 +103,7 @@ html {
 body {
   margin: 0;
   padding: 0;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Noto Sans JP', 'Segoe UI', system-ui, -apple-system, sans-serif;
   background-color: var(--color-bg-page);
   color: var(--color-fg-primary);
 }
@@ -259,6 +259,41 @@ body {
 .badge-danger {
   background-color: rgb(220 38 38 / 0.1);
   color: var(--color-danger);
+}
+
+/* Live state: green with pulse */
+.badge-live {
+  background-color: rgb(22 163 74 / 0.15);
+  color: var(--color-success);
+  position: relative;
+}
+
+.badge-live::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-success);
+  margin-right: 4px;
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Muted / ended state */
+.badge-muted {
+  background-color: var(--color-bg-muted);
+  color: var(--color-fg-secondary);
+}
+
+/* Info (alias) */
+.badge-info {
+  background-color: rgb(37 99 235 / 0.1);
+  color: var(--color-accent);
 }
 
 /* Reduced Motion */

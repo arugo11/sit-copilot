@@ -176,7 +176,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           'text-fg-secondary hover:text-fg-primary hover:bg-bg-muted',
           'focus:outline-2 focus:outline-offset-2 focus:outline-focus'
         )}
-        aria-label="Close notification"
+        aria-label="通知を閉じる"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

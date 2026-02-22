@@ -14,7 +14,10 @@ export interface TranscriptLine {
   tsEndMs: number
   speakerLabel?: string
   sourceLangText: string
+  originalLangText?: string
   translatedText?: string
+  translatedLangMode?: 'easy-ja' | 'en'
+  correctionStatus?: 'pending' | 'reviewed' | 'review_failed'
   confidence?: number
   isPartial: boolean
   sourceRefs: {
@@ -93,7 +96,7 @@ export interface LiveUiState {
   translationLagMs: number
   sourceLagMs: number
   autoScroll: boolean
-  selectedLanguage: 'ja' | 'en'
+  selectedLanguage: 'ja' | 'easy-ja' | 'en'
   transcriptDensity: TranscriptDensity
   leftPanelMode: LeftPanelMode
 }

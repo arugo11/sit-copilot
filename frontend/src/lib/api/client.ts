@@ -12,13 +12,15 @@ function resolveApiBaseUrl(): string {
   if (import.meta.env.DEV) {
     return ''
   }
-  return 'http://localhost:8000'
+  return 'http://127.0.0.1:8000'
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()
 export const LECTURE_API_TOKEN =
   import.meta.env.VITE_LECTURE_API_TOKEN || 'dev-lecture-token'
-export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo-user'
+export const PROCEDURE_API_TOKEN =
+  import.meta.env.VITE_PROCEDURE_API_TOKEN || 'dev-procedure-token'
+export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo_user'
 
 export class ApiError extends Error {
   status: number
@@ -81,14 +83,73 @@ export interface SpeechChunkIngestResponse {
   accepted: boolean
 }
 
+export interface SpeechChunkAuditApplyRequest {
+  session_id: string
+  event_id: string
+}
+
+export interface SpeechChunkAuditApplyResponse {
+  session_id: string
+  event_id: string
+  original_text: string
+  corrected_text: string
+  updated: boolean
+  review_status: 'reviewed' | 'review_failed'
+  reviewed: boolean
+  was_corrected: boolean
+  retry_count: number
+  failure_reason?: string | null
+}
+
+export interface SubtitleTransformRequest {
+  session_id: string
+  text: string
+  target_lang_mode: 'ja' | 'easy-ja' | 'en'
+}
+
+export interface SubtitleTransformResponse {
+  session_id: string
+  target_lang_mode: 'ja' | 'easy-ja' | 'en'
+  transformed_text: string
+}
+
+export interface SubtitleAuditRequest {
+  session_id: string
+  text: string
+}
+
+export interface SubtitleAuditResponse {
+  session_id: string
+  original_text: string
+  corrected_text: string
+  review_status: 'reviewed' | 'review_failed'
+  reviewed: boolean
+  was_corrected: boolean
+  retry_count: number
+  failure_reason?: string | null
+}
+
 export interface ReadinessCheckRequest {
   course_name: string
   syllabus_text: string
-  lang_mode: 'ja' | 'easy-ja' | 'en'
+  first_material_blob_path?: string | null
+  lang_mode?: 'ja' | 'easy-ja' | 'en'
+  jp_level_self?: number | null
+  domain_level_self?: number | null
+}
+
+export interface ReadinessTerm {
+  term: string
+  explanation: string
 }
 
 export interface ReadinessCheckResponse {
   readiness_score: number
+  terms: ReadinessTerm[]
+  difficult_points: string[]
+  recommended_settings: string[]
+  prep_tasks: string[]
+  disclaimer: string
 }
 
 export interface HealthResponse {
@@ -98,6 +159,8 @@ export interface HealthResponse {
 
 interface SummaryKeyTerm {
   term: string
+  explanation?: string
+  translation?: string
 }
 
 export interface LectureSummaryLatestResponse {
@@ -164,6 +227,35 @@ export interface LectureIndexBuildResponse {
   status: 'success' | 'skipped'
 }
 
+export type ProcedureQaLangMode = 'ja' | 'easy-ja' | 'en'
+export type ProcedureQaConfidence = 'high' | 'medium' | 'low'
+
+export interface ProcedureSource {
+  title: string
+  section: string
+  snippet: string
+  source_id: string
+}
+
+export interface ProcedureAskRequest {
+  query: string
+  lang_mode: ProcedureQaLangMode
+}
+
+export interface ProcedureAskResponse {
+  answer: string
+  confidence: ProcedureQaConfidence
+  sources: ProcedureSource[]
+  action_next: string
+  fallback: string
+}
+
+type AuthScope = 'lecture' | 'procedure' | 'none'
+
+interface ApiRequestOptions extends RequestInit {
+  authScope?: AuthScope
+}
+
 function normalizeUserSettings(value: unknown): UserSettings {
   if (!value || typeof value !== 'object') {
     return {}
@@ -195,6 +287,9 @@ function normalizeUserSettings(value: unknown): UserSettings {
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
+    if (error.status === 0) {
+      return 'Network error: APIサーバーに接続できません。バックエンド起動と VITE_API_BASE_URL を確認してください。'
+    }
     return error.message
   }
   if (error instanceof Error) {
@@ -215,17 +310,25 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: ApiRequestOptions = {}
   ): Promise<T> {
+    const { authScope = 'lecture', ...fetchOptions } = options
     const url = `${this.baseUrl}${endpoint}`
 
-    const headers = new Headers(options.headers ?? {})
+    const headers = new Headers(fetchOptions.headers ?? {})
     headers.set('Content-Type', 'application/json')
-    headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
-    headers.set('X-User-Id', DEMO_USER_ID)
+
+    if (authScope === 'lecture') {
+      headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
+      headers.set('X-User-Id', DEMO_USER_ID)
+    }
+
+    if (authScope === 'procedure') {
+      headers.set('X-Procedure-Token', PROCEDURE_API_TOKEN)
+    }
 
     const config: RequestInit = {
-      ...options,
+      ...fetchOptions,
       headers,
     }
 
@@ -244,8 +347,13 @@ class ApiClient {
           message = response.statusText || message
         }
         if (response.status === 401) {
-          message =
-            'Unauthorized. デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+          if (authScope === 'procedure') {
+            message =
+              'Unauthorized. デモトークン設定を確認してください (X-Procedure-Token)。'
+          } else {
+            message =
+              'Unauthorized. デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+          }
         }
         throw new ApiError(response.status, message)
       }
@@ -259,19 +367,60 @@ class ApiClient {
     }
   }
 
-  async get<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: 'GET' })
+  async get<T>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: 'GET' })
   }
 
-  async post<T>(endpoint: string, data?: unknown): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown, options: ApiRequestOptions = {}): Promise<T> {
     return this.request<T>(endpoint, {
+      ...options,
       method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    })
+  }
+
+  async patch<T>(endpoint: string, data?: unknown, options: ApiRequestOptions = {}): Promise<T> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
     })
   }
 }
 
 export const apiClient = new ApiClient()
+
+async function waitMs(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+function isTransientSessionError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) {
+    return false
+  }
+  return error.status === 0 || error.status === 503
+}
+
+async function withSessionRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const delays = [250, 700]
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (!isTransientSessionError(error) || attempt >= delays.length) {
+        throw error
+      }
+      await waitMs(delays[attempt])
+    }
+  }
+
+  throw lastError
+}
 
 /**
  * Demo API
@@ -280,19 +429,23 @@ export const demoApi = {
   async startDemoSession(
     request: LectureSessionStartRequest
   ): Promise<LectureSessionStartResponse> {
-    return apiClient.post<LectureSessionStartResponse>(
-      '/api/v4/lecture/session/start',
-      request
+    return withSessionRetry(() =>
+      apiClient.post<LectureSessionStartResponse>(
+        '/api/v4/lecture/session/start',
+        request
+      )
     )
   },
 
   async finalizeDemoSession(sessionId: string): Promise<LectureSessionFinalizeResponse> {
-    return apiClient.post<LectureSessionFinalizeResponse>(
-      '/api/v4/lecture/session/finalize',
-      {
-        session_id: sessionId,
-        build_qa_index: false,
-      }
+    return withSessionRetry(() =>
+      apiClient.post<LectureSessionFinalizeResponse>(
+        '/api/v4/lecture/session/finalize',
+        {
+          session_id: sessionId,
+          build_qa_index: false,
+        }
+      )
     )
   },
 
@@ -314,9 +467,57 @@ export const demoApi = {
     )
   },
 
+  async auditAndApplySpeechChunk(
+    request: SpeechChunkAuditApplyRequest
+  ): Promise<SpeechChunkAuditApplyResponse> {
+    return apiClient.post<SpeechChunkAuditApplyResponse>(
+      '/api/v4/lecture/speech/chunk/audit-apply',
+      request
+    )
+  },
+
   async getLatestSummary(sessionId: string): Promise<LectureSummaryLatestResponse> {
     return apiClient.get<LectureSummaryLatestResponse>(
       `/api/v4/lecture/summary/latest?session_id=${encodeURIComponent(sessionId)}`
+    )
+  },
+
+  async analyzeKeyterms(request: {
+    session_id: string
+    transcript_text: string
+    lang_mode: 'ja' | 'easy-ja' | 'en'
+  }): Promise<{ key_terms: SummaryKeyTerm[]; detected_terms: string[] }> {
+    return apiClient.post<{ key_terms: SummaryKeyTerm[]; detected_terms: string[] }>(
+      '/api/v4/lecture/transcript/analyze-keyterms',
+      request
+    )
+  },
+
+  async updateLangMode(request: {
+    session_id: string
+    lang_mode: 'ja' | 'easy-ja' | 'en'
+  }): Promise<{ session_id: string; lang_mode: string; status: string }> {
+    return apiClient.patch<{ session_id: string; lang_mode: string; status: string }>(
+      '/api/v4/lecture/session/lang-mode',
+      request
+    )
+  },
+
+  async transformSubtitle(
+    request: SubtitleTransformRequest
+  ): Promise<SubtitleTransformResponse> {
+    return apiClient.post<SubtitleTransformResponse>(
+      '/api/v4/lecture/subtitle/transform',
+      request
+    )
+  },
+
+  async auditSubtitle(
+    request: SubtitleAuditRequest
+  ): Promise<SubtitleAuditResponse> {
+    return apiClient.post<SubtitleAuditResponse>(
+      '/api/v4/lecture/subtitle/audit',
+      request
     )
   },
 }
@@ -347,6 +548,19 @@ export const lectureQaApi = {
     return apiClient.post<LectureFollowupResponse>(
       '/api/v4/lecture/qa/followup',
       request
+    )
+  },
+}
+
+/**
+ * Procedure QA API
+ */
+export const procedureQaApi = {
+  async ask(request: ProcedureAskRequest): Promise<ProcedureAskResponse> {
+    return apiClient.post<ProcedureAskResponse>(
+      '/api/v4/procedure/ask',
+      request,
+      { authScope: 'procedure' }
     )
   },
 }

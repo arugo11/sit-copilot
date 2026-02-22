@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { useTheme } from '@/hooks/useTheme'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error'
 
@@ -29,6 +30,7 @@ export function AppShell({
   locale = 'ja',
   skipLinkLabel = { ja: 'コンテンツへスキップ', en: 'Skip to main content' },
 }: AppShellProps) {
+  const { theme, toggleTheme } = useTheme()
   return (
     <div className="min-h-screen bg-bg-page">
       {/* Skip to main content link for keyboard users */}
@@ -49,8 +51,27 @@ export function AppShell({
           className="sticky top-0 z-40 w-full bg-bg-surface border-b border-border"
           role="banner"
         >
-          <div className="container mx-auto px-4">
-            {topbar}
+          <div className="container mx-auto px-4 flex items-center">
+            <div className="flex-1">{topbar}</div>
+            {/* Theme toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="ml-2 btn btn-ghost p-2 text-fg-secondary hover:text-fg-primary"
+              aria-label={theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
+              title={theme === 'dark' ? 'ライトモード' : 'ダークモード'}
+            >
+              {theme === 'dark'
+                ? /* Sun icon */
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m8.66-9h-1M4.34 12h-1m15.07-6.07-.707.707M6.343 17.657l-.707.707m12.728 0-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 1 0 0 14A7 7 0 0 0 12 5z" />
+                </svg>
+                : /* Moon icon */
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+              }
+            </button>
           </div>
         </header>
       )}
@@ -62,7 +83,7 @@ export function AppShell({
           <aside
             className="w-64 bg-bg-surface border-r border-border min-h-[calc(100vh-60px)]"
             role="complementary"
-            aria-label="Sidebar"
+            aria-label="サイドバー"
           >
             <div className="p-4">
               {sidebar}
@@ -87,7 +108,7 @@ export function AppShell({
           <aside
             className="w-80 bg-bg-surface border-l border-border min-h-[calc(100vh-60px)]"
             role="complementary"
-            aria-label="Additional information"
+            aria-label="補足情報"
           >
             <div className="p-4">
               {rightRail}

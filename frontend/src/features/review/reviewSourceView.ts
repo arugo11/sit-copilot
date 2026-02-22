@@ -40,13 +40,13 @@ export const DEFAULT_REVIEW_SOURCE_ITEMS: ReviewSourceViewItem[] = [
   {
     citationId: 'c_static_1',
     title: '発言 10:05',
-    transcript: '過学習は未知データで性能が落ちる状態です。',
+    transcript: 'これはデモ文です（根拠表示サンプル1）。',
     snapshot: 'https://dummyimage.com/640x360/e2e8f0/0f172a&text=Lecture+Source',
   },
   {
     citationId: 'c_static_2',
     title: '資料 p.3',
-    transcript: '正則化と検証データ監視を実施する。',
+    transcript: 'これはデモ文です（根拠表示サンプル2）。',
     snapshot: 'https://dummyimage.com/640x360/cbd5e1/0f172a&text=Slide+p3',
   },
 ]

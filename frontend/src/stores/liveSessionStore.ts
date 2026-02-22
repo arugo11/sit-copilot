@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { demoApi } from '@/lib/api/client'
 import type {
   AssistSummaryPayload,
   AssistTermPayload,
@@ -20,19 +21,37 @@ interface LiveSessionStore extends LiveUiState {
   transcriptLines: TranscriptLine[]
   summaryPoints: string[]
   assistTerms: AssistTermPayload[]
+  sessionId: string | null
+  langMode: 'ja' | 'easy-ja' | 'en'
   setConnection: (connection: ConnectionState) => void
   setAutoScroll: (autoScroll: boolean) => void
   setCameraEnabled: (enabled: boolean) => void
-  setSelectedLanguage: (lang: 'ja' | 'en') => void
+  setSelectedLanguage: (lang: 'ja' | 'easy-ja' | 'en') => void
   setTranscriptDensity: (density: TranscriptDensity) => void
   setLeftPanelMode: (mode: LeftPanelMode) => void
+  setSessionId: (sessionId: string | null) => void
+  setLangMode: (langMode: 'ja' | 'easy-ja' | 'en') => Promise<void>
+  switchLanguage: (langMode: 'ja' | 'easy-ja' | 'en') => Promise<void>
   applyTranscriptPartial: (line: TranscriptLine) => void
   applyTranscriptFinal: (line: TranscriptLine) => void
-  applyTranslationFinal: (lineId: string, translatedText: string) => void
+  replaceTranscriptLineText: (lineId: string, correctedText: string) => void
+  setTranscriptCorrectionStatus: (
+    lineId: string,
+    status: 'pending' | 'reviewed' | 'review_failed'
+  ) => void
+  applyTranslationFinal: (
+    lineId: string,
+    translatedText: string,
+    translatedLangMode: 'easy-ja' | 'en'
+  ) => void
   pushSourceFrame: (frame: SourceFrame) => void
   pushSourceOcr: (ocr: SourceOcrChunk) => void
   setAssistSummary: (summary: AssistSummaryPayload) => void
   setAssistTerms: (terms: AssistTermPayload[]) => void
+  summaryEnabled: boolean
+  keytermsEnabled: boolean
+  toggleSummary: () => void
+  toggleKeyterms: () => void
   hydrateFromSettings: (settings: {
     language?: 'ja' | 'en'
     transcriptDensity?: TranscriptDensity
@@ -57,6 +76,10 @@ const initialState: Pick<
   | 'transcriptLines'
   | 'summaryPoints'
   | 'assistTerms'
+  | 'sessionId'
+  | 'langMode'
+  | 'summaryEnabled'
+  | 'keytermsEnabled'
 > = {
   connection: 'connecting',
   transcriptLagMs: 0,
@@ -72,9 +95,13 @@ const initialState: Pick<
   transcriptLines: [],
   summaryPoints: [],
   assistTerms: [],
+  sessionId: null,
+  langMode: 'ja',
+  summaryEnabled: false,
+  keytermsEnabled: false,
 }
 
-export const useLiveSessionStore = create<LiveSessionStore>((set) => ({
+export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
   ...initialState,
 
   setConnection: (connection) => set({ connection }),
@@ -83,32 +110,154 @@ export const useLiveSessionStore = create<LiveSessionStore>((set) => ({
   setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
   setTranscriptDensity: (transcriptDensity) => set({ transcriptDensity }),
   setLeftPanelMode: (leftPanelMode) => set({ leftPanelMode }),
+  setSessionId: (sessionId) => set({ sessionId }),
+
+  setLangMode: async (langMode) => {
+    const { sessionId } = get()
+    if (!sessionId) {
+      console.warn('Cannot update lang_mode: no active session')
+      return
+    }
+    const previousLangMode = get().langMode
+    set({ langMode })
+    try {
+      await demoApi.updateLangMode({ session_id: sessionId, lang_mode: langMode })
+    } catch (error) {
+      set({ langMode: previousLangMode })
+      throw error
+    }
+  },
+
+  switchLanguage: async (langMode) => {
+    const { sessionId, selectedLanguage, langMode: previousLangMode } = get()
+    set({ selectedLanguage: langMode, langMode })
+
+    if (!sessionId) {
+      return
+    }
+
+    try {
+      await demoApi.updateLangMode({ session_id: sessionId, lang_mode: langMode })
+    } catch (error) {
+      set({ selectedLanguage, langMode: previousLangMode })
+      throw error
+    }
+  },
 
   applyTranscriptPartial: (line) =>
     set((state) => {
+      const existing = state.transcriptLines.find((item) => item.id === line.id)
+      const mergedLine = {
+        ...existing,
+        ...line,
+        originalLangText:
+          line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
+      }
       const without = state.transcriptLines.filter((item) => item.id !== line.id)
       return {
-        transcriptLines: [...without, line].sort((a, b) => a.tsStartMs - b.tsStartMs),
+        transcriptLines: [...without, mergedLine].sort((a, b) => a.tsStartMs - b.tsStartMs),
         transcriptLagMs: Math.max(400, state.transcriptLagMs),
       }
     }),
 
   applyTranscriptFinal: (line) =>
     set((state) => {
+      const existing = state.transcriptLines.find((item) => item.id === line.id)
+      const mergedLine = {
+        ...existing,
+        ...line,
+        originalLangText:
+          line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
+      }
       const without = state.transcriptLines.filter((item) => item.id !== line.id)
       return {
-        transcriptLines: [...without, line].sort((a, b) => a.tsStartMs - b.tsStartMs),
+        transcriptLines: [...without, mergedLine].sort((a, b) => a.tsStartMs - b.tsStartMs),
         transcriptLagMs: 120,
       }
     }),
 
-  applyTranslationFinal: (lineId, translatedText) =>
-    set((state) => ({
-      transcriptLines: state.transcriptLines.map((line) =>
-        line.id === lineId ? { ...line, translatedText } : line
-      ),
-      translationLagMs: 180,
-    })),
+  replaceTranscriptLineText: (lineId, correctedText) =>
+    set((state) => {
+      const normalized = correctedText.trim()
+      if (!normalized) {
+        return state
+      }
+
+      let changed = false
+      const updated = state.transcriptLines.map((line) => {
+        if (line.id !== lineId) {
+          return line
+        }
+        if (line.sourceLangText === normalized) {
+          return line
+        }
+        changed = true
+        return {
+          ...line,
+          originalLangText: line.originalLangText ?? line.sourceLangText,
+          sourceLangText: normalized,
+        }
+      })
+
+      if (!changed) {
+        return state
+      }
+
+      return {
+        transcriptLines: updated,
+        transcriptLagMs: 100,
+      }
+    }),
+
+  setTranscriptCorrectionStatus: (lineId, status) =>
+    set((state) => {
+      let changed = false
+      const updatedLines = state.transcriptLines.map((line) => {
+        if (line.id !== lineId) {
+          return line
+        }
+        if (line.correctionStatus === status) {
+          return line
+        }
+        changed = true
+        return { ...line, correctionStatus: status }
+      })
+
+      if (!changed) {
+        return state
+      }
+
+      return { transcriptLines: updatedLines }
+    }),
+
+  applyTranslationFinal: (lineId, translatedText, translatedLangMode) =>
+    set((state) => {
+      let changed = false
+      const updatedLines = state.transcriptLines.map((line) => {
+        if (line.id !== lineId) {
+          return line
+        }
+
+        if (
+          line.translatedText === translatedText &&
+          line.translatedLangMode === translatedLangMode
+        ) {
+          return line
+        }
+
+        changed = true
+        return { ...line, translatedText, translatedLangMode }
+      })
+
+      if (!changed) {
+        return state
+      }
+
+      return {
+        transcriptLines: updatedLines,
+        translationLagMs: 180,
+      }
+    }),
 
   pushSourceFrame: (frame) =>
     set((state) => ({
@@ -127,6 +276,9 @@ export const useLiveSessionStore = create<LiveSessionStore>((set) => ({
 
   setAssistTerms: (assistTerms) => set({ assistTerms: assistTerms.slice(0, 4) }),
 
+  toggleSummary: () => set((state) => ({ summaryEnabled: !state.summaryEnabled })),
+  toggleKeyterms: () => set((state) => ({ keytermsEnabled: !state.keytermsEnabled })),
+
   hydrateFromSettings: (settings) =>
     set((state) => ({
       selectedLanguage: settings.language ?? state.selectedLanguage,
@@ -141,5 +293,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set) => ({
       transcriptDensity: 'comfortable',
       autoScroll: true,
       cameraEnabled: false,
+      sessionId: null,
+      langMode: 'ja',
     }),
 }))

@@ -14,11 +14,11 @@ interface SourceRow {
 }
 
 const MOCK_ROWS: SourceRow[] = [
-  { id: '1', time: '10:00', type: 'audio', text: '機械学習について学びましょう', confidence: 0.96 },
-  { id: '2', time: '10:03', type: 'slide', text: 'Overfitting and Regularization', confidence: 0.9 },
-  { id: '3', time: '10:05', type: 'audio', text: '過学習は未知データで性能が落ちる状態です', confidence: 0.94 },
-  { id: '4', time: '10:07', type: 'ocr', text: '正則化 (L2) + 検証データ', confidence: 0.82 },
-  { id: '5', time: '10:08', type: 'board', text: 'L2 = lambda * ||w||^2', confidence: 0.79 },
+  { id: '1', time: '10:00', type: 'audio', text: 'これはデモ文です（音声サンプル1）', confidence: 0.96 },
+  { id: '2', time: '10:03', type: 'slide', text: 'これはデモ文です（スライドサンプル）', confidence: 0.9 },
+  { id: '3', time: '10:05', type: 'audio', text: 'これはデモ文です（音声サンプル2）', confidence: 0.94 },
+  { id: '4', time: '10:07', type: 'ocr', text: 'これはデモ文です（OCRサンプル）', confidence: 0.82 },
+  { id: '5', time: '10:08', type: 'board', text: 'これはデモ文です（板書サンプル）', confidence: 0.79 },
 ]
 
 export function LectureSourcesPage() {

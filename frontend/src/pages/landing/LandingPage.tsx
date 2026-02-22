@@ -63,6 +63,13 @@ export function LandingPage() {
               <Link to="/lectures" className="btn btn-primary w-full text-center block">
                 デモを開始
               </Link>
+              <Link to="/readiness-check" className="btn btn-secondary w-full text-center block">
+                履修前サポート (F0)
+              </Link>
+
+              <Link to="/procedure" className="btn btn-secondary w-full text-center block">
+                学内手続きQAを試す
+              </Link>
 
               {/* Language Selector */}
               <div className="pt-4 border-t border-border">
