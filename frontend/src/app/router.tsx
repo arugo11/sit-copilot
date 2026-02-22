@@ -12,7 +12,10 @@ const LecturesPage = lazy(() => import('@/pages/lectures/LecturesPage').then(m =
 const LectureLivePage = lazy(() => import('@/pages/lectures/LectureLivePage').then(m => ({ default: m.LectureLivePage })))
 const LectureReviewPage = lazy(() => import('@/pages/lectures/LectureReviewPage').then(m => ({ default: m.LectureReviewPage })))
 const LectureSourcesPage = lazy(() => import('@/pages/lectures/LectureSourcesPage').then(m => ({ default: m.LectureSourcesPage })))
+const LectureQAPage = lazy(() => import('@/pages/lectures/LectureQAPage').then(m => ({ default: m.LectureQAPage })))
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const ProcedurePage = lazy(() => import('@/pages/procedure/ProcedurePage').then(m => ({ default: m.ProcedurePage })))
+const ReadinessCheckPage = lazy(() => import('@/pages/readiness/ReadinessCheckPage').then(m => ({ default: m.ReadinessCheckPage })))
 
 import { Skeleton } from '@/components/common/Skeleton'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -50,8 +53,24 @@ const router = createBrowserRouter([
     element: <LectureSourcesPage />,
   },
   {
+    path: '/lecture/:session_id/qa',
+    element: <LectureQAPage />,
+  },
+  {
+    path: '/lectures/:id/qa',
+    element: <LectureQAPage />,
+  },
+  {
     path: '/settings',
     element: <SettingsPage />,
+  },
+  {
+    path: '/procedure',
+    element: <ProcedurePage />,
+  },
+  {
+    path: '/readiness-check',
+    element: <ReadinessCheckPage />,
   },
   {
     path: '*',
