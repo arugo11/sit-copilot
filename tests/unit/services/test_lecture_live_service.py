@@ -24,6 +24,9 @@ from app.services.lecture_live_service import (
 )
 from app.services.vision_ocr_service import VisionOCRResult, VisionOCRServiceError
 from app.services.vision_ocr_service import AzureVisionOCRService
+from app.services.asr_hallucination_judge_service import (
+    NoopJapaneseASRHallucinationJudgeService,
+)
 
 
 class FakeVisionOCRService:
@@ -72,6 +75,20 @@ class FailingJapaneseCorrectionService:
 
     async def correct_minimally(self, text: str) -> str:
         raise RuntimeError("simulated correction failure")
+
+
+class FakeApproveAllJudgeService:
+    """Judge that auto-approves all corrections (not Noop, so constructor won't replace)."""
+
+    async def judge(
+        self, *, original_text: str, candidate_text: str
+    ) -> "HallucinationJudgeResult":
+        from app.services.asr_hallucination_judge_service import HallucinationJudgeResult
+
+        changed = candidate_text.strip() != original_text.strip()
+        return HallucinationJudgeResult(
+            should_apply=changed, confidence=1.0, reason="fake_approve_all"
+        )
 
 
 @pytest.mark.asyncio
@@ -181,6 +198,7 @@ async def test_audit_and_apply_speech_chunk_updates_display_text(
         db_session,
         user_id="demo_user",
         correction_service=FakeJapaneseCorrectionService(),
+        judge_service=FakeApproveAllJudgeService(),
     )
     start_response = await service.start_session(
         LectureSessionStartRequest(

@@ -11,6 +11,7 @@ from app.services.lecture_summary_generator_service import (
     LectureSummaryResult,
 )
 from app.services.observability import WeaveObserverService
+from app.services.observability.llm_usage import LLMUsage
 
 __all__ = [
     "ObservedLectureSummaryGeneratorService",
@@ -71,6 +72,25 @@ class ObservedLectureSummaryGeneratorService:
         # Determine model name
         model = getattr(self._inner, "_model", "gpt-5-nano")
 
+        # Extract usage from inner service
+        usage: LLMUsage | None = getattr(self._inner, "_last_usage", None)
+
+        # Build metadata with cost information
+        metadata: dict[str, object] = {
+            "lang_mode": lang_mode,
+            "speech_count": len(speech_events),
+            "visual_count": len(visual_events),
+            "key_terms_count": len(result.key_terms),
+            "evidence_tags_count": len(result.evidence_tags),
+        }
+        if usage is not None:
+            metadata["prompt_tokens"] = usage.prompt_tokens
+            metadata["completion_tokens"] = usage.completion_tokens
+            metadata["total_tokens"] = usage.total_tokens
+            metadata["prompt_cost_usd"] = usage.prompt_cost
+            metadata["completion_cost_usd"] = usage.completion_cost
+            metadata["total_cost_usd"] = usage.total_cost
+
         # Track LLM summary generation
         await self._observer.track_llm_call(
             provider="azure-openai",
@@ -78,13 +98,9 @@ class ObservedLectureSummaryGeneratorService:
             prompt=prompt_excerpt,
             response=result.summary[:500],
             latency_ms=latency_ms,
-            metadata={
-                "lang_mode": lang_mode,
-                "speech_count": len(speech_events),
-                "visual_count": len(visual_events),
-                "key_terms_count": len(result.key_terms),
-                "evidence_tags_count": len(result.evidence_tags),
-            },
+            tokens_prompt=usage.prompt_tokens if usage else None,
+            tokens_completion=usage.completion_tokens if usage else None,
+            metadata=metadata,
         )
 
         return result

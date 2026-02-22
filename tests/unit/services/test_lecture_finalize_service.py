@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
+from app.models.speech_review_history import SpeechReviewHistory
 from app.models.visual_event import VisualEvent
 from app.schemas.lecture_qa import LectureIndexBuildResponse
 from app.services.lecture_finalize_service import (
@@ -402,3 +403,118 @@ async def test_finalize_keeps_existing_qa_index_true_when_rebuild_fails(
 
     assert response.status == "finalized"
     assert response.qa_index_built is True
+
+
+@pytest.mark.asyncio
+async def test_delete_session_auto_finalizes_and_removes_related_records(
+    db_session: AsyncSession,
+    mock_summary_generator,
+) -> None:
+    """Delete should auto-finalize active session and remove all owned artifacts."""
+    session = LectureSession(
+        id="lec_delete_001",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="active",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    speech_event = SpeechEvent(
+        session_id=session.id,
+        start_ms=1000,
+        end_ms=7000,
+        text="削除前イベント",
+        confidence=0.9,
+        is_final=True,
+        speaker="teacher",
+    )
+    db_session.add(speech_event)
+    await db_session.flush()
+
+    db_session.add(
+        SpeechReviewHistory(
+            session_id=session.id,
+            speech_event_id=speech_event.id,
+            attempt_no=1,
+            review_status="reviewed",
+            input_text="削除前イベント",
+            candidate_text="削除前イベント",
+            final_text="削除前イベント",
+            was_corrected=False,
+            failure_reason=None,
+            judge_model="test-judge",
+            judge_confidence=0.9,
+        )
+    )
+    await db_session.flush()
+
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
+    service = SqlAlchemyLectureFinalizeService(
+        db=db_session,
+        user_id="demo_user",
+        summary_service=summary_service,
+        index_service=SuccessfulIndexService(),
+    )
+
+    response = await service.delete_session(session_id=session.id)
+
+    assert response.status == "deleted"
+    assert response.auto_finalized is True
+
+    session_result = await db_session.execute(
+        select(LectureSession).where(LectureSession.id == session.id)
+    )
+    speech_result = await db_session.execute(
+        select(SpeechEvent).where(SpeechEvent.session_id == session.id)
+    )
+    history_result = await db_session.execute(
+        select(SpeechReviewHistory).where(SpeechReviewHistory.session_id == session.id)
+    )
+
+    assert session_result.scalar_one_or_none() is None
+    assert speech_result.scalars().all() == []
+    assert history_result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_rejects_invalid_status(
+    db_session: AsyncSession,
+    mock_summary_generator,
+) -> None:
+    """Delete should reject sessions in non-finalizable state."""
+    session = LectureSession(
+        id="lec_delete_002",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="error",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
+    service = SqlAlchemyLectureFinalizeService(
+        db=db_session,
+        user_id="demo_user",
+        summary_service=summary_service,
+        index_service=SuccessfulIndexService(),
+    )
+
+    with pytest.raises(LectureSessionStateError):
+        await service.delete_session(session_id=session.id)

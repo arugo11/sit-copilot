@@ -430,6 +430,16 @@ class LectureSessionFinalizeResponse(BaseModel):
     stats: LectureSessionFinalizeStats
 
 
+class LectureSessionDeleteResponse(BaseModel):
+    """Response schema for lecture session deletion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    status: Literal["deleted"]
+    auto_finalized: bool
+
+
 class TranscriptKeyTermsRequest(BaseModel):
     """Request schema for analyzing key terms in transcript."""
 

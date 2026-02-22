@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from time import perf_counter
 
-from app.schemas.lecture import LectureSessionFinalizeResponse
+from app.schemas.lecture import (
+    LectureSessionDeleteResponse,
+    LectureSessionFinalizeResponse,
+)
 from app.services.lecture_finalize_service import LectureFinalizeService
 from app.services.observability import WeaveObserverService
 
@@ -70,6 +73,28 @@ class ObservedLectureFinalizeService:
                     "summary_windows": result.stats.summary_windows,
                     "lecture_chunks": result.stats.lecture_chunks,
                 },
+            },
+        )
+
+        return result
+
+    async def delete_session(self, session_id: str) -> LectureSessionDeleteResponse:
+        """Delete lecture session with observation tracking."""
+        start_time = perf_counter()
+
+        result = await self._inner.delete_session(session_id)
+
+        latency_ms = int((perf_counter() - start_time) * 1000)
+        await self._observer.track_llm_call(
+            provider="system",
+            model="session_delete",
+            prompt=f"session: {session_id}",
+            response=f"deleted, auto_finalized={result.auto_finalized}",
+            latency_ms=latency_ms,
+            metadata={
+                "session_id": session_id,
+                "status": result.status,
+                "auto_finalized": result.auto_finalized,
             },
         )
 

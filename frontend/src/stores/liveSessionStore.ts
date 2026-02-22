@@ -139,7 +139,15 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
     try {
       await demoApi.updateLangMode({ session_id: sessionId, lang_mode: langMode })
     } catch (error) {
-      set({ selectedLanguage, langMode: previousLangMode })
+      // 表示言語の切替はローカル機能として維持し、
+      // サーバー側の lang_mode 更新だけを元に戻す。
+      set({ langMode: previousLangMode })
+      console.warn('Failed to persist lang_mode; keeping local language view.', {
+        error,
+        sessionId,
+        selectedLanguage,
+        requestedLangMode: langMode,
+      })
       throw error
     }
   },
@@ -150,6 +158,13 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       const mergedLine = {
         ...existing,
         ...line,
+        // Preserve existing translation data — SSE payloads don't include
+        // translatedText/translatedLangMode, so the spread above would
+        // leave them intact only if the incoming object lacks those keys
+        // entirely. Explicitly prioritising existing values makes this safe
+        // regardless of payload shape.
+        translatedText: existing?.translatedText ?? line.translatedText,
+        translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
@@ -166,6 +181,9 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       const mergedLine = {
         ...existing,
         ...line,
+        // Preserve existing translation — see applyTranscriptPartial comment.
+        translatedText: existing?.translatedText ?? line.translatedText,
+        translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
@@ -280,11 +298,20 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
   toggleKeyterms: () => set((state) => ({ keytermsEnabled: !state.keytermsEnabled })),
 
   hydrateFromSettings: (settings) =>
-    set((state) => ({
-      selectedLanguage: settings.language ?? state.selectedLanguage,
-      transcriptDensity: settings.transcriptDensity ?? state.transcriptDensity,
-      autoScroll: settings.autoScrollDefault ?? state.autoScroll,
-    })),
+    set((state) => {
+      // Only hydrate language if both selectedLanguage and langMode are still
+      // at their default ('ja'). If the user has already switched language
+      // during the live session, don't override it with persisted settings.
+      const userHasSwitched =
+        state.selectedLanguage !== 'ja' || state.langMode !== 'ja'
+      const hydratedLang = settings.language ?? state.selectedLanguage
+      return {
+        selectedLanguage: userHasSwitched ? state.selectedLanguage : hydratedLang,
+        langMode: userHasSwitched ? state.langMode : hydratedLang,
+        transcriptDensity: settings.transcriptDensity ?? state.transcriptDensity,
+        autoScroll: settings.autoScrollDefault ?? state.autoScroll,
+      }
+    }),
 
   resetLiveData: () =>
     set({

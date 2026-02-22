@@ -18,9 +18,11 @@ from app.db.session import commit_with_retry, is_sqlite_locked_error
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
+from app.models.speech_review_history import SpeechReviewHistory
 from app.models.summary_window import SummaryWindow
 from app.models.visual_event import VisualEvent
 from app.schemas.lecture import (
+    LectureSessionDeleteResponse,
     LectureSessionFinalizeResponse,
     LectureSessionFinalizeStats,
 )
@@ -62,6 +64,10 @@ class LectureFinalizeService(Protocol):
         build_qa_index: bool,
     ) -> LectureSessionFinalizeResponse:
         """Finalize a lecture session and generate artifacts."""
+        ...
+
+    async def delete_session(self, session_id: str) -> LectureSessionDeleteResponse:
+        """Finalize (if needed) and delete a lecture session with owned artifacts."""
         ...
 
 
@@ -131,6 +137,46 @@ class SqlAlchemyLectureFinalizeService:
             note_generated=stats.summary_windows > 0,
             qa_index_built=session.qa_index_built,
             stats=response_stats,
+        )
+
+    async def delete_session(self, session_id: str) -> LectureSessionDeleteResponse:
+        """Finalize active session first, then delete session and artifacts."""
+        session = await self._get_session_with_ownership(session_id)
+
+        auto_finalized = False
+        if session.status in FINALIZABLE_ACTIVE_STATUSES:
+            await self.finalize(session_id=session_id, build_qa_index=False)
+            auto_finalized = True
+        elif session.status != "finalized":
+            raise LectureSessionStateError(
+                f"session status does not allow delete: {session.status}"
+            )
+
+        # Explicit child-table cleanup to keep behavior stable across SQLite FK modes.
+        await self._db.execute(
+            delete(SpeechReviewHistory).where(
+                SpeechReviewHistory.session_id == session_id
+            )
+        )
+        await self._db.execute(
+            delete(LectureChunk).where(LectureChunk.session_id == session_id)
+        )
+        await self._db.execute(
+            delete(SummaryWindow).where(SummaryWindow.session_id == session_id)
+        )
+        await self._db.execute(
+            delete(VisualEvent).where(VisualEvent.session_id == session_id)
+        )
+        await self._db.execute(
+            delete(SpeechEvent).where(SpeechEvent.session_id == session_id)
+        )
+        await self._db.execute(delete(LectureSession).where(LectureSession.id == session_id))
+        await commit_with_retry(self._db)
+
+        return LectureSessionDeleteResponse(
+            session_id=session_id,
+            status="deleted",
+            auto_finalized=auto_finalized,
         )
 
     async def _get_session_with_ownership(self, session_id: str) -> LectureSession:

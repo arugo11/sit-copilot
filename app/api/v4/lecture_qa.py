@@ -47,7 +47,10 @@ from app.services.lecture_verifier_service import (
     AzureOpenAILectureVerifierService,
     LectureVerifierService,
 )
-from app.services.observability.weave_observer_service import WeaveObserverService
+from app.services.observability.weave_observer_service import (
+    NoopWeaveObserverService,
+    WeaveObserverService,
+)
 from app.services.observed_lecture_answerer_service import (
     ObservedLectureAnswererService,
 )
@@ -77,7 +80,7 @@ def get_weave_observer(request: Request) -> WeaveObserverService:
     Returns:
         WeaveObserverService instance from app state
     """
-    return request.app.state.weave_observer
+    return getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
 
 
 def get_azure_search_service() -> AzureSearchService:

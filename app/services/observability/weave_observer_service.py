@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, runtime_checkable
 
+from app.services.observability.llm_usage import MODEL_COSTS
 from app.services.observability.weave_dispatcher import WeaveDispatcher
 
 __all__ = [
@@ -355,6 +356,17 @@ class WandBWeaveObserverService:
                 data["tokens_prompt"] = tokens_prompt
             if tokens_completion is not None:
                 data["tokens_completion"] = tokens_completion
+
+            # Compute per-call cost using registered model pricing
+            if tokens_prompt is not None and tokens_completion is not None:
+                cost_info = MODEL_COSTS.get(model)
+                if cost_info:
+                    prompt_cost = tokens_prompt * cost_info["prompt"]
+                    completion_cost = tokens_completion * cost_info["completion"]
+                    data["prompt_cost_usd"] = prompt_cost
+                    data["completion_cost_usd"] = completion_cost
+                    data["total_cost_usd"] = prompt_cost + completion_cost
+
             if metadata:
                 data["metadata"] = metadata
             return data

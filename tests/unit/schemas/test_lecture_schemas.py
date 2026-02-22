@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.schemas.lecture import (
     MAX_VISUAL_IMAGE_BYTES,
+    LectureSessionDeleteResponse,
     LectureSessionFinalizeRequest,
     LectureSessionFinalizeResponse,
     LectureSessionStartRequest,
@@ -309,3 +310,17 @@ def test_lecture_session_finalize_response_requires_stats() -> None:
 
     assert response.status == "finalized"
     assert response.stats.lecture_chunks == 17
+
+
+def test_lecture_session_delete_response_requires_flags() -> None:
+    """Delete response should include deleted status and auto_finalized flag."""
+    payload = {
+        "session_id": "lec_20260220_ab12cd",
+        "status": "deleted",
+        "auto_finalized": True,
+    }
+
+    response = LectureSessionDeleteResponse.model_validate(payload)
+
+    assert response.status == "deleted"
+    assert response.auto_finalized is True

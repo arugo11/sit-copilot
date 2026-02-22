@@ -23,5 +23,5 @@ def test_build_chat_completion_url_uses_normalized_openai_endpoint() -> None:
     assert (
         result
         == "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
-        "?api-version=2024-10-21"
+        "?api-version=2024-05-01-preview"
     )

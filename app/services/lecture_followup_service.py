@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.azure_openai_config import ValidationResult, validate_openai_config
 from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
+from app.services.observability.llm_usage import LLMUsage, extract_usage
 
 __all__ = [
     "LectureFollowupService",
@@ -87,6 +88,7 @@ class SqlAlchemyLectureFollowupService:
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._api_version = api_version
+        self._last_usage: LLMUsage | None = None
         self._validation = self._validate_configuration(
             account_name=openai_account_name
         )
@@ -276,8 +278,7 @@ class SqlAlchemyLectureFollowupService:
                 },
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.0,
-            "max_tokens": 256,
+            "max_completion_tokens": 256,
         }
         body = json.dumps(payload).encode("utf-8")
         request = Request(
@@ -297,6 +298,7 @@ class SqlAlchemyLectureFollowupService:
         try:
             raw = await asyncio.to_thread(_run_request)
             response_json = json.loads(raw)
+            self._last_usage = extract_usage(response_json)
             rewritten = self._extract_content(response_json).strip()
             return rewritten
         except HTTPError as exc:

@@ -52,21 +52,26 @@ export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: stri
           translation: typeof term === 'string' ? term : (term.translation || term.term),
         })))
       }
+    } catch (error) {
+      console.warn('[summary] refresh failed:', error)
     } finally {
       setIsRefreshingSummary(false)
     }
   }, [sessionId, isRefreshingSummary, setAssistSummary, setAssistTerms])
 
   // Auto-refresh every 30 seconds (only when summary is enabled)
+  // Also trigger an immediate fetch when summary is first enabled.
   useEffect(() => {
-    if (!sessionId || connection !== 'live' || !summaryEnabled) {
+    if (!sessionId || !summaryEnabled) {
       return
     }
+    // Immediate fetch on toggle-on so users don't wait 30 seconds
+    handleRefreshSummary()
     const interval = setInterval(() => {
       handleRefreshSummary()
     }, SUMMARY_REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [sessionId, connection, summaryEnabled, handleRefreshSummary])
+  }, [sessionId, summaryEnabled, handleRefreshSummary])
 
   const isRecording = useAudioInputStore((state) => state.isRecording)
   const audioLevel = useAudioInputStore((state) => state.audioLevel)

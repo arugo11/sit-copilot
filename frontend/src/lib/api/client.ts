@@ -67,6 +67,12 @@ export interface LectureSessionFinalizeResponse {
   status: 'finalized'
 }
 
+export interface LectureSessionDeleteResponse {
+  session_id: string
+  status: 'deleted'
+  auto_finalized: boolean
+}
+
 export interface SpeechChunkIngestRequest {
   session_id: string
   start_ms: number
@@ -386,6 +392,10 @@ class ApiClient {
       body: data ? JSON.stringify(data) : undefined,
     })
   }
+
+  async delete<T>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' })
+  }
 }
 
 export const apiClient = new ApiClient()
@@ -445,6 +455,14 @@ export const demoApi = {
           session_id: sessionId,
           build_qa_index: false,
         }
+      )
+    )
+  },
+
+  async deleteDemoSession(sessionId: string): Promise<LectureSessionDeleteResponse> {
+    return withSessionRetry(() =>
+      apiClient.delete<LectureSessionDeleteResponse>(
+        `/api/v4/lecture/session/${encodeURIComponent(sessionId)}`
       )
     )
   },

@@ -9,6 +9,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.core.azure_openai_config import ValidationResult, validate_openai_config
+from app.services.observability.llm_usage import LLMUsage, extract_usage
 
 __all__ = [
     "LectureKeyTermsService",
@@ -111,6 +112,7 @@ class AzureOpenAILectureKeyTermsService:
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
         self._api_version = api_version
+        self._last_usage: LLMUsage | None = None
         self._validation = self._validate_configuration(account_name=account_name)
         if not self._validation.is_valid:
             logger.warning(
@@ -211,8 +213,7 @@ JSONのみを出力してください。"""
                 },
                 {"role": "user", "content": prompt},
             ],
-            "temperature": self._temperature,
-            "max_tokens": self._max_tokens,
+            "max_completion_tokens": self._max_tokens,
             "response_format": {"type": "json_object"},
         }
         body = json.dumps(payload).encode("utf-8")
@@ -234,7 +235,9 @@ JSONのみを出力してください。"""
             import asyncio
 
             raw = await asyncio.to_thread(_run_request)
-            return json.loads(raw)
+            result = json.loads(raw)
+            self._last_usage = extract_usage(result)
+            return result
         except HTTPError as exc:
             logger.warning(
                 "azure_openai_keyterms_http_error status=%s",
