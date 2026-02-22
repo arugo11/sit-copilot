@@ -1,9 +1,11 @@
 """FastAPI application main entry point."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v4 import auth as auth_api
 from app.api.v4 import health as health_api
@@ -21,19 +23,83 @@ from app.models import (  # noqa: F401  # Ensure model metadata is loaded
     LectureSession,
     QATurn,
     SpeechEvent,
+    SpeechReviewHistory,
     SummaryWindow,
     User,
     UserSettings,
     VisualEvent,
 )
+from app.services.observability import (
+    NoopWeaveObserverService,
+    WandBWeaveObserverService,
+    WeaveDispatcher,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def _ensure_sqlite_schema_compatibility(connection) -> None:  # noqa: ANN001
+    """Apply lightweight SQLite compatibility migrations for demo runtime."""
+    if not settings.database_url.startswith("sqlite"):
+        return
+
+    result = await connection.exec_driver_sql("PRAGMA table_info(speech_events)")
+    columns = {str(row[1]) for row in result.fetchall()}
+    if "original_text" not in columns:
+        await connection.exec_driver_sql(
+            "ALTER TABLE speech_events ADD COLUMN original_text TEXT"
+        )
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Create database tables at app startup for demo single-replica usage."""
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Create database tables at app startup for demo single-replica usage.
+
+    Also initializes Weave observer service if enabled.
+    """
+    if not settings.azure_openai_enabled:
+        logger.warning(
+            "azure_openai_disabled env=AZURE_OPENAI_ENABLED|AZURE_OPENAI_ENABLE feature_flags=subtitle_audit,caption_transform,summary,qa fallback_mode=local"
+        )
+
+    # Initialize Weave observer
+    weave_observer = NoopWeaveObserverService()
+
+    if settings.weave.enabled:
+        try:
+            import weave
+
+            weave.init(project_name=settings.weave.project)
+            weave_observer = WandBWeaveObserverService(settings.weave)
+            # Start dispatcher
+            dispatcher: WeaveDispatcher | None = getattr(
+                weave_observer, "_dispatcher_value", None
+            )
+            if dispatcher is not None:
+                await dispatcher.start()
+            logger.info(f"Weave initialized: project={settings.weave.project}")
+        except Exception as e:
+            logger.warning(f"Weave initialization failed: {e}. Using Noop.")
+            weave_observer = NoopWeaveObserverService()
+
+    # Store observer in app state for dependency injection
+    app.state.weave_observer = weave_observer
+
+    # Initialize database
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await _ensure_sqlite_schema_compatibility(connection)
+        if settings.database_url.startswith("sqlite"):
+            await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await connection.exec_driver_sql("PRAGMA busy_timeout=30000")
+            await connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
+
     yield
+
+    # Shutdown: stop Weave dispatcher
+    dispatcher = getattr(weave_observer, "_dispatcher_value", None)
+    if dispatcher is not None:
+        await dispatcher.stop()
 
 
 app = FastAPI(
@@ -42,6 +108,20 @@ app = FastAPI(
     debug=settings.debug,
     lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:4176",
+        "http://localhost:4176",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 register_error_handlers(app)
 
 # Include v4 API routers

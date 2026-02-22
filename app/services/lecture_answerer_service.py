@@ -54,11 +54,11 @@ class LectureAnswererService(Protocol):
 class AzureOpenAILectureAnswererService:
     """Azure OpenAI-based answerer with source grounding."""
 
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "gpt-5-nano"
     DEFAULT_MAX_TOKENS = 1000
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_TIMEOUT_SECONDS = 30
-    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_ACTION_NEXT = "他にご質問があればどうぞ。"
     NO_SOURCE_ANSWER = "該当する情報が見つかりませんでした。"
     NO_SOURCE_ACTION = "別の質問をしてください。"

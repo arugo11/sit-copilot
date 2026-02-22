@@ -33,7 +33,9 @@ class LectureSummaryResult:
     """Generated lecture summary with evidence tags."""
 
     summary: str
-    key_terms: list[str]
+    key_terms: list[
+        dict[str, str]
+    ]  # [{"term": "...", "explanation": "...", "translation": "..."}]
     evidence_tags: list[
         dict[str, str]
     ]  # {"type": "speech|slide|board", "timestamp": "...", "text": "..."}
@@ -87,11 +89,11 @@ class UnavailableLectureSummaryGeneratorService:
 class AzureOpenAILectureSummaryGeneratorService:
     """Azure OpenAI-based lecture summary generator with evidence attribution."""
 
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "gpt-5-nano"
     DEFAULT_MAX_TOKENS = 800
     DEFAULT_TEMPERATURE = 0
     DEFAULT_TIMEOUT_SECONDS = 30
-    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_API_VERSION = "2024-05-01-preview"
     MAX_SUMMARY_CHARS = 600
 
     def __init__(
@@ -104,17 +106,19 @@ class AzureOpenAILectureSummaryGeneratorService:
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         api_version: str = DEFAULT_API_VERSION,
+        keyterms_model: str = "",
     ) -> None:
         """Initialize Azure OpenAI summary generator.
 
         Args:
             api_key: Azure OpenAI API key
             endpoint: Azure OpenAI endpoint URL
-            model: Model deployment name
+            model: Model deployment name for summaries
             max_tokens: Maximum tokens in response
             temperature: Sampling temperature (0 for factual summaries)
             timeout_seconds: Request timeout
             api_version: Azure OpenAI API version
+            keyterms_model: Optional separate model for key terms extraction
         """
         self._api_key = api_key
         self._endpoint = endpoint
@@ -123,6 +127,9 @@ class AzureOpenAILectureSummaryGeneratorService:
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
         self._api_version = api_version
+        self._keyterms_model = (
+            keyterms_model or model
+        )  # Use same model if not specified
         self._validation = self._validate_configuration(account_name=account_name)
         if not self._validation.is_valid:
             logger.warning(
@@ -182,13 +189,22 @@ class AzureOpenAILectureSummaryGeneratorService:
 要件:
 - {instructions}
 - 重要なキーワードを3〜5つ抽出してください
+- 各キーワードについて、以下の情報を含めてください：
+  * explanation: 用語の説明（専門用語の場合は初心者にもわかるように）
+  * translation: 読み方や翻訳（漢字にはひらがなで読みを添えてください）
 - 各ポイントにタイムスタンプを引用して情報の出典を明示してください
 - 出典は [発言:05:23], [スライド:03:10], [板書:08:30] の形式で明示してください
 
 出力形式 (JSON):
 {{
     "summary": "全体の要約（600文字以内）",
-    "key_terms": ["キーワード1", "キーワード2", "キーワード3"],
+    "key_terms": [
+        {{
+            "term": "キーワード",
+            "explanation": "用語の説明（100文字以内）",
+            "translation": "読み方や翻訳"
+        }}
+    ],
     "evidence": [
         {{"type": "speech", "timestamp": "05:23", "text": "該当する発言の抜粋"}},
         {{"type": "slide", "timestamp": "03:10", "text": "該当するスライドの抜粋"}},
@@ -389,11 +405,33 @@ JSONのみを出力してください。"""
             if not isinstance(key_terms, list):
                 raise ValueError("key_terms must be a list")
 
-            # Validate key_terms are strings
-            validated_key_terms: list[str] = []
+            # Validate key_terms (support both legacy string format and new dict format)
+            validated_key_terms: list[dict[str, str]] = []
             for term in key_terms:
+                # Legacy format: string only
                 if isinstance(term, str) and term.strip():
-                    validated_key_terms.append(term.strip())
+                    validated_key_terms.append(
+                        {
+                            "term": term.strip(),
+                            "explanation": "Generated from lecture summary evidence.",
+                            "translation": term.strip(),
+                        }
+                    )
+                # New format: dict with term, explanation, translation
+                elif isinstance(term, dict):
+                    term_value = term.get("term", "")
+                    if not isinstance(term_value, str) or not term_value.strip():
+                        continue
+                    validated_key_terms.append(
+                        {
+                            "term": term_value.strip(),
+                            "explanation": term.get(
+                                "explanation",
+                                "Generated from lecture summary evidence.",
+                            ),
+                            "translation": term.get("translation", term_value.strip()),
+                        }
+                    )
 
             evidence = result.get("evidence", [])
             if not isinstance(evidence, list):

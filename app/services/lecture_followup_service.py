@@ -58,9 +58,9 @@ class SqlAlchemyLectureFollowupService:
     """Follow-up service using conversation history from QATurn."""
 
     DEFAULT_HISTORY_TURNS = 3
-    DEFAULT_REWRITE_MODEL = "gpt-4o"
+    DEFAULT_REWRITE_MODEL = "gpt-5-nano"
     DEFAULT_TIMEOUT_SECONDS = 20
-    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_API_VERSION = "2024-05-01-preview"
 
     def __init__(
         self,

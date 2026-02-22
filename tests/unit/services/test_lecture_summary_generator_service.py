@@ -151,8 +151,12 @@ async def test_generate_summary_returns_valid_result(
         == "この区間では、外れ値の確認手順として、まず散布図で視覚的な確認を行う方法が説明されました。外れ値や残差の確認が重要であることが強調されています。"
     )
     assert len(result.key_terms) == 4
-    assert "外れ値" in result.key_terms
-    assert "散布図" in result.key_terms
+    # key_terms is now a list of dicts with term, explanation, translation
+    term_values = [
+        term["term"] if isinstance(term, dict) else term for term in result.key_terms
+    ]
+    assert "外れ値" in term_values
+    assert "散布図" in term_values
     assert len(result.evidence_tags) == 2
     assert result.evidence_tags[0]["type"] == "speech"
     assert result.evidence_tags[1]["type"] == "slide"
@@ -483,7 +487,13 @@ async def test_generate_summary_with_en_mode(
 
     # Assert
     assert result.summary == "This segment explains how to detect outliers."
-    assert result.key_terms == ["outlier", "scatter plot"]
+    # key_terms is now a list of dicts with term, explanation, translation
+    assert len(result.key_terms) == 2
+    term_values = [
+        term["term"] if isinstance(term, dict) else term for term in result.key_terms
+    ]
+    assert "outlier" in term_values
+    assert "scatter plot" in term_values
 
 
 @pytest.mark.asyncio

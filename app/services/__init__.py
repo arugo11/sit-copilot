@@ -52,6 +52,15 @@ from app.services.lecture_verifier_service import (
     LectureVerificationResult,
     LectureVerifierService,
 )
+from app.services.observability.weave_observer_service import (
+    NoopWeaveObserverService,
+    WandBWeaveObserverService,
+    WeaveObserverService,
+)
+from app.services.observed_lecture_answerer_service import (
+    ObservedLectureAnswererService,
+)
+from app.services.observed_lecture_qa_service import ObservedLectureQAService
 from app.services.procedure_answerer_service import (
     AzureOpenAIProcedureAnswererService,
     ProcedureAnswerDraft,
@@ -82,6 +91,7 @@ from app.services.speech_token_service import (
     issue_speech_token_via_sts,
 )
 from app.services.vision_ocr_service import (
+    AzureVisionOCRService,
     NoopVisionOCRService,
     VisionOCRResult,
     VisionOCRService,
@@ -119,6 +129,7 @@ __all__ = [
     "LectureVerificationResult",
     "LectureVerifierService",
     "LectureFollowupService",
+    "AzureVisionOCRService",
     "NoopVisionOCRService",
     "NoopProcedureRetrievalService",
     "ProcedureAnswerDraft",
@@ -145,4 +156,9 @@ __all__ = [
     "VisionOCRResult",
     "VisionOCRService",
     "VisionOCRServiceError",
+    "WeaveObserverService",
+    "NoopWeaveObserverService",
+    "WandBWeaveObserverService",
+    "ObservedLectureAnswererService",
+    "ObservedLectureQAService",
 ]

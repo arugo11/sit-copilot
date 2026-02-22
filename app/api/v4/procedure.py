@@ -24,6 +24,10 @@ from app.services.procedure_retrieval_service import (
     ProcedureRetrievalService,
     ProcedureSearchService,
 )
+from app.services.lecture_verifier_service import (
+    AzureOpenAILectureVerifierService,
+    LectureVerifierService,
+)
 
 router = APIRouter(
     prefix="/procedure",
@@ -65,6 +69,18 @@ def get_procedure_answerer_service() -> ProcedureAnswererService:
         endpoint=settings.azure_openai_endpoint,
         account_name=settings.azure_openai_account_name,
         model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
+    )
+
+
+def get_procedure_verifier_service() -> LectureVerifierService:
+    """Dependency provider for procedure verifier service."""
+    return AzureOpenAILectureVerifierService(
+        api_key=settings.azure_openai_api_key,
+        endpoint=settings.azure_openai_endpoint,
+        account_name=settings.azure_openai_account_name,
+        model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
     )
 
 
@@ -76,12 +92,16 @@ def get_procedure_qa_service(
     answerer: Annotated[
         ProcedureAnswererService, Depends(get_procedure_answerer_service)
     ],
+    verifier: Annotated[
+        LectureVerifierService, Depends(get_procedure_verifier_service)
+    ],
 ) -> ProcedureQAService:
     """Dependency provider for procedure QA orchestration service."""
     return SqlAlchemyProcedureQAService(
         db=db,
         retriever=retriever,
         answerer=answerer,
+        verifier=verifier,
         retrieval_limit=settings.procedure_retrieval_limit,
         no_source_fallback=settings.procedure_no_source_fallback,
         no_source_action_next=settings.procedure_no_source_action_next,

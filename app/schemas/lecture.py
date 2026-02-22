@@ -9,6 +9,7 @@ LectureSpeaker = Literal["teacher", "unknown"]
 LectureVisualSource = Literal["slide", "board"]
 VisualEventQuality = Literal["good", "warn", "bad"]
 LectureEvidenceType = Literal["speech", "slide", "board"]
+ReviewStatus = Literal["reviewed", "review_failed"]
 
 MAX_SESSION_ID_LENGTH = 64
 MAX_TEXT_LENGTH = 5000
@@ -70,6 +71,116 @@ class LectureSessionStartResponse(BaseModel):
     status: Literal["active"]
 
 
+class LectureSessionLangModeUpdateRequest(BaseModel):
+    """Request schema for updating lecture session language mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    lang_mode: LangMode = Field(
+        description="Language mode for new summaries (ja, easy-ja, en)"
+    )
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id_not_blank(cls, value: str) -> str:
+        """Normalize session ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("session_id must not be blank.")
+        return normalized
+
+
+class LectureSessionLangModeUpdateResponse(BaseModel):
+    """Response schema for updating lecture session language mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    lang_mode: LangMode
+    status: Literal["active"]
+
+
+class SubtitleTransformRequest(BaseModel):
+    """Request schema for transforming subtitle text for live display."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    target_lang_mode: LangMode
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_transform_session_id_not_blank(cls, value: str) -> str:
+        """Normalize session ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("session_id must not be blank.")
+        return normalized
+
+    @field_validator("text")
+    @classmethod
+    def validate_transform_text_not_blank(cls, value: str) -> str:
+        """Normalize subtitle text and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("text must not be blank.")
+        return normalized
+
+
+class SubtitleTransformResponse(BaseModel):
+    """Response schema for transformed subtitle text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    target_lang_mode: LangMode
+    transformed_text: str
+
+
+class SubtitleAuditRequest(BaseModel):
+    """Request schema for immediate subtitle audit/correction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_audit_session_id_not_blank(cls, value: str) -> str:
+        """Normalize session ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("session_id must not be blank.")
+        return normalized
+
+    @field_validator("text")
+    @classmethod
+    def validate_audit_text_not_blank(cls, value: str) -> str:
+        """Normalize subtitle text and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("text must not be blank.")
+        return normalized
+
+
+class SubtitleAuditResponse(BaseModel):
+    """Response schema for immediate subtitle audit/correction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    original_text: str
+    corrected_text: str
+    review_status: ReviewStatus = "reviewed"
+    reviewed: bool = True
+    was_corrected: bool = False
+    retry_count: int = Field(default=0, ge=0, le=2)
+    failure_reason: str | None = None
+
+
 class SpeechChunkIngestRequest(BaseModel):
     """Request schema for finalized subtitle event ingestion."""
 
@@ -119,6 +230,41 @@ class SpeechChunkIngestResponse(BaseModel):
     event_id: str
     session_id: str
     accepted: bool
+
+
+class SpeechChunkAuditApplyRequest(BaseModel):
+    """Request schema for post-display speech chunk audit and replacement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    event_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("session_id", "event_id")
+    @classmethod
+    def validate_ids_not_blank(cls, value: str) -> str:
+        """Normalize IDs and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("id must not be blank.")
+        return normalized
+
+
+class SpeechChunkAuditApplyResponse(BaseModel):
+    """Response schema for post-display speech chunk audit and replacement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    event_id: str
+    original_text: str
+    corrected_text: str
+    updated: bool
+    review_status: ReviewStatus = "reviewed"
+    reviewed: bool = True
+    was_corrected: bool = False
+    retry_count: int = Field(default=0, ge=0, le=2)
+    failure_reason: str | None = None
 
 
 class VisualEventIngestRequest(BaseModel):
@@ -191,6 +337,14 @@ class LectureSummaryKeyTerm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     term: str = Field(min_length=1, max_length=128)
+    explanation: str = Field(
+        default="", max_length=500, description="LLM-generated explanation of the term"
+    )
+    translation: str = Field(
+        default="",
+        max_length=128,
+        description="LLM-generated translation (e.g., hiragana reading for Japanese)",
+    )
     evidence_tags: list[LectureEvidenceType] = Field(min_length=1, max_length=3)
 
     @field_validator("term")
@@ -274,3 +428,40 @@ class LectureSessionFinalizeResponse(BaseModel):
     note_generated: bool
     qa_index_built: bool
     stats: LectureSessionFinalizeStats
+
+
+class TranscriptKeyTermsRequest(BaseModel):
+    """Request schema for analyzing key terms in transcript."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    transcript_text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    lang_mode: LangMode = "ja"
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id_not_blank(cls, value: str) -> str:
+        """Normalize session ID and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("session_id must not be blank.")
+        return normalized
+
+    @field_validator("transcript_text")
+    @classmethod
+    def validate_transcript_text_not_blank(cls, value: str) -> str:
+        """Normalize transcript text and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("transcript_text must not be blank.")
+        return normalized
+
+
+class TranscriptKeyTermsResponse(BaseModel):
+    """Response schema for key terms analysis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key_terms: list[LectureSummaryKeyTerm]
+    detected_terms: list[str]  # Terms that were detected as needing explanation

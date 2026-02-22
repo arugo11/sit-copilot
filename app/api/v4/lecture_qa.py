@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_lecture_token, require_user_id
@@ -47,6 +47,11 @@ from app.services.lecture_verifier_service import (
     AzureOpenAILectureVerifierService,
     LectureVerifierService,
 )
+from app.services.observability.weave_observer_service import WeaveObserverService
+from app.services.observed_lecture_answerer_service import (
+    ObservedLectureAnswererService,
+)
+from app.services.observed_lecture_qa_service import ObservedLectureQAService
 
 router = APIRouter(
     prefix="/lecture/qa",
@@ -61,6 +66,18 @@ def _azure_search_available() -> bool:
         and bool(settings.azure_search_endpoint.strip())
         and bool(settings.azure_search_api_key.strip())
     )
+
+
+def get_weave_observer(request: Request) -> WeaveObserverService:
+    """Get Weave observer from app state.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        WeaveObserverService instance from app state
+    """
+    return request.app.state.weave_observer
 
 
 def get_azure_search_service() -> AzureSearchService:
@@ -81,15 +98,30 @@ def get_lecture_retrieval_service() -> LectureRetrievalService:
     return get_shared_lecture_retrieval_service()
 
 
-def get_lecture_answerer_service() -> LectureAnswererService:
-    """Dependency provider for lecture answerer service."""
-    return AzureOpenAILectureAnswererService(
+def get_lecture_answerer_service(
+    observer: Annotated[WeaveObserverService, Depends(get_weave_observer)],
+) -> LectureAnswererService:
+    """Dependency provider for lecture answerer service.
+
+    Wraps with observed service when Weave is enabled.
+    """
+    inner_service = AzureOpenAILectureAnswererService(
         api_key=settings.azure_openai_api_key,
         endpoint=settings.azure_openai_endpoint,
         account_name=settings.azure_openai_account_name,
         model=settings.azure_openai_model,
         api_version=settings.azure_openai_api_version,
     )
+
+    # Wrap with observed service if Weave is enabled
+    if settings.weave.enabled:
+        return ObservedLectureAnswererService(
+            inner=inner_service,
+            observer=observer,
+            model=settings.azure_openai_model,
+        )
+
+    return inner_service
 
 
 def get_lecture_verifier_service() -> LectureVerifierService:
@@ -141,9 +173,13 @@ def get_lecture_qa_service(
     answerer: Annotated[LectureAnswererService, Depends(get_lecture_answerer_service)],
     verifier: Annotated[LectureVerifierService, Depends(get_lecture_verifier_service)],
     followup: Annotated[LectureFollowupService, Depends(get_lecture_followup_service)],
+    observer: Annotated[WeaveObserverService, Depends(get_weave_observer)],
 ) -> LectureQAService:
-    """Dependency provider for lecture QA orchestration service."""
-    return SqlAlchemyLectureQAService(
+    """Dependency provider for lecture QA orchestration service.
+
+    Wraps with observed service when Weave is enabled.
+    """
+    inner_service = SqlAlchemyLectureQAService(
         db=db,
         retriever=retriever,
         answerer=answerer,
@@ -151,6 +187,12 @@ def get_lecture_qa_service(
         followup=followup,
         retrieval_limit=settings.lecture_qa_retrieval_limit,
     )
+
+    # Wrap with observed service if Weave is enabled
+    if settings.weave.enabled:
+        return ObservedLectureQAService(inner=inner_service, observer=observer)
+
+    return inner_service
 
 
 @router.post(

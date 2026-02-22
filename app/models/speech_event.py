@@ -15,6 +15,7 @@ __all__ = ["SpeechEvent"]
 
 if TYPE_CHECKING:
     from app.models.lecture_session import LectureSession
+    from app.models.speech_review_history import SpeechReviewHistory
 
 
 class SpeechEvent(Base):
@@ -35,6 +36,7 @@ class SpeechEvent(Base):
     )
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     is_final: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -48,4 +50,9 @@ class SpeechEvent(Base):
     session: Mapped[LectureSession] = relationship(
         "LectureSession",
         back_populates="speech_events",
+    )
+    review_histories: Mapped[list[SpeechReviewHistory]] = relationship(
+        "SpeechReviewHistory",
+        back_populates="speech_event",
+        cascade="all, delete-orphan",
     )

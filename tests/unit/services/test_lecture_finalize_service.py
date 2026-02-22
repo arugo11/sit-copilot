@@ -256,6 +256,61 @@ async def test_finalize_rejects_error_status_session(
 
 
 @pytest.mark.asyncio
+async def test_finalize_accepts_legacy_live_status_session(
+    db_session: AsyncSession,
+    mock_summary_generator,
+) -> None:
+    """Finalize should accept legacy sessions with status=live."""
+    session = LectureSession(
+        id="lec_finalize_live_legacy",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="live",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=12000,
+            end_ms=19000,
+            text="外れ値の確認手順を説明します。",
+            confidence=0.95,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    await db_session.flush()
+
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
+    service = SqlAlchemyLectureFinalizeService(
+        db=db_session,
+        user_id="demo_user",
+        summary_service=summary_service,
+        index_service=SuccessfulIndexService(),
+    )
+
+    response = await service.finalize(session_id=session.id, build_qa_index=False)
+
+    assert response.status == "finalized"
+    assert response.stats.speech_events == 1
+
+    session_result = await db_session.execute(
+        select(LectureSession).where(LectureSession.id == session.id)
+    )
+    finalized = session_result.scalar_one()
+    assert finalized.status == "finalized"
+
+
+@pytest.mark.asyncio
 async def test_finalize_handles_index_failure_as_false_flag(
     db_session: AsyncSession,
     mock_summary_generator,

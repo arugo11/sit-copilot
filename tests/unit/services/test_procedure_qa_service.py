@@ -11,6 +11,7 @@ from app.services.procedure_answerer_service import (
     ProcedureAnswererError,
 )
 from app.services.procedure_qa_service import SqlAlchemyProcedureQAService
+from app.services.lecture_verifier_service import LectureVerificationResult
 
 
 class StubRetriever:
@@ -51,6 +52,64 @@ class ErrorAnswerer:
         raise ProcedureAnswererError("failed")
 
 
+class PassVerifier:
+    """Verifier that always passes."""
+
+    def __init__(self) -> None:
+        self.verify_call_count = 0
+
+    async def verify(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+    ) -> LectureVerificationResult:
+        _ = (question, answer, sources)
+        self.verify_call_count += 1
+        return LectureVerificationResult(
+            passed=True,
+            summary="verified",
+            unsupported_claims=[],
+        )
+
+    async def repair_answer(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+        unsupported_claims: list[str],
+    ) -> str | None:
+        _ = (question, answer, sources, unsupported_claims)
+        return None
+
+
+class FailVerifier:
+    """Verifier that always fails and cannot repair."""
+
+    async def verify(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+    ) -> LectureVerificationResult:
+        _ = (question, answer, sources)
+        return LectureVerificationResult(
+            passed=False,
+            summary="unsupported",
+            unsupported_claims=[answer],
+        )
+
+    async def repair_answer(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+        unsupported_claims: list[str],
+    ) -> str | None:
+        _ = (question, answer, sources, unsupported_claims)
+        return None
+
+
 @pytest.mark.asyncio
 async def test_ask_with_sources_returns_answer_and_persists_turn(
     db_session: AsyncSession,
@@ -72,8 +131,12 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
             action_next="学生証を持って証明書発行機を利用してください。",
         )
     )
+    verifier = PassVerifier()
     service = SqlAlchemyProcedureQAService(
-        db=db_session, retriever=retriever, answerer=answerer
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
     )
 
     response = await service.ask(
@@ -84,6 +147,7 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
     assert response.fallback == ""
     assert response.confidence == "high"
     assert answerer.call_count == 1
+    assert verifier.verify_call_count == 1
 
     result = await db_session.execute(
         select(QATurn).where(QATurn.question == "在学証明書はどこですか。")
@@ -92,7 +156,7 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
     assert qa_turn is not None
     assert qa_turn.feature == "procedure_qa"
     assert qa_turn.session_id is None
-    assert qa_turn.verifier_supported is False
+    assert qa_turn.verifier_supported is True
     assert qa_turn.latency_ms >= 0
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["doc_012_c03"]
@@ -111,8 +175,12 @@ async def test_ask_without_sources_returns_fallback_and_does_not_call_answerer(
             action_next="unused",
         )
     )
+    verifier = PassVerifier()
     service = SqlAlchemyProcedureQAService(
-        db=db_session, retriever=retriever, answerer=answerer
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
     )
 
     response = await service.ask(
@@ -130,7 +198,7 @@ async def test_ask_without_sources_returns_fallback_and_does_not_call_answerer(
     qa_turn = result.scalar_one_or_none()
     assert qa_turn is not None
     assert qa_turn.feature == "procedure_qa"
-    assert qa_turn.verifier_supported is False
+    assert qa_turn.verifier_supported is True
     assert qa_turn.latency_ms >= 0
     assert qa_turn.citations_json == []
     assert qa_turn.retrieved_chunk_ids_json == []
@@ -154,6 +222,7 @@ async def test_ask_with_answerer_failure_returns_local_grounded_answer_and_persi
         db=db_session,
         retriever=retriever,
         answerer=ErrorAnswerer(),
+        verifier=PassVerifier(),
         backend_failure_fallback="回答生成に失敗しました。",
     )
 
@@ -174,3 +243,49 @@ async def test_ask_with_answerer_failure_returns_local_grounded_answer_and_persi
     assert qa_turn is not None
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["doc_012_c03"]
+
+
+@pytest.mark.asyncio
+async def test_ask_with_verification_failure_returns_safe_fallback(
+    db_session: AsyncSession,
+) -> None:
+    """Service should return safe fallback when verification fails."""
+    sources = [
+        ProcedureSource(
+            title="証明書発行案内",
+            section="申請方法",
+            snippet="在学証明書は証明書発行機で発行できます。",
+            source_id="doc_012_c03",
+        )
+    ]
+    retriever = StubRetriever(sources)
+    answerer = SpyAnswerer(
+        ProcedureAnswerDraft(
+            answer="誤った推測回答です。",
+            confidence="high",
+            action_next="学生課に連絡してください。",
+        )
+    )
+    service = SqlAlchemyProcedureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=FailVerifier(),
+        backend_failure_fallback="回答生成中にエラーが発生しました。",
+    )
+
+    response = await service.ask(
+        ProcedureAskRequest(query="在学証明書はどこですか。", lang_mode="ja")
+    )
+
+    assert response.confidence == "low"
+    assert response.sources == sources
+    assert response.fallback == "回答生成中にエラーが発生しました。"
+    assert response.answer == "回答生成中にエラーが発生しました。"
+
+    result = await db_session.execute(
+        select(QATurn).where(QATurn.question == "在学証明書はどこですか。")
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "verification_failed"

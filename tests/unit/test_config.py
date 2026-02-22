@@ -29,3 +29,29 @@ def test_settings_rejects_invalid_speech_timeout() -> None:
     """Settings should reject non-positive speech STS timeout values."""
     with pytest.raises(ValidationError):
         Settings(_env_file=None, azure_speech_sts_timeout_seconds=0)
+
+
+def test_settings_accepts_azure_vision_configuration_fields() -> None:
+    """Settings should include Azure Vision configuration values."""
+    configured = Settings(
+        _env_file=None,
+        azure_vision_enabled=True,
+        azure_vision_key="dummy-vision-key",
+        azure_vision_endpoint="https://japaneast.api.cognitive.microsoft.com/",
+    )
+
+    assert configured.azure_vision_enabled is True
+    assert configured.azure_vision_key == "dummy-vision-key"
+    assert configured.azure_vision_endpoint == (
+        "https://japaneast.api.cognitive.microsoft.com/"
+    )
+
+
+def test_settings_accepts_legacy_azure_openai_enable_env_alias() -> None:
+    """Settings should accept AZURE_OPENAI_ENABLE as alias."""
+    configured = Settings(
+        _env_file=None,
+        AZURE_OPENAI_ENABLE="true",
+    )
+
+    assert configured.azure_openai_enabled is True

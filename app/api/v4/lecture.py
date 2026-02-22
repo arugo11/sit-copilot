@@ -35,15 +35,37 @@ from app.schemas.lecture import (
     MAX_VISUAL_IMAGE_BYTES,
     LectureSessionFinalizeRequest,
     LectureSessionFinalizeResponse,
+    LectureSessionLangModeUpdateRequest,
+    LectureSessionLangModeUpdateResponse,
     LectureSessionStartRequest,
     LectureSessionStartResponse,
+    LectureSummaryKeyTerm,
     LectureSummaryLatestResponse,
     LectureVisualSource,
+    SpeechChunkAuditApplyRequest,
+    SpeechChunkAuditApplyResponse,
     SpeechChunkIngestRequest,
     SpeechChunkIngestResponse,
+    SubtitleAuditRequest,
+    SubtitleAuditResponse,
+    SubtitleTransformRequest,
+    SubtitleTransformResponse,
+    TranscriptKeyTermsRequest,
+    TranscriptKeyTermsResponse,
     VisualEventIngestRequest,
     VisualEventIngestResponse,
 )
+from app.services.asr_hallucination_judge_service import (
+    AzureOpenAIJapaneseASRHallucinationJudgeService,
+    JapaneseASRHallucinationJudgeService,
+    NoopJapaneseASRHallucinationJudgeService,
+)
+from app.services.asr_japanese_correction_service import (
+    AzureOpenAIJapaneseASRCorrectionService,
+    JapaneseASRCorrectionService,
+    NoopJapaneseASRCorrectionService,
+)
+from app.services.asr_subtitle_review_service import SubtitleReviewService
 from app.services.azure_search_service import (
     AzureSearchService,
     get_shared_azure_search_service,
@@ -58,10 +80,17 @@ from app.services.lecture_index_service import (
     BM25LectureIndexService,
     LectureIndexService,
 )
+from app.services.lecture_keyterms_service import (
+    AzureOpenAILectureKeyTermsService,
+    LectureKeyTermsError,
+    LectureKeyTermsService,
+    UnavailableLectureKeyTermsService,
+)
 from app.services.lecture_live_service import (
     LectureLiveService,
     LectureSessionInactiveError,
     LectureSessionNotFoundError,
+    LectureSpeechEventNotFoundError,
     SqlAlchemyLectureLiveService,
 )
 from app.services.lecture_retrieval_service import (
@@ -76,6 +105,24 @@ from app.services.lecture_summary_generator_service import (
 from app.services.lecture_summary_service import (
     LectureSummaryService,
     SqlAlchemyLectureSummaryService,
+)
+from app.services.live_caption_transform_service import (
+    AzureOpenAILiveCaptionTransformService,
+    CaptionTransformService,
+)
+from app.services.observability import (
+    NoopWeaveObserverService,
+    WeaveObserverService,
+)
+from app.services.observed_lecture_finalize_service import (
+    ObservedLectureFinalizeService,
+)
+from app.services.observed_lecture_live_service import ObservedLectureLiveService
+from app.services.observed_lecture_summary_generator_service import (
+    ObservedLectureSummaryGeneratorService,
+)
+from app.services.observed_lecture_summary_service import (
+    ObservedLectureSummaryService,
 )
 from app.services.vision_ocr_service import NoopVisionOCRService, VisionOCRService
 
@@ -148,21 +195,39 @@ def _extract_assist_terms(key_terms_raw: object) -> list[dict[str, str]]:
 
     terms: list[dict[str, str]] = []
     for item in key_terms_raw:
-        if not isinstance(item, dict):
-            continue
-        raw_term = item.get("term", "")  # type: ignore[arg-type]
-        if not isinstance(raw_term, str):
-            continue
-        term = raw_term.strip()
-        if not term:
-            continue
-        terms.append(
-            {
-                "term": term,
-                "explanation": "Generated from lecture summary evidence.",
-                "translation": term,
-            }
-        )
+        # Support both legacy string format and new dict format
+        if isinstance(item, str):
+            term = item.strip()
+            if not term:
+                continue
+            terms.append(
+                {
+                    "term": term,
+                    "explanation": "Generated from lecture summary evidence.",
+                    "translation": term,
+                }
+            )
+        elif isinstance(item, dict):
+            raw_term = item.get("term", "")  # type: ignore[arg-type]
+            if not isinstance(raw_term, str):
+                continue
+            term = raw_term.strip()
+            if not term:
+                continue
+            explanation = item.get("explanation")  # type: ignore[arg-type]
+            translation = item.get("translation")  # type: ignore[arg-type]
+            terms.append(
+                {
+                    "term": term,
+                    "explanation": explanation
+                    if isinstance(explanation, str)
+                    else "Generated from lecture summary evidence.",
+                    "translation": translation
+                    if isinstance(translation, str)
+                    else term,
+                }
+            )
+
         if len(terms) >= MAX_ASSIST_TERMS:
             break
     return terms
@@ -416,39 +481,127 @@ def get_azure_search_service() -> AzureSearchService:
     )
 
 
-def get_lecture_live_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: Annotated[str, Depends(require_user_id)],
-    vision_ocr_service: Annotated[VisionOCRService, Depends(get_vision_ocr_service)],
-) -> LectureLiveService:
-    """Dependency provider for lecture live service."""
-    return SqlAlchemyLectureLiveService(
-        db=db,
-        user_id=user_id,
-        vision_ocr_service=vision_ocr_service,
-    )
-
-
-def get_lecture_summary_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> LectureSummaryService:
-    """Dependency provider for lecture summary service."""
-    summary_generator: LectureSummaryGeneratorService
-    if _azure_openai_summary_available():
-        summary_generator = AzureOpenAILectureSummaryGeneratorService(
+def get_japanese_asr_correction_service() -> JapaneseASRCorrectionService:
+    """Dependency provider for Japanese ASR minimal correction service."""
+    if settings.azure_openai_enabled:
+        return AzureOpenAIJapaneseASRCorrectionService(
             api_key=settings.azure_openai_api_key,
             endpoint=settings.azure_openai_endpoint,
             account_name=settings.azure_openai_account_name,
             model=settings.azure_openai_model,
+            api_version=settings.azure_openai_api_version,
+        )
+    return NoopJapaneseASRCorrectionService(
+        warning_reason=(
+            "azure_openai_disabled_request_fallback env=AZURE_OPENAI_ENABLED|AZURE_OPENAI_ENABLE endpoint=/api/v4/lecture/subtitle/audit using=noop_correction"
+        )
+    )
+
+
+def get_japanese_asr_hallucination_judge_service() -> JapaneseASRHallucinationJudgeService:
+    """Dependency provider for strict hallucination judge."""
+    if settings.azure_openai_enabled:
+        judge_model = settings.azure_openai_judge_model.strip() or settings.azure_openai_model
+        return AzureOpenAIJapaneseASRHallucinationJudgeService(
+            api_key=settings.azure_openai_api_key,
+            endpoint=settings.azure_openai_endpoint,
+            account_name=settings.azure_openai_account_name,
+            model=judge_model,
+            api_version=settings.azure_openai_api_version,
+            timeout_seconds=settings.asr_judge_timeout_seconds,
+            obvious_threshold=settings.asr_hallucination_obvious_threshold,
+        )
+    return NoopJapaneseASRHallucinationJudgeService(
+        warning_reason=(
+            "azure_openai_judge_disabled_request_fallback env=AZURE_OPENAI_ENABLED|AZURE_OPENAI_ENABLE endpoint=/api/v4/lecture/subtitle/audit using=noop_judge"
+        )
+    )
+
+
+def get_subtitle_review_service(
+    correction_service: Annotated[
+        JapaneseASRCorrectionService,
+        Depends(get_japanese_asr_correction_service),
+    ],
+    judge_service: Annotated[
+        JapaneseASRHallucinationJudgeService,
+        Depends(get_japanese_asr_hallucination_judge_service),
+    ],
+) -> SubtitleReviewService:
+    """Dependency provider for subtitle review flow (generator + judge)."""
+    return SubtitleReviewService(
+        correction_service=correction_service,
+        judge_service=judge_service,
+        retry_max=settings.asr_audit_retry_max,
+    )
+
+
+def get_lecture_live_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[str, Depends(require_user_id)],
+    vision_ocr_service: Annotated[VisionOCRService, Depends(get_vision_ocr_service)],
+    correction_service: Annotated[
+        JapaneseASRCorrectionService,
+        Depends(get_japanese_asr_correction_service),
+    ],
+    judge_service: Annotated[
+        JapaneseASRHallucinationJudgeService,
+        Depends(get_japanese_asr_hallucination_judge_service),
+    ],
+    subtitle_review_service: Annotated[
+        SubtitleReviewService,
+        Depends(get_subtitle_review_service),
+    ],
+    request: Request,
+) -> LectureLiveService:
+    """Dependency provider for lecture live service with Weave observation."""
+    observer: WeaveObserverService = (
+        getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
+    )
+
+    inner = SqlAlchemyLectureLiveService(
+        db=db,
+        user_id=user_id,
+        vision_ocr_service=vision_ocr_service,
+        correction_service=correction_service,
+        judge_service=judge_service,
+        subtitle_review_service=subtitle_review_service,
+    )
+    return ObservedLectureLiveService(inner=inner, observer=observer)
+
+
+def get_lecture_summary_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> LectureSummaryService:
+    """Dependency provider for lecture summary service with Weave observation."""
+    observer: WeaveObserverService = (
+        getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
+    )
+
+    # Create observed summary generator
+    summary_generator: LectureSummaryGeneratorService
+    if _azure_openai_summary_available():
+        inner_generator = AzureOpenAILectureSummaryGeneratorService(
+            api_key=settings.azure_openai_api_key,
+            endpoint=settings.azure_openai_endpoint,
+            account_name=settings.azure_openai_account_name,
+            model=settings.azure_openai_model,
+            keyterms_model=settings.azure_openai_keyterms_model,
+        )
+        summary_generator = ObservedLectureSummaryGeneratorService(
+            inner=inner_generator, observer=observer
         )
     else:
         summary_generator = UnavailableLectureSummaryGeneratorService(
             reason="azure openai summary backend is unavailable"
         )
-    return SqlAlchemyLectureSummaryService(
+
+    inner_service = SqlAlchemyLectureSummaryService(
         db=db,
         summary_generator=summary_generator,
     )
+    return ObservedLectureSummaryService(inner=inner_service, observer=observer)
 
 
 def get_lecture_index_service(
@@ -474,13 +627,45 @@ def get_lecture_finalize_service(
         LectureSummaryService, Depends(get_lecture_summary_service)
     ],
     index_service: Annotated[LectureIndexService, Depends(get_lecture_index_service)],
+    request: Request,
 ) -> LectureFinalizeService:
-    """Dependency provider for lecture finalize service."""
-    return SqlAlchemyLectureFinalizeService(
+    """Dependency provider for lecture finalize service with Weave observation."""
+    observer: WeaveObserverService = (
+        getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
+    )
+
+    inner = SqlAlchemyLectureFinalizeService(
         db=db,
         user_id=user_id,
         summary_service=summary_service,
         index_service=index_service,
+    )
+    return ObservedLectureFinalizeService(inner=inner, observer=observer)
+
+
+def get_lecture_keyterms_service() -> LectureKeyTermsService:
+    """Dependency provider for lecture key terms service."""
+    if _azure_openai_summary_available():
+        return AzureOpenAILectureKeyTermsService(
+            api_key=settings.azure_openai_api_key,
+            endpoint=settings.azure_openai_endpoint,
+            account_name=settings.azure_openai_account_name,
+            model=settings.azure_openai_model,
+        )
+    else:
+        return UnavailableLectureKeyTermsService(
+            reason="azure openai key terms backend is unavailable"
+        )
+
+
+def get_caption_transform_service() -> CaptionTransformService:
+    """Dependency provider for live subtitle transform service."""
+    return AzureOpenAILiveCaptionTransformService(
+        api_key=settings.azure_openai_api_key,
+        endpoint=settings.azure_openai_endpoint,
+        account_name=settings.azure_openai_account_name,
+        model=settings.azure_openai_model,
+        api_version=settings.azure_openai_api_version,
     )
 
 
@@ -495,6 +680,43 @@ async def start_lecture_session(
 ) -> LectureSessionStartResponse:
     """Start a new active lecture session."""
     return await service.start_session(request)
+
+
+@router.patch(
+    "/session/lang-mode",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureSessionLangModeUpdateResponse,
+)
+async def update_lecture_session_lang_mode(
+    request: LectureSessionLangModeUpdateRequest,
+    service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
+) -> LectureSessionLangModeUpdateResponse:
+    """Update language mode for an active lecture session.
+
+    Note: This only updates the session's lang_mode field.
+    Existing summaries are NOT regenerated.
+    New summaries will use the updated lang_mode.
+    """
+    try:
+        result = await service.update_lang_mode(
+            session_id=request.session_id,
+            lang_mode=request.lang_mode,
+        )
+        return LectureSessionLangModeUpdateResponse(
+            session_id=result.session_id,
+            lang_mode=request.lang_mode,
+            status="active",
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session is not active.",
+        ) from exc
 
 
 @router.post(
@@ -519,6 +741,102 @@ async def ingest_speech_chunk(
             status_code=status.HTTP_409_CONFLICT,
             detail="Lecture session is not active.",
         ) from exc
+
+
+@router.post(
+    "/speech/chunk/audit-apply",
+    status_code=status.HTTP_200_OK,
+    response_model=SpeechChunkAuditApplyResponse,
+)
+async def audit_and_apply_speech_chunk(
+    request: SpeechChunkAuditApplyRequest,
+    service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
+) -> SpeechChunkAuditApplyResponse:
+    """Audit displayed speech chunk and replace persisted subtitle text."""
+    try:
+        return await service.audit_and_apply_speech_chunk(
+            session_id=request.session_id,
+            event_id=request.event_id,
+        )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session is not active.",
+        ) from exc
+    except LectureSpeechEventNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Speech event not found.",
+        ) from exc
+
+
+@router.post(
+    "/subtitle/transform",
+    status_code=status.HTTP_200_OK,
+    response_model=SubtitleTransformResponse,
+)
+async def transform_subtitle_for_display(
+    request: SubtitleTransformRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    transform_service: Annotated[
+        CaptionTransformService,
+        Depends(get_caption_transform_service),
+    ],
+) -> SubtitleTransformResponse:
+    """Transform subtitle text for selected live subtitle language."""
+    await _ensure_stream_session_access(
+        db=db,
+        session_id=request.session_id,
+        user_id=user_id,
+    )
+    transformed_text = await transform_service.transform(
+        text=request.text,
+        target_lang_mode=request.target_lang_mode,
+    )
+    return SubtitleTransformResponse(
+        session_id=request.session_id,
+        target_lang_mode=request.target_lang_mode,
+        transformed_text=transformed_text,
+    )
+
+
+@router.post(
+    "/subtitle/audit",
+    status_code=status.HTTP_200_OK,
+    response_model=SubtitleAuditResponse,
+)
+async def audit_subtitle_text(
+    request: SubtitleAuditRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    review_service: Annotated[
+        SubtitleReviewService,
+        Depends(get_subtitle_review_service),
+    ],
+) -> SubtitleAuditResponse:
+    """Run immediate subtitle audit/correction for displayed text."""
+    await _ensure_stream_session_access(
+        db=db,
+        session_id=request.session_id,
+        user_id=user_id,
+    )
+    review_result = await review_service.review(request.text)
+    return SubtitleAuditResponse(
+        session_id=request.session_id,
+        original_text=request.text,
+        corrected_text=review_result.corrected_text,
+        review_status=review_result.review_status,
+        reviewed=review_result.review_status == "reviewed",
+        was_corrected=review_result.was_corrected,
+        retry_count=review_result.retry_count,
+        failure_reason=review_result.failure_reason,
+    )
 
 
 @router.post(
@@ -703,4 +1021,58 @@ async def finalize_lecture_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Lecture summary backend is unavailable.",
+        ) from exc
+
+
+@router.post(
+    "/transcript/analyze-keyterms",
+    status_code=status.HTTP_200_OK,
+    response_model=TranscriptKeyTermsResponse,
+)
+async def analyze_transcript_keyterms(
+    request: TranscriptKeyTermsRequest,
+    service: Annotated[LectureKeyTermsService, Depends(get_lecture_keyterms_service)],
+    user_id: Annotated[str, Depends(require_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TranscriptKeyTermsResponse:
+    """Analyze transcript for key terms and generate explanations."""
+    # Verify session exists and belongs to user
+    result = await db.execute(
+        select(LectureSession).where(
+            LectureSession.id == request.session_id,
+            LectureSession.user_id == user_id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        )
+
+    try:
+        keyterms_result = await service.extract_key_terms(
+            transcript_text=request.transcript_text,
+            lang_mode=request.lang_mode,
+        )
+
+        # Convert dict result to LectureSummaryKeyTerm objects
+        key_terms = [
+            LectureSummaryKeyTerm(
+                term=term["term"],
+                explanation=term.get("explanation", ""),
+                translation=term.get("translation", ""),
+                evidence_tags=["speech"],
+            )
+            for term in keyterms_result.key_terms
+        ]
+
+        return TranscriptKeyTermsResponse(
+            key_terms=key_terms,
+            detected_terms=keyterms_result.detected_terms,
+        )
+    except LectureKeyTermsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Key terms extraction service is unavailable.",
         ) from exc

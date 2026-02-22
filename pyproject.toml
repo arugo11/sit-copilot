@@ -9,8 +9,10 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.21.0",
     "rank-bm25>=0.2.2",
+    "azure-ai-vision-imageanalysis>=1.0.0",
     "azure-search-documents>=11.6.0",
     "python-multipart>=0.0.22",
+    "weave>=0.52.28",
 ]
 
 [project.optional-dependencies]

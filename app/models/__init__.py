@@ -4,6 +4,7 @@ from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.qa_turn import QATurn
 from app.models.speech_event import SpeechEvent
+from app.models.speech_review_history import SpeechReviewHistory
 from app.models.summary_window import SummaryWindow
 from app.models.user import User
 from app.models.user_settings import UserSettings
@@ -17,5 +18,6 @@ __all__ = [
     "LectureChunk",
     "LectureSession",
     "SpeechEvent",
+    "SpeechReviewHistory",
     "VisualEvent",
 ]

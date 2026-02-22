@@ -16,6 +16,7 @@ __all__ = ["LectureSession"]
 if TYPE_CHECKING:
     from app.models.lecture_chunk import LectureChunk
     from app.models.speech_event import SpeechEvent
+    from app.models.speech_review_history import SpeechReviewHistory
     from app.models.summary_window import SummaryWindow
     from app.models.visual_event import VisualEvent
 
@@ -51,6 +52,11 @@ class LectureSession(Base):
 
     speech_events: Mapped[list[SpeechEvent]] = relationship(
         "SpeechEvent",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+    speech_review_histories: Mapped[list[SpeechReviewHistory]] = relationship(
+        "SpeechReviewHistory",
         back_populates="session",
         cascade="all, delete-orphan",
     )

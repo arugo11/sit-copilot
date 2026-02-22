@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import re
+import asyncio
 from typing import Literal, Protocol
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.user_id import get_user_id_candidates
+from app.db.session import commit_with_retry, is_sqlite_locked_error
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
 from app.models.summary_window import SummaryWindow
@@ -36,6 +40,9 @@ MAX_KEY_TERMS = 5
 MAX_KEY_TERM_EVIDENCE_TAGS = 3
 MAX_EVIDENCE_ITEMS = 6
 EVIDENCE_TAG_ORDER: tuple[LectureEvidenceType, ...] = ("speech", "slide", "board")
+SUMMARY_ALLOWED_SESSION_STATUSES = {"active", "live", "finalized"}
+WRITE_RETRY_ATTEMPTS = 5
+WRITE_RETRY_BASE_DELAY_SECONDS = 0.05
 
 
 class LectureSummaryService(Protocol):
@@ -119,6 +126,9 @@ class SqlAlchemyLectureSummaryService:
                 persist=True,
                 lang_mode=session.lang_mode,
             )
+            # Release SQLite writer lock immediately per window to avoid
+            # long lock retention across LLM calls in subsequent windows.
+            await commit_with_retry(self._db)
 
         return await self._count_summary_windows(session_id)
 
@@ -159,10 +169,21 @@ class SqlAlchemyLectureSummaryService:
         }
 
         key_terms: list[LectureSummaryKeyTerm] = []
-        for term in summary_result.key_terms:
+        for term_item in summary_result.key_terms:
+            # Extract term value (support both legacy string and new dict format)
+            term_value = (
+                term_item if isinstance(term_item, str) else term_item.get("term", "")
+            )
+            term_explanation = (
+                term_item.get("explanation", "") if isinstance(term_item, dict) else ""
+            )
+            term_translation = (
+                term_item.get("translation", "") if isinstance(term_item, dict) else ""
+            )
+
             term_evidence_tags: list[LectureEvidenceType] = (
                 self._collect_term_evidence_tags(
-                    term=term,
+                    term=term_value,
                     evidence_tags=summary_result.evidence_tags,
                     evidence_type_map=evidence_type_map,
                 )
@@ -171,7 +192,12 @@ class SqlAlchemyLectureSummaryService:
             if not term_evidence_tags:
                 term_evidence_tags = ["speech"]
             key_terms.append(
-                LectureSummaryKeyTerm(term=term, evidence_tags=term_evidence_tags)
+                LectureSummaryKeyTerm(
+                    term=term_value,
+                    explanation=term_explanation,
+                    translation=term_translation,
+                    evidence_tags=term_evidence_tags,
+                )
             )
         evidence = self._build_evidence(
             speech_events=speech_events,
@@ -204,10 +230,11 @@ class SqlAlchemyLectureSummaryService:
         session_id: str,
         user_id: str,
     ) -> LectureSession:
+        user_id_candidates = get_user_id_candidates(user_id)
         result = await self._db.execute(
             select(LectureSession).where(
                 LectureSession.id == session_id,
-                LectureSession.user_id == user_id,
+                LectureSession.user_id.in_(user_id_candidates),
             )
         )
         session = result.scalar_one_or_none()
@@ -216,7 +243,7 @@ class SqlAlchemyLectureSummaryService:
             raise LectureSessionNotFoundError(
                 f"lecture session not found: {session_id}"
             )
-        if session.status not in {"active", "finalized"}:
+        if session.status not in SUMMARY_ALLOWED_SESSION_STATUSES:
             raise LectureSessionInactiveError(
                 f"lecture session state does not allow summary: {session.status}"
             )
@@ -308,8 +335,20 @@ class SqlAlchemyLectureSummaryService:
                 "evidence_event_ids_json": evidence_refs,
             },
         )
-        await self._db.execute(upsert_stmt)
-        await self._db.flush()
+        for attempt in range(WRITE_RETRY_ATTEMPTS):
+            try:
+                await self._db.execute(upsert_stmt)
+                await self._db.flush()
+                return
+            except OperationalError as exc:
+                if (
+                    not is_sqlite_locked_error(exc)
+                    or attempt >= WRITE_RETRY_ATTEMPTS - 1
+                ):
+                    raise
+                await self._db.rollback()
+                delay = WRITE_RETRY_BASE_DELAY_SECONDS * (2**attempt)
+                await asyncio.sleep(delay)
 
     async def _count_summary_windows(self, session_id: str) -> int:
         result = await self._db.execute(

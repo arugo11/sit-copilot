@@ -15,6 +15,7 @@ from app.services.procedure_answerer_service import (
     ProcedureAnswerDraft,
     ProcedureAnswererError,
 )
+from app.services.lecture_verifier_service import LectureVerificationResult
 from app.services.procedure_retrieval_service import (
     AzureSearchProcedureRetrievalService,
     NoopProcedureRetrievalService,
@@ -61,6 +62,33 @@ class ErrorAnswerer:
         raise ProcedureAnswererError("failed")
 
 
+class PassVerifier:
+    """Verifier test double that always passes."""
+
+    async def verify(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+    ) -> LectureVerificationResult:
+        _ = (question, answer, sources)
+        return LectureVerificationResult(
+            passed=True,
+            summary="verified",
+            unsupported_claims=[],
+        )
+
+    async def repair_answer(
+        self,
+        question: str,
+        answer: str,
+        sources: list,
+        unsupported_claims: list[str],
+    ) -> str | None:
+        _ = (question, answer, sources, unsupported_claims)
+        return None
+
+
 @pytest.mark.asyncio
 async def test_post_procedure_ask_with_evidence_returns_sources_and_persists(
     async_client: AsyncClient,
@@ -86,6 +114,9 @@ async def test_post_procedure_ask_with_evidence_returns_sources_and_persists(
                 action_next="学生証を持って証明書発行機を利用してください。",
             )
         )
+    )
+    app.dependency_overrides[procedure_api.get_procedure_verifier_service] = lambda: (
+        PassVerifier()
     )
 
     payload = {
@@ -132,6 +163,9 @@ async def test_post_procedure_ask_without_evidence_returns_fallback_and_persists
     )
     app.dependency_overrides[procedure_api.get_procedure_answerer_service] = lambda: (
         answerer
+    )
+    app.dependency_overrides[procedure_api.get_procedure_verifier_service] = lambda: (
+        PassVerifier()
     )
 
     payload = {
@@ -180,6 +214,9 @@ async def test_post_procedure_ask_with_answerer_failure_returns_local_grounded_a
     )
     app.dependency_overrides[procedure_api.get_procedure_answerer_service] = lambda: (
         ErrorAnswerer()
+    )
+    app.dependency_overrides[procedure_api.get_procedure_verifier_service] = lambda: (
+        PassVerifier()
     )
 
     payload = {

@@ -50,11 +50,11 @@ class ProcedureAnswererService(Protocol):
 class AzureOpenAIProcedureAnswererService:
     """Azure OpenAI answerer for procedure QA."""
 
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "gpt-5-nano"
     DEFAULT_MAX_TOKENS = 800
     DEFAULT_TEMPERATURE = 0.2
     DEFAULT_TIMEOUT_SECONDS = 30
-    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_ACTION_NEXT = (
         "教務課または公式ポータルで最新の手続き情報を確認してください。"
     )

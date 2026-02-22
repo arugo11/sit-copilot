@@ -67,11 +67,11 @@ class LectureVerifierService(Protocol):
 class AzureOpenAILectureVerifierService:
     """Azure OpenAI-based verifier for citation validation."""
 
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "gpt-5-nano"
     DEFAULT_MAX_TOKENS = 800
     DEFAULT_TEMPERATURE = 0.3  # Lower for verification
     DEFAULT_TIMEOUT_SECONDS = 30
-    DEFAULT_API_VERSION = "2024-10-21"
+    DEFAULT_API_VERSION = "2024-05-01-preview"
     LOCAL_SNIPPET_WINDOW = 12
 
     def __init__(

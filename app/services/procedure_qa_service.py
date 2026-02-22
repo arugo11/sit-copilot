@@ -6,10 +6,16 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.qa_turn import QATurn
+from app.schemas.lecture_qa import LectureSource
 from app.schemas.procedure import (
     ProcedureAskRequest,
     ProcedureAskResponse,
     ProcedureSource,
+)
+from app.services.lecture_verifier_service import (
+    LectureVerificationResult,
+    LectureVerifierError,
+    LectureVerifierService,
 )
 from app.services.procedure_answerer_service import (
     ProcedureAnswerDraft,
@@ -48,6 +54,7 @@ class SqlAlchemyProcedureQAService:
         db: AsyncSession,
         retriever: ProcedureRetrievalService,
         answerer: ProcedureAnswererService,
+        verifier: LectureVerifierService,
         retrieval_limit: int = DEFAULT_RETRIEVAL_LIMIT,
         no_source_fallback: str = DEFAULT_NO_SOURCE_FALLBACK,
         no_source_action_next: str = DEFAULT_NO_SOURCE_ACTION_NEXT,
@@ -56,6 +63,7 @@ class SqlAlchemyProcedureQAService:
         self._db = db
         self._retriever = retriever
         self._answerer = answerer
+        self._verifier = verifier
         self._retrieval_limit = max(1, retrieval_limit)
         self._no_source_fallback = no_source_fallback
         self._no_source_action_next = no_source_action_next
@@ -82,6 +90,7 @@ class SqlAlchemyProcedureQAService:
                 question=request.query,
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
+                outcome_reason="no_source",
             )
             return response
 
@@ -91,16 +100,50 @@ class SqlAlchemyProcedureQAService:
                 lang_mode=request.lang_mode,
                 sources=sources,
             )
-            response = self._build_success_response(
-                draft=draft,
+            verification = await self._safe_verify(
+                question=request.query,
+                answer=draft.answer,
                 sources=sources,
             )
+            outcome_reason = "verified"
+
+            if not verification.passed:
+                repaired = await self._safe_repair(
+                    question=request.query,
+                    answer=draft.answer,
+                    sources=sources,
+                    unsupported_claims=verification.unsupported_claims,
+                )
+                if repaired:
+                    draft = ProcedureAnswerDraft(
+                        answer=repaired,
+                        confidence="medium",
+                        action_next=draft.action_next,
+                    )
+                    verification = await self._safe_verify(
+                        question=request.query,
+                        answer=repaired,
+                        sources=sources,
+                    )
+                    outcome_reason = "repaired_verified"
+
+            if verification.passed:
+                response = self._build_success_response(
+                    draft=draft,
+                    sources=sources,
+                )
+            else:
+                response = self._build_verification_failed_response(sources=sources)
+                outcome_reason = "verification_failed"
         except ProcedureAnswererError:
             response = self._build_local_grounded_response(sources=sources)
+            outcome_reason = "answerer_error"
+
         await self._persist_turn(
             question=request.query,
             response=response,
             latency_ms=self._to_latency_ms(started_at),
+            outcome_reason=outcome_reason,
         )
         return response
 
@@ -141,12 +184,74 @@ class SqlAlchemyProcedureQAService:
             fallback="",
         )
 
+    def _build_verification_failed_response(
+        self, *, sources: list[ProcedureSource]
+    ) -> ProcedureAskResponse:
+        return ProcedureAskResponse(
+            answer=self._backend_failure_fallback,
+            confidence="low",
+            sources=sources,
+            action_next=self._no_source_action_next,
+            fallback=self._backend_failure_fallback,
+        )
+
+    async def _safe_verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        sources: list[ProcedureSource],
+    ) -> LectureVerificationResult:
+        try:
+            return await self._verifier.verify(
+                question=question,
+                answer=answer,
+                sources=self._to_lecture_sources(sources),
+            )
+        except LectureVerifierError:
+            return LectureVerificationResult(
+                passed=False,
+                summary="検証中にエラーが発生しました。",
+                unsupported_claims=[answer],
+            )
+
+    async def _safe_repair(
+        self,
+        *,
+        question: str,
+        answer: str,
+        sources: list[ProcedureSource],
+        unsupported_claims: list[str],
+    ) -> str | None:
+        try:
+            return await self._verifier.repair_answer(
+                question=question,
+                answer=answer,
+                sources=self._to_lecture_sources(sources),
+                unsupported_claims=unsupported_claims,
+            )
+        except LectureVerifierError:
+            return None
+
+    @staticmethod
+    def _to_lecture_sources(sources: list[ProcedureSource]) -> list[LectureSource]:
+        return [
+            LectureSource(
+                chunk_id=source.source_id,
+                type="speech",
+                text=f"{source.title}（{source.section}）: {source.snippet}",
+                bm25_score=1.0,
+            )
+            for source in sources
+        ]
+
     async def _persist_turn(
         self,
         *,
         question: str,
         response: ProcedureAskResponse,
         latency_ms: int,
+        outcome_reason: str,
     ) -> None:
         citations = [source.model_dump() for source in response.sources]
         source_ids = [source.source_id for source in response.sources]
@@ -160,7 +265,8 @@ class SqlAlchemyProcedureQAService:
             citations_json=citations,
             retrieved_chunk_ids_json=source_ids,
             latency_ms=latency_ms,
-            verifier_supported=False,
+            verifier_supported=True,
+            outcome_reason=outcome_reason,
         )
         self._db.add(qa_turn)
         await self._db.flush()

@@ -21,6 +21,10 @@ AUTH_HEADERS = {
     LECTURE_TOKEN_HEADER: settings.lecture_api_token,
     USER_ID_HEADER: "demo_user",
 }
+LEGACY_DEMO_HEADERS = {
+    LECTURE_TOKEN_HEADER: settings.lecture_api_token,
+    USER_ID_HEADER: "demo-user",
+}
 OWNER_A_HEADERS = {
     LECTURE_TOKEN_HEADER: settings.lecture_api_token,
     USER_ID_HEADER: "owner_a",
@@ -185,6 +189,7 @@ async def test_post_lecture_speech_chunk_returns_200_and_persists(
     assert speech_event is not None
     assert speech_event.session_id == session_id
     assert speech_event.text == chunk_payload["text"]
+    assert speech_event.original_text == chunk_payload["text"]
 
 
 @pytest.mark.asyncio
@@ -597,6 +602,15 @@ async def test_get_lecture_events_stream_returns_sse_events(
     assert "source.frame" in event_types
     assert "source.ocr" in event_types
 
+    transcript_events = [e for e in events if e.get("type") == "transcript.final"]
+    assert transcript_events
+    transcript_payload = transcript_events[0]["payload"]
+    assert transcript_payload["sourceLangText"] == "講義導入です。"
+    assert (
+        transcript_payload.get("originalLangText")
+        or transcript_payload["sourceLangText"]
+    ) == "講義導入です。"
+
 
 @pytest.mark.asyncio
 async def test_get_lecture_events_stream_without_token_returns_401(
@@ -865,10 +879,10 @@ async def test_post_lecture_session_finalize_returns_200_and_stats(
 
 
 @pytest.mark.asyncio
-async def test_post_lecture_session_finalize_with_runtime_error_returns_503(
+async def test_post_lecture_session_finalize_with_runtime_error_still_finalizes(
     async_client: AsyncClient,
 ) -> None:
-    """Finalize should map summary backend runtime errors to 503."""
+    """Finalize should degrade gracefully when summary backend is down."""
     from app.api.v4.lecture import get_lecture_summary_service
 
     class FailingSummaryService:
@@ -907,9 +921,9 @@ async def test_post_lecture_session_finalize_with_runtime_error_returns_503(
         app.dependency_overrides.pop(get_lecture_summary_service, None)
 
     body = response.json()
-    assert response.status_code == 503
-    assert body["error"]["code"] == "http_error"
-    assert body["error"]["message"] == "Lecture summary backend is unavailable."
+    assert response.status_code == 200
+    assert body["status"] == "finalized"
+    assert body["session_id"] == session_id
 
 
 @pytest.mark.asyncio
@@ -1065,6 +1079,92 @@ async def test_post_lecture_session_finalize_with_invalid_status_returns_409(
         headers=AUTH_HEADERS,
     )
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_accepts_legacy_live_status(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Finalize endpoint should accept legacy sessions with status=live."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "外れ値の確認手順を説明します。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        lecture_session = result.scalar_one()
+        lecture_session.status = "live"
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": session_id, "build_qa_index": False},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "finalized"
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_session_finalize_accepts_demo_user_alias_headers(
+    async_client: AsyncClient,
+) -> None:
+    """Finalize should succeed even when start/finalize requests use demo user aliases."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=LEGACY_DEMO_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": session_id, "build_qa_index": False},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "finalized"
 
 
 # ============================================================================
@@ -1246,3 +1346,330 @@ async def test_get_lecture_summary_latest_ownership_enforced_with_azure(
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_lecture_session_lang_mode_updates_active_session(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """PATCH /lecture/session/lang-mode should update persisted lang_mode."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.patch(
+        "/api/v4/lecture/session/lang-mode",
+        json={"session_id": session_id, "lang_mode": "easy-ja"},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["lang_mode"] == "easy-ja"
+    assert body["status"] == "active"
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        lecture_session = result.scalar_one()
+    assert lecture_session.lang_mode == "easy-ja"
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_subtitle_transform_returns_transformed_text(
+    async_client: AsyncClient,
+) -> None:
+    """POST /lecture/subtitle/transform should return transformed subtitle text."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/subtitle/transform",
+        json={
+            "session_id": session_id,
+            "text": "機械学習は未知データで性能を確認します。",
+            "target_lang_mode": "easy-ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["target_lang_mode"] == "easy-ja"
+    assert isinstance(body["transformed_text"], str)
+    assert body["transformed_text"].strip() != ""
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_subtitle_audit_returns_corrected_text(
+    async_client: AsyncClient,
+) -> None:
+    """POST /lecture/subtitle/audit should return corrected subtitle text."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+    source_text = "機械学習わ未知データで性能お確認します。"
+
+    response = await async_client.post(
+        "/api/v4/lecture/subtitle/audit",
+        json={
+            "session_id": session_id,
+            "text": source_text,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["original_text"] == source_text
+    assert isinstance(body["corrected_text"], str)
+    assert body["corrected_text"].strip() != ""
+    assert body["review_status"] in {"reviewed", "review_failed"}
+    assert isinstance(body["reviewed"], bool)
+    assert isinstance(body["was_corrected"], bool)
+    assert isinstance(body["retry_count"], int)
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_speech_chunk_audit_apply_updates_persisted_text(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """POST /lecture/speech/chunk/audit-apply should replace subtitle text."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    ingest_response = await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 4000,
+            "text": "機械学習わ未知データで性能お確認します。",
+            "confidence": 0.91,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    event_id = ingest_response.json()["event_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/speech/chunk/audit-apply",
+        json={
+            "session_id": session_id,
+            "event_id": event_id,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["event_id"] == event_id
+    assert body["updated"] is True
+    assert body["review_status"] == "reviewed"
+    assert body["reviewed"] is True
+    assert body["was_corrected"] is True
+    assert body["corrected_text"].strip() != ""
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(SpeechEvent).where(SpeechEvent.id == event_id)
+        )
+        speech_event = result.scalar_one()
+    assert speech_event.original_text == "機械学習わ未知データで性能お確認します。"
+    assert speech_event.text == body["corrected_text"]
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_speech_chunk_audit_apply_with_unknown_event_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Audit-apply endpoint should return 404 for unknown speech event."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/speech/chunk/audit-apply",
+        json={
+            "session_id": session_id,
+            "event_id": "missing-event-id",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 404
+    assert body["error"]["code"] == "http_error"
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_events_stream_once_reflects_updated_speech_text(
+    async_client: AsyncClient,
+) -> None:
+    """SSE snapshot should return corrected text after audit-apply update."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    ingest_response = await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 4000,
+            "text": "機械学習わ未知データで性能お確認します。",
+            "confidence": 0.91,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    event_id = ingest_response.json()["event_id"]
+
+    audit_response = await async_client.post(
+        "/api/v4/lecture/speech/chunk/audit-apply",
+        json={"session_id": session_id, "event_id": event_id},
+        headers=AUTH_HEADERS,
+    )
+    corrected_text = audit_response.json()["corrected_text"]
+
+    response = await async_client.get(
+        "/api/v4/lecture/events/stream",
+        params={"session_id": session_id, "once": "true"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    transcript_events = [e for e in events if e.get("type") == "transcript.final"]
+    assert transcript_events
+    transcript_payload = transcript_events[0]["payload"]
+    assert transcript_payload["id"] == event_id
+    assert transcript_payload["sourceLangText"] == corrected_text
+    assert (
+        transcript_payload.get("originalLangText")
+        or transcript_payload["sourceLangText"]
+    ) == "機械学習わ未知データで性能お確認します。"
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_subtitle_transform_returns_en_text(
+    async_client: AsyncClient,
+) -> None:
+    """POST /lecture/subtitle/transform should support English target mode."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+    source_text = "機械学習は未知データで性能を確認します。"
+
+    response = await async_client.post(
+        "/api/v4/lecture/subtitle/transform",
+        json={
+            "session_id": session_id,
+            "text": source_text,
+            "target_lang_mode": "en",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["target_lang_mode"] == "en"
+    assert isinstance(body["transformed_text"], str)
+    assert body["transformed_text"].strip() != ""
+    assert body["transformed_text"] != source_text
