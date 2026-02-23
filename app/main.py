@@ -1,6 +1,7 @@
 """FastAPI application main entry point."""
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -84,13 +85,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             #   Input:  $0.05 → $0.00000005 per token
             #   Output: $0.40 → $0.0000004  per token
             try:
-                from datetime import datetime, timezone
+                from datetime import UTC, datetime
 
                 weave_client.add_cost(
                     llm_id="gpt-5-nano",
                     prompt_token_cost=0.05 / 1_000_000,
                     completion_token_cost=0.40 / 1_000_000,
-                    effective_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    effective_date=datetime(2025, 1, 1, tzinfo=UTC),
                 )
                 logger.info("weave_custom_cost_registered model=gpt-5-nano")
             except Exception as cost_err:
@@ -128,14 +129,34 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+def _get_cors_allowed_origins() -> list[str]:
+    """Resolve CORS allowed origins from environment with local defaults."""
+    default_origins = [
         "http://127.0.0.1:4176",
         "http://localhost:4176",
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-    ],
+    ]
+    configured = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    if not configured:
+        return default_origins
+    if configured == "*":
+        return ["*"]
+
+    configured_origins = [
+        origin.strip() for origin in configured.split(",") if origin.strip()
+    ]
+    merged = [*default_origins]
+    for origin in configured_origins:
+        if origin not in merged:
+            merged.append(origin)
+    return merged
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_get_cors_allowed_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1904,11 +1904,81 @@ FastAPI Route (Depends)
 - 2026-02-23: Added live subtitle transform fallback signaling design (structured transform status, GPT-5 reasoning-effort control, and frontend fallback visibility).
 - 2026-02-23: Added subtitle transform response compatibility guard in frontend to absorb missing/invalid `status` and prevent silent non-Japanese-view failures.
 - 2026-02-23: Runtime operation switched subtitle transform Azure deployment to `gpt-4.1-nano` (`api-version=2025-01-01-preview`) to mitigate persistent fallback behavior.
+- 2026-02-23: Executed live Azure deployment for API/frontend using Container Apps + Static Website, and added env-driven CORS support (`CORS_ALLOWED_ORIGINS`) for hosted frontend access.
+- 2026-02-23: Migrated frontend public endpoint to Azure Static Web Apps (`proud-sand-00bb37700.1.azurestaticapps.net`) with local CLI deploy and SPA fallback config.
+- 2026-02-23: Hardened API secret flow by switching Container Apps `azure-openai-api-key` to Key Vault reference (`identityref:system`) and assigning `Key Vault Secrets User` to managed identity.
+- 2026-02-23: Hardened API CORS from wildcard to explicit origin allowlist (`SWA + Storage static website`) via `CORS_ALLOWED_ORIGINS`.
 - 2026-02-23: Added PptxGenJS A0 poster generation implementation plan with task breakdown, dependencies, and risk mitigation.
 - 2026-02-23: Added PptxGenJS A0 poster generation architecture (module boundaries, JSON schema approach, reusable component contracts, and layered configuration strategy).
 - 2026-02-23: Added A0 technical poster layout decision for SIT Copilot (grid, hierarchy, section flow, visual/diagram strategy, and color/typography direction).
 - 2026-02-22: Added WandB Weave observer architecture for FastAPI with Protocol/Noop patterns, async isolation, local/cloud support, and TDD-first rollout.
 - 2026-02-22: Added Weave async risk matrix (likelihood/impact + concrete mitigations) for performance, memory, isolation, Azure deployment, testing, and privacy.
+
+---
+
+## Azure Deployment Execution Snapshot (2026-02-23)
+
+### Decision Summary
+
+- Deployed FastAPI backend as an externally accessible Azure Container App using image build/push via Azure Container Registry.
+- Added runtime-configurable CORS origin support via `CORS_ALLOWED_ORIGINS` (default keeps local dev origins; deployment used `*` for immediate hosted access).
+- Deployed frontend build artifacts to Azure Storage Static Website for same-day publishability without waiting for GitHub-connected SWA pipeline wiring.
+- Set backend runtime `WEAVE_ENABLED=false` for deployment stability and lower external dependency risk in current demo environment.
+- Passed Azure OpenAI key to Container Apps as app secret (`azure-openai-api-key`) and referenced it from env var mapping.
+
+### Provisioned/Used Resources
+
+- Resource Group: `rg-sitcopilot-dev-02210594`
+- Container Registry: `acrsitc02210594`
+- Container Apps Environment: `cae-sitc-02210594`
+- API Container App: `ca-sitc-api-02210594`
+- Frontend Static Website: `stsitc02210594` (`$web` container)
+
+### Runtime Endpoints
+
+- API: `https://ca-sitc-api-02210594.nicebeach-313ed1de.japaneast.azurecontainerapps.io`
+- Frontend: `https://stsitc02210594.z11.web.core.windows.net/`
+
+### Rationale
+
+- `docs/SPEC.md` target architecture remains Azure-native, but immediate deployment priority was to publish both API and UI with minimal operational friction.
+- Container Apps provides managed HTTPS ingress and revision rollout suited for FastAPI runtime.
+- Static Website hosting enabled fast frontend publish from local build output while preserving a later migration path to Azure Static Web Apps.
+
+### Compatibility Rules
+
+- Backend image build uses repo root `Dockerfile`; runtime entrypoint must remain `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+- Frontend production build must inject `VITE_API_BASE_URL` pointing to deployed API FQDN.
+- For production hardening, replace wildcard CORS and app-secret injection with explicit frontend origin allowlist and Key Vault reference-based secret resolution.
+
+---
+
+## Azure Deployment Hardening Update (2026-02-23)
+
+### Decision Summary
+
+- Frontend primary public endpoint is now Azure Static Web Apps:
+  `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+- API CORS is constrained to explicit trusted origins:
+  - `https://proud-sand-00bb37700.1.azurestaticapps.net`
+  - `https://stsitc02210594.z11.web.core.windows.net`
+- Container Apps now resolves `AZURE_OPENAI_API_KEY` through Key Vault reference secret with system-assigned managed identity, not raw secret value injection.
+
+### Implementation Notes
+
+- Added `frontend/public/staticwebapp.config.json` with `navigationFallback` rewrite to `/index.html` for SPA deep links.
+- Created SWA resource: `swa-sitc-02210594` (`Free`, `eastasia`), deployed using deployment token and SWA CLI.
+- Assigned system identity to `ca-sitc-api-02210594`, granted `Key Vault Secrets User` on `kvsitc02210594`, then updated:
+  - `azure-openai-api-key=keyvaultref:<secret-uri>,identityref:system`
+- Updated API env:
+  - `CORS_ALLOWED_ORIGINS` to SWA + Storage origins
+  - `AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key`
+
+### Validation Results
+
+- `GET /api/v4/health` from API endpoint returns `200`.
+- CORS preflight from SWA origin with expected headers (`X-Lecture-Token`, `X-User-Id`) returns `200` and includes `access-control-allow-origin`.
+- SWA deep link (`/lectures`) returns `200` via SPA fallback.
 
 ---
 
