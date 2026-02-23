@@ -2169,3 +2169,61 @@ interface PosterContent {
 - [ ] Color contrast meets accessibility standards
 - [ ] Content covers all competition requirements
 - [ ] File size is reasonable for printing (<50MB)
+
+---
+
+## Live Mini QA Migration (2026-02-23)
+
+### Decision Summary
+
+- Removed frontend review UI pages (`/lectures/:id/review`, `/lectures/:id/qa`, `/lecture/:session_id/qa`) and redirected legacy paths to `/lectures`.
+- Migrated lecture grounded QA execution to live right rail mini-question flow (`AssistPanel`) so users can ask and receive cited answers during live session.
+- Kept backend lecture QA APIs (`/api/v4/lecture/qa/index/build`, `/ask`, `/followup`) unchanged and reused them from live UI.
+- Adopted follow-up policy: first question uses `ask`, second and later questions use `followup`.
+- Adopted index refresh policy for live QA: rebuild lecture QA index at most once per 30 seconds with `rebuild=true` to balance freshness and load.
+- Added sequential subtitle IDs (`S-001`, `S-002`, ...) to finalized transcript lines, and prefixed mini QA audio citation labels with the resolved subtitle ID.
+- Removed ended-session navigation target from lecture list; ended sessions remain visible but non-navigable.
+
+### Rationale
+
+- Eliminates duplicated QA surfaces and concentrates user flow in live screen where ASR evidence is generated.
+- Preserves proven backend contract and test surface while minimizing API migration risk.
+- 30-second rebuild cadence avoids stale ASR retrieval while preventing per-question rebuild overload.
+- Subtitle ID prefixes improve traceability by making answer evidence point back to exact transcript lines.
+
+### Compatibility Rules
+
+- Existing direct links to removed review routes must not break: they are redirected to `/lectures`.
+- Procedure QA remains unchanged and continues to reuse shared QA block/store utilities.
+- Naming cleanup of `review*` frontend modules is explicitly deferred; only feature migration is in scope for this change.
+- QA API contract remains unchanged; subtitle ID decoration is a frontend-only mapping using existing `citationId` chunk references.
+- Inline answer references that point to audio timestamps are normalized from `[timestamp]` to `S-xxx` in the live mini QA renderer.
+
+### Changelog
+
+- 2026-02-23: Migrated lecture grounded QA from review pages into live mini-question panel; removed review UI routes/pages and added legacy route redirects.
+- 2026-02-23: Added finalized-transcript sequential subtitle IDs and mini QA citation label prefixing (`S-xxx`) for evidence traceability.
+- 2026-02-23: Replaced inline audio timestamp references (`[hh:mm:ss]` style labels) in mini QA answer text with subtitle IDs (`S-xxx`) for consistency with citation chips.
+
+---
+
+## Lecture Session Delete Legacy Compatibility (2026-02-23)
+
+### Decision Summary
+
+- Updated lecture session delete flow to treat legacy `ended` status as deletable finalized state.
+- Kept auto-finalize behavior unchanged for active-style statuses (`active`, `live`).
+
+### Rationale
+
+- Some legacy rows still carry `ended`; rejecting them with `409` caused delete-button failures in the lecture list UI.
+- Allowing deletion for `ended` keeps backward compatibility without changing current lifecycle (`active` -> `finalized`).
+
+### Compatibility Rules
+
+- Delete endpoint continues to reject truly invalid states (e.g., `error`), preserving safety checks.
+- This change is backward-compatible and does not modify API schema or response fields.
+
+### Changelog
+
+- 2026-02-23: Added backend delete compatibility for legacy `ended` lecture session rows to prevent `409` failures from UI delete actions.

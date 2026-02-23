@@ -10,6 +10,7 @@ export type LeftPanelMode = 'slides' | 'board' | 'split'
 
 export interface TranscriptLine {
   id: string
+  subtitleSerial?: number
   tsStartMs: number
   tsEndMs: number
   speakerLabel?: string

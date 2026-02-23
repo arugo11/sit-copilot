@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -38,6 +38,7 @@ __all__ = [
 
 MAX_EMBEDDING_TEXT_CHARS = 1000
 FINALIZABLE_ACTIVE_STATUSES = {"active", "live"}
+DELETABLE_FINALIZED_STATUSES = {"finalized", "ended"}
 logger = logging.getLogger(__name__)
 WRITE_RETRY_ATTEMPTS = 5
 WRITE_RETRY_BASE_DELAY_SECONDS = 0.05
@@ -147,7 +148,7 @@ class SqlAlchemyLectureFinalizeService:
         if session.status in FINALIZABLE_ACTIVE_STATUSES:
             await self.finalize(session_id=session_id, build_qa_index=False)
             auto_finalized = True
-        elif session.status != "finalized":
+        elif session.status not in DELETABLE_FINALIZED_STATUSES:
             raise LectureSessionStateError(
                 f"session status does not allow delete: {session.status}"
             )

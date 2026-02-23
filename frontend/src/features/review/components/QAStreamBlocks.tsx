@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-interface Citation {
+export interface QaStreamCitation {
   citationId: string
   type: 'audio' | 'slide' | 'board' | 'ocr'
   label: string
@@ -9,12 +9,14 @@ interface Citation {
   sourceFrameId?: string
 }
 
-interface QaTurn {
+export type QaStreamStatus = 'idle' | 'streaming' | 'done' | 'error'
+
+export interface QaStreamTurn {
   answerId: string
   question: string
   markdown: string
-  status: 'idle' | 'streaming' | 'done' | 'error'
-  citations: Citation[]
+  status: QaStreamStatus
+  citations: QaStreamCitation[]
   followups: string[]
 }
 
@@ -26,7 +28,7 @@ export function QAStreamBlocks({
   isBusy,
   labels,
 }: {
-  turns: QaTurn[]
+  turns: QaStreamTurn[]
   onCitationSelect: (citationId: string) => void
   onRetry: (answerId: string) => void
   onRegenerate: (question: string) => void
@@ -79,7 +81,7 @@ export function QAStreamBlocks({
   )
 }
 
-function StatusBadge({ status }: { status: QaTurn['status'] }): ReactNode {
+function StatusBadge({ status }: { status: QaStreamTurn['status'] }): ReactNode {
   if (status === 'streaming') {
     return <span className="badge badge-warning">streaming</span>
   }
@@ -99,7 +101,7 @@ function Footer({
   isBusy,
   labels,
 }: {
-  turn: QaTurn
+  turn: QaStreamTurn
   onRetry: (answerId: string) => void
   onRegenerate: (question: string) => void
   isBusy: boolean

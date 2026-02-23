@@ -4,6 +4,11 @@ import { useAudioInputStore } from '@/stores/audioInputStore'
 import { demoApi } from '@/lib/api/client'
 import { useToast } from '@/components/common/Toast'
 import { ToggleSwitch } from '@/components/common/ToggleSwitch'
+import {
+  QAStreamBlocks,
+  type QaStreamStatus,
+  type QaStreamTurn,
+} from '@/features/review/components/QAStreamBlocks'
 
 const LANG_MODE_OPTIONS = [
   { value: 'ja', label: '日本語' },
@@ -15,7 +20,32 @@ const SUMMARY_REFRESH_INTERVAL_MS = 30000 // 30 seconds
 
 const QUICK_QUESTIONS = ['この式の意味', 'もう一度説明して', 'この単語を日本語で']
 
-export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: string) => void }) {
+const QA_STATUS_LABELS: Record<QaStreamStatus, string> = {
+  idle: '待機中',
+  streaming: '回答生成中…',
+  done: '完了',
+  error: 'エラー',
+}
+
+interface AssistPanelProps {
+  onAskMiniQuestion: (q: string) => void
+  qaTurns: QaStreamTurn[]
+  qaStatus: QaStreamStatus
+  isQaSubmitting: boolean
+  onQaCitationSelect: (citationId: string) => void
+  onQaRetry: (answerId: string) => void
+  onQaRegenerate: (question: string) => void
+}
+
+export function AssistPanel({
+  onAskMiniQuestion,
+  qaTurns,
+  qaStatus,
+  isQaSubmitting,
+  onQaCitationSelect,
+  onQaRetry,
+  onQaRegenerate,
+}: AssistPanelProps) {
   const { showToast } = useToast()
   const connection = useLiveSessionStore((state) => state.connection)
   const summaryPoints = useLiveSessionStore((state) => state.summaryPoints)
@@ -191,7 +221,20 @@ export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: stri
       </section>
 
       <section className="card p-3 space-y-2">
-        <h2 className="text-sm font-semibold">質問候補</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">質問候補</h2>
+          <span
+            className={`badge ${
+              qaStatus === 'streaming'
+                ? 'badge-warning'
+                : qaStatus === 'error'
+                  ? 'badge-danger'
+                  : 'badge-success'
+            }`}
+          >
+            {QA_STATUS_LABELS[qaStatus]}
+          </span>
+        </div>
         <div className="flex flex-wrap gap-2">
           {QUICK_QUESTIONS.map((question) => (
             <button
@@ -199,6 +242,7 @@ export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: stri
               type="button"
               className="badge badge-default cursor-pointer"
               onClick={() => onAskMiniQuestion(question)}
+              disabled={isQaSubmitting}
             >
               {question}
             </button>
@@ -213,10 +257,12 @@ export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: stri
               value={miniQuestion}
               onChange={(e) => setMiniQuestion(e.target.value)}
               placeholder="短い質問を入力"
+              disabled={isQaSubmitting}
             />
             <button
               type="button"
               className="btn btn-primary"
+              disabled={isQaSubmitting}
               onClick={() => {
                 const q = miniQuestion.trim()
                 if (!q) return
@@ -224,10 +270,18 @@ export function AssistPanel({ onAskMiniQuestion }: { onAskMiniQuestion: (q: stri
                 setMiniQuestion('')
               }}
             >
-              送信
+              {isQaSubmitting ? '送信中...' : '送信'}
             </button>
           </div>
         </div>
+        <QAStreamBlocks
+          turns={qaTurns}
+          isBusy={isQaSubmitting}
+          labels={{ resume: '再試行', regenerate: '再生成' }}
+          onCitationSelect={onQaCitationSelect}
+          onRetry={onQaRetry}
+          onRegenerate={onQaRegenerate}
+        />
       </section>
     </div>
   )

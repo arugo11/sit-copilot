@@ -3,24 +3,40 @@
  * SSE-first live stream
  */
 
-import { useCallback, useEffect, useRef } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useConnectionAnnouncer } from '@/hooks/useLiveRegion'
+import { useConnectionAnnouncer, useQaAnnouncer } from '@/hooks/useLiveRegion'
 import { useToast } from '@/components/common/Toast'
 import { AppShell } from '@/components/common/AppShell'
 import { SourcePanel } from '@/features/live/components/SourcePanel'
 import { TranscriptPanel } from '@/features/live/components/TranscriptPanel'
 import { AssistPanel } from '@/features/live/components/AssistPanel'
+import {
+  createReviewAnswerId,
+  requestReviewQaAnswer,
+} from '@/features/review/reviewQaApi'
+import {
+  mapLectureQaResponseToChunk,
+  mapLectureQaResponseToDone,
+} from '@/features/review/qaResponseMapper'
 import { streamClient, sseStreamTransport } from '@/lib/stream'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
+import { useReviewQaStore } from '@/stores/reviewQaStore'
 import { useMicrophoneInput } from '@/features/audio/useMicrophoneInput'
 import { useSpeechRecognition } from '@/features/audio/useSpeechRecognition'
 import { useUserSettings } from '@/lib/api/hooks'
-import { demoApi, getApiErrorMessage } from '@/lib/api/client'
+import {
+  ApiError,
+  demoApi,
+  getApiErrorMessage,
+  lectureQaApi,
+} from '@/lib/api/client'
+import type { QaAnswerChunk } from '@/lib/stream/types'
 
 const SUMMARY_TRIGGER_CHUNK_COUNT = 3
 const ERROR_TOAST_THROTTLE_MS = 5000
+const QA_INDEX_REFRESH_INTERVAL_MS = 30000
 
 type SubtitleTransformResult = {
   text: string
@@ -47,16 +63,91 @@ function sanitizeTranslatedText(
   return trimmed
 }
 
+function formatSubtitleId(serial: number): string {
+  return `S-${String(serial).padStart(3, '0')}`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function replaceSpeechCitationLabels(
+  text: string,
+  labelToSubtitleId: ReadonlyMap<string, string>
+): string {
+  if (!text || labelToSubtitleId.size === 0) {
+    return text
+  }
+
+  let updatedText = text
+  labelToSubtitleId.forEach((subtitleId, sourceLabel) => {
+    const escapedLabel = escapeRegExp(sourceLabel)
+    const bracketPattern = new RegExp(`\\[\\s*${escapedLabel}\\s*\\]`, 'g')
+    updatedText = updatedText.replace(bracketPattern, subtitleId)
+  })
+
+  // Japanese sentences commonly omit spaces before identifier-like tokens.
+  return updatedText.replace(/([ぁ-んァ-ヶ一-龠々ー])\s+(S-\d{3})/gu, '$1$2')
+}
+
+function addSubtitleIdsToSpeechCitations(
+  chunk: QaAnswerChunk,
+  subtitleIdByChunkId: ReadonlyMap<string, number>
+): QaAnswerChunk {
+  const labelToSubtitleId = new Map<string, string>()
+  const citations = chunk.citations.map((citation) => {
+    if (citation.type !== 'audio') {
+      return citation
+    }
+
+    const parts = citation.citationId.split('::')
+    const sourceChunkId = parts.length >= 2 ? parts[1] : ''
+    if (!sourceChunkId) {
+      return citation
+    }
+
+    const subtitleSerial = subtitleIdByChunkId.get(sourceChunkId)
+    if (subtitleSerial === undefined) {
+      return citation
+    }
+
+    const subtitleId = formatSubtitleId(subtitleSerial)
+    const normalizedLabel = citation.label.trim()
+    if (normalizedLabel && !labelToSubtitleId.has(normalizedLabel)) {
+      labelToSubtitleId.set(normalizedLabel, subtitleId)
+    }
+
+    const updatedLabel = normalizedLabel
+      ? `${subtitleId} (${normalizedLabel})`
+      : subtitleId
+
+    return {
+      ...citation,
+      label: updatedLabel,
+    }
+  })
+
+  return {
+    ...chunk,
+    textChunk: replaceSpeechCitationLabels(chunk.textChunk, labelToSubtitleId),
+    citations,
+  }
+}
+
 export function LectureLivePage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { id } = useParams()
   const sessionId = id ?? 'demo-session'
   const { showToast } = useToast()
   const { announceConnection } = useConnectionAnnouncer()
+  const { announceQaStatus } = useQaAnnouncer()
   const { data: userSettings } = useUserSettings()
+  const [isQaSubmitting, setIsQaSubmitting] = useState(false)
 
   const connection = useLiveSessionStore((state) => state.connection)
   const transcriptLagMs = useLiveSessionStore((state) => state.transcriptLagMs)
+  const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
   const cameraEnabled = useLiveSessionStore((state) => state.cameraEnabled)
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
   const setConnection = useLiveSessionStore((state) => state.setConnection)
@@ -80,8 +171,19 @@ export function LectureLivePage() {
   )
   const hydrateFromSettings = useLiveSessionStore((state) => state.hydrateFromSettings)
   const resetLiveData = useLiveSessionStore((state) => state.resetLiveData)
+  const qaTurns = useReviewQaStore((state) => state.qaTurns)
+  const qaStatus = useReviewQaStore((state) => state.status)
+  const submitQuestion = useReviewQaStore((state) => state.submitQuestion)
+  const applyChunk = useReviewQaStore((state) => state.applyChunk)
+  const applyDone = useReviewQaStore((state) => state.applyDone)
+  const failAnswer = useReviewQaStore((state) => state.failAnswer)
+  const retryAnswer = useReviewQaStore((state) => state.retryAnswer)
+  const resetReviewQa = useReviewQaStore((state) => state.reset)
   const autoStartAttemptedRef = useRef(false)
   const chunkIndexRef = useRef(0)
+  const successfulTurnCountRef = useRef(0)
+  const lastQaIndexBuildAtRef = useRef(0)
+  const qaIndexBuiltOnceRef = useRef(false)
   const previousConnectionRef = useRef(connection)
   const lastReconnectToastAtRef = useRef(0)
   const lastErrorToastAtRef = useRef(0)
@@ -175,6 +277,191 @@ export function LectureLivePage() {
       }
     },
     [sessionId]
+  )
+
+  const refreshQaIndexIfNeeded = useCallback(async () => {
+    const now = Date.now()
+    const elapsed = now - lastQaIndexBuildAtRef.current
+    if (elapsed < QA_INDEX_REFRESH_INTERVAL_MS) {
+      return
+    }
+
+    try {
+      await lectureQaApi.buildIndex({
+        session_id: sessionId,
+        rebuild: true,
+      })
+      lastQaIndexBuildAtRef.current = now
+      qaIndexBuiltOnceRef.current = true
+    } catch (error) {
+      if (qaIndexBuiltOnceRef.current) {
+        showToast({
+          variant: 'warning',
+          title: 'QA索引更新に失敗しました',
+          message: getApiErrorMessage(
+            error,
+            '前回までの索引で回答を継続します。'
+          ),
+        })
+        return
+      }
+      throw error
+    }
+  }, [sessionId, showToast])
+
+  const executeMiniQuestion = useCallback(
+    async (
+      rawQuestion: string,
+      options: { existingAnswerId?: string } = {}
+    ) => {
+      const normalizedQuestion = rawQuestion.trim()
+      if (!normalizedQuestion || isQaSubmitting) {
+        return
+      }
+
+      const answerId = options.existingAnswerId ?? createReviewAnswerId()
+      setIsQaSubmitting(true)
+
+      if (options.existingAnswerId) {
+        retryAnswer(answerId)
+      } else {
+        submitQuestion(normalizedQuestion, answerId)
+      }
+
+      const locale = userSettings?.language === 'en' ? 'en' : 'ja'
+      announceQaStatus('generating', locale)
+
+      try {
+        await refreshQaIndexIfNeeded()
+        const response = await requestReviewQaAnswer({
+          sessionId,
+          question: normalizedQuestion,
+          language: userSettings?.language,
+          hasSuccessfulTurn: successfulTurnCountRef.current > 0,
+        })
+
+        const subtitleIdByChunkId = new Map<string, number>()
+        transcriptLines.forEach((line) => {
+          if (typeof line.subtitleSerial === 'number' && !line.isPartial) {
+            subtitleIdByChunkId.set(line.id, line.subtitleSerial)
+          }
+        })
+
+        const mappedChunk = mapLectureQaResponseToChunk(answerId, response)
+        applyChunk(
+          addSubtitleIdsToSpeechCitations(mappedChunk, subtitleIdByChunkId)
+        )
+        applyDone(mapLectureQaResponseToDone(answerId))
+        successfulTurnCountRef.current += 1
+        announceQaStatus('done', locale)
+
+        if (response.fallback) {
+          showToast({
+            variant: 'warning',
+            title: '根拠が不足している回答です',
+            message: response.action_next,
+          })
+        }
+      } catch (error) {
+        failAnswer(answerId)
+        announceQaStatus('error', locale)
+
+        if (error instanceof ApiError && error.status === 401) {
+          showToast({
+            variant: 'danger',
+            title: '認証エラー',
+            message:
+              'デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。',
+          })
+          return
+        }
+        if (error instanceof ApiError && error.status === 404) {
+          showToast({
+            variant: 'danger',
+            title: 'セッションが見つかりません',
+            message: '講義一覧へ戻ります。',
+          })
+          navigate('/lectures')
+          return
+        }
+        if (error instanceof ApiError && error.status === 503) {
+          showToast({
+            variant: 'danger',
+            title: 'QAバックエンド利用不可',
+            message:
+              '現在は回答生成サービスを利用できません。しばらくして再試行してください。',
+          })
+          return
+        }
+        showToast({
+          variant: 'danger',
+          title: '回答の取得に失敗しました',
+          message: getApiErrorMessage(
+            error,
+            '回答生成中にエラーが発生しました。'
+          ),
+        })
+      } finally {
+        setIsQaSubmitting(false)
+      }
+    },
+    [
+      announceQaStatus,
+      applyChunk,
+      applyDone,
+      failAnswer,
+      isQaSubmitting,
+      navigate,
+      refreshQaIndexIfNeeded,
+      retryAnswer,
+      sessionId,
+      showToast,
+      submitQuestion,
+      transcriptLines,
+      userSettings?.language,
+    ]
+  )
+
+  const handleMiniQuestion = useCallback(
+    (question: string) => {
+      void executeMiniQuestion(question)
+    },
+    [executeMiniQuestion]
+  )
+
+  const handleQaRetry = useCallback(
+    (answerId: string) => {
+      if (isQaSubmitting) {
+        return
+      }
+      const turn = qaTurns.find((item) => item.answerId === answerId)
+      if (!turn) {
+        return
+      }
+      void executeMiniQuestion(turn.question, { existingAnswerId: answerId })
+    },
+    [executeMiniQuestion, isQaSubmitting, qaTurns]
+  )
+
+  const handleQaRegenerate = useCallback(
+    (question: string) => {
+      if (isQaSubmitting) {
+        return
+      }
+      void executeMiniQuestion(question)
+    },
+    [executeMiniQuestion, isQaSubmitting]
+  )
+
+  const handleQaCitationSelect = useCallback(
+    (citationId: string) => {
+      showToast({
+        variant: 'info',
+        title: '引用情報',
+        message: `引用ID: ${citationId}`,
+      })
+    },
+    [showToast]
   )
 
   const handleSpeechResult = useCallback(
@@ -410,6 +697,16 @@ export function LectureLivePage() {
     }, 150)
     return () => window.clearTimeout(timer)
   }, [isRecording, speechSupported, speechRecognitionLang, startListening, stopListening])
+
+  useEffect(() => {
+    resetReviewQa()
+    successfulTurnCountRef.current = 0
+    lastQaIndexBuildAtRef.current = 0
+    qaIndexBuiltOnceRef.current = false
+    return () => {
+      resetReviewQa()
+    }
+  }, [resetReviewQa, sessionId])
 
   useEffect(() => {
     hydrateFromSettings({
@@ -682,14 +979,24 @@ export function LectureLivePage() {
                 />
               ))}
             </div>
-            <Link to={`/lectures/${sessionId}/review`} className="btn btn-secondary">
-              {t('live.stream.toReview')}
+            <Link to="/lectures" className="btn btn-secondary">
+              {t('nav.lectures')}
             </Link>
           </div>
         </div>
       }
       sidebar={cameraEnabled ? <SourcePanel /> : undefined}
-      rightRail={<AssistPanel onAskMiniQuestion={(q) => showToast({ variant: 'info', title: 'ミニ回答', message: `${q} → 詳細回答はreview画面で確認してください。` })} />}
+      rightRail={
+        <AssistPanel
+          onAskMiniQuestion={handleMiniQuestion}
+          qaTurns={qaTurns}
+          qaStatus={qaStatus}
+          isQaSubmitting={isQaSubmitting}
+          onQaCitationSelect={handleQaCitationSelect}
+          onQaRetry={handleQaRetry}
+          onQaRegenerate={handleQaRegenerate}
+        />
+      }
     >
       <div className="h-[calc(100vh-130px)]">
         <TranscriptPanel />
