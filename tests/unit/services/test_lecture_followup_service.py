@@ -640,7 +640,7 @@ def test_build_chat_completion_url():
         "https://test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
         in result
     )
-    assert "api-version=2024-10-21" in result
+    assert "api-version=2024-05-01-preview" in result
 
 
 def test_build_chat_completion_url_with_trailing_slash():

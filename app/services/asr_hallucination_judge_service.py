@@ -12,6 +12,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.core.azure_openai_config import ValidationResult, validate_openai_config
+from app.services.observability.llm_usage import LLMUsage, extract_usage
 
 __all__ = [
     "HallucinationJudgeResult",
@@ -96,6 +97,7 @@ class AzureOpenAIJapaneseASRHallucinationJudgeService:
         self._api_version = api_version
         self._timeout_seconds = timeout_seconds
         self._obvious_threshold = obvious_threshold
+        self._last_usage: LLMUsage | None = None
         self._validation = self._validate_configuration()
 
         if not self._validation.is_valid:
@@ -149,8 +151,7 @@ class AzureOpenAIJapaneseASRHallucinationJudgeService:
                     ),
                 },
             ],
-            "temperature": 0.0,
-            "max_tokens": 220,
+            "max_completion_tokens": 220,
             "response_format": {"type": "json_object"},
         }
 
@@ -172,6 +173,7 @@ class AzureOpenAIJapaneseASRHallucinationJudgeService:
         try:
             raw = await asyncio.to_thread(_run_request)
             response_json = json.loads(raw)
+            self._last_usage = extract_usage(response_json)
             content = self._extract_content(response_json)
             parsed = json.loads(content)
 

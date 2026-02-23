@@ -11,6 +11,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.core.azure_openai_config import ValidationResult, validate_openai_config
+from app.services.observability.llm_usage import LLMUsage, extract_usage
 
 __all__ = [
     "JapaneseASRCorrectionService",
@@ -67,6 +68,7 @@ class AzureOpenAIJapaneseASRCorrectionService:
         self._model = model
         self._api_version = api_version
         self._timeout_seconds = timeout_seconds
+        self._last_usage: LLMUsage | None = None
         self._validation = self._validate_configuration(account_name=account_name)
 
         if not self._validation.is_valid:
@@ -152,8 +154,7 @@ class AzureOpenAIJapaneseASRCorrectionService:
                     "content": prompt,
                 },
             ],
-            "temperature": 0.0,
-            "max_tokens": 600,
+            "max_completion_tokens": 600,
         }
         body = json.dumps(payload).encode("utf-8")
         request = Request(
@@ -173,6 +174,7 @@ class AzureOpenAIJapaneseASRCorrectionService:
         try:
             raw = await asyncio.to_thread(_run_request)
             response_json = json.loads(raw)
+            self._last_usage = extract_usage(response_json)
             return self._extract_content(response_json)
         except HTTPError as exc:
             raise RuntimeError("asr correction http error") from exc

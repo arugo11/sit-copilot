@@ -57,7 +57,6 @@ export function LectureLivePage() {
     (state) => state.setTranscriptCorrectionStatus
   )
   const applyTranslationFinal = useLiveSessionStore((state) => state.applyTranslationFinal)
-  const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
   const pushSourceFrame = useLiveSessionStore((state) => state.pushSourceFrame)
   const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
   const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
@@ -165,10 +164,13 @@ export function LectureLivePage() {
               target_lang_mode: currentMode,
             })
             const translated = sanitizeTranslatedText(
-              transformed.transformed_text || transcriptForAssist,
+              transformed.transformed_text || '',
               currentMode
             )
-            applyTranslationFinal(ingested.event_id, translated, currentMode)
+            // Only apply if the backend returned a non-empty translation.
+            if (translated) {
+              applyTranslationFinal(ingested.event_id, translated, currentMode)
+            }
           } catch (translationError) {
             console.warn('[subtitle-translation] post-correction transform failed', {
               sessionId,
@@ -210,7 +212,33 @@ export function LectureLivePage() {
           useLiveSessionStore.getState().summaryEnabled &&
           chunkIndexRef.current % SUMMARY_TRIGGER_CHUNK_COUNT === 0
         ) {
-          await demoApi.getLatestSummary(sessionId)
+          try {
+            const summaryResult = await demoApi.getLatestSummary(sessionId)
+            if (summaryResult.status === 'ok') {
+              setAssistSummary({
+                timestampMs: Date.now(),
+                points: summaryResult.summary
+                  .split('。')
+                  .filter(Boolean)
+                  .slice(0, 3),
+              })
+              setAssistTerms(
+                summaryResult.key_terms.map((term) => ({
+                  term: typeof term === 'string' ? term : term.term,
+                  explanation:
+                    typeof term === 'string'
+                      ? ''
+                      : term.explanation || '',
+                  translation:
+                    typeof term === 'string'
+                      ? term
+                      : term.translation || term.term,
+                }))
+              )
+            }
+          } catch (summaryError) {
+            console.warn('[summary] 3-chunk trigger failed:', summaryError)
+          }
         }
       } catch (error) {
         const nowMs = Date.now()
@@ -258,9 +286,14 @@ export function LectureLivePage() {
           text,
           target_lang_mode: mode,
         })
-        return sanitizeTranslatedText(transformed.transformed_text || text, mode)
+        // Return the transformed text, or empty string if the API returned
+        // nothing. Callers compare with source text to detect fallbacks.
+        return sanitizeTranslatedText(transformed.transformed_text || '', mode)
       } catch {
-        return text
+        // Return empty string on failure so callers know translation failed
+        // (rather than returning the Japanese source text and pretending
+        // it's a valid translation).
+        return ''
       }
     },
     [sessionId]
@@ -350,11 +383,25 @@ export function LectureLivePage() {
         applyTranscriptFinal(event.payload)
         const currentMode = useLiveSessionStore.getState().selectedLanguage
         if (currentMode !== 'ja') {
+          // Only translate if this line doesn't already have a translation
+          // for the current display mode. SSE re-delivers events on reconnect
+          // and the redundant transform API calls can return fallback (Japanese)
+          // text that overwrites a valid earlier translation.
+          const existingLine = useLiveSessionStore.getState().transcriptLines.find(
+            (l) => l.id === event.payload.id
+          )
+          if (existingLine?.translatedLangMode === currentMode) {
+            return
+          }
           void (async () => {
             const translated = await transformSubtitleForMode(
               event.payload.sourceLangText,
               currentMode
             )
+            // Don't mark as translated if empty (API failure)
+            if (!translated.trim()) {
+              return
+            }
             applyTranslationFinal(event.payload.id, translated, currentMode)
           })()
         }
@@ -417,11 +464,18 @@ export function LectureLivePage() {
   }, [lastError, showToast])
 
   useEffect(() => {
-    if (selectedLanguage === 'ja' || transcriptLines.length === 0) {
+    if (selectedLanguage === 'ja') {
       return
     }
 
-    transcriptLines.forEach((line) => {
+    // Read transcript lines non-reactively to avoid re-triggering on every
+    // translation update (applyTranslationFinal mutates transcriptLines).
+    const lines = useLiveSessionStore.getState().transcriptLines
+    if (lines.length === 0) {
+      return
+    }
+
+    lines.forEach((line) => {
       if (line.translatedLangMode === selectedLanguage) {
         return
       }
@@ -430,13 +484,16 @@ export function LectureLivePage() {
           line.sourceLangText,
           selectedLanguage
         )
+        // Don't mark as "translated" if empty (API failure).
+        if (!translated.trim()) {
+          return
+        }
         applyTranslationFinal(line.id, translated, selectedLanguage)
       })()
     })
   }, [
     applyTranslationFinal,
     selectedLanguage,
-    transcriptLines,
     transformSubtitleForMode,
   ])
 

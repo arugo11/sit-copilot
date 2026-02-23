@@ -79,40 +79,50 @@ export function TranscriptPanel() {
         {sortedLines.length === 0 ? (
           <div className="card p-4 text-sm text-fg-secondary">字幕待機中です</div>
         ) : (
-          sortedLines.map((line) => (
-            <article
-              key={line.id}
-              className={`card ${density === 'compact' ? 'p-3' : 'p-4'} ${line.isPartial ? 'opacity-60' : ''}`}
-            >
-              <div className="text-xs text-fg-secondary flex items-center gap-2 mb-1">
-                <span>{formatTime(line.tsStartMs)}</span>
-                {line.speakerLabel ? <span>• {line.speakerLabel}</span> : null}
-                {line.isPartial ? <span className="badge badge-warning">partial</span> : <span className="badge badge-success">final</span>}
-              </div>
-              {selectedLanguage === 'ja' ? (
-                <>
-                  <p className="text-fg-primary leading-relaxed">{line.sourceLangText}</p>
-                  {line.correctionStatus === 'pending' && (
-                    <p className="text-xs text-fg-secondary mt-1">日本語補正中（原文表示）</p>
-                  )}
-                  {line.correctionStatus === 'review_failed' && (
-                    <p className="text-xs text-warning mt-1">日本語補正失敗（原文表示）</p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-fg-primary leading-relaxed">
-                    {line.translatedLangMode === selectedLanguage
-                      ? line.translatedText
-                      : line.sourceLangText}
-                  </p>
-                  {line.translatedLangMode !== selectedLanguage && (
-                    <p className="text-xs text-fg-secondary mt-1">翻訳生成待機中（原文表示）</p>
-                  )}
-                </>
-              )}
-            </article>
-          ))
+          sortedLines.map((line) => {
+            const originalText = (line.originalLangText ?? '').trim()
+            const currentText = (line.sourceLangText ?? '').trim()
+            const hasCorrectionDiff =
+              originalText.length > 0 && currentText.length > 0 && originalText !== currentText
+
+            return (
+              <article
+                key={line.id}
+                className={`card ${density === 'compact' ? 'p-3' : 'p-4'} ${line.isPartial ? 'opacity-60' : ''}`}
+              >
+                <div className="text-xs text-fg-secondary flex items-center gap-2 mb-1">
+                  <span>{formatTime(line.tsStartMs)}</span>
+                  {line.speakerLabel ? <span>• {line.speakerLabel}</span> : null}
+                  {line.isPartial ? <span className="badge badge-warning">partial</span> : <span className="badge badge-success">final</span>}
+                </div>
+                {selectedLanguage === 'ja' ? (
+                  <>
+                    <p className="text-fg-primary leading-relaxed">{line.sourceLangText}</p>
+                    {hasCorrectionDiff && (
+                      <p className="text-xs text-fg-secondary mt-2">補正前: {originalText}</p>
+                    )}
+                    {line.correctionStatus === 'pending' && (
+                      <p className="text-xs text-fg-secondary mt-1">日本語補正中（原文表示）</p>
+                    )}
+                    {line.correctionStatus === 'review_failed' && (
+                      <p className="text-xs text-warning mt-1">日本語補正失敗（原文表示）</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-fg-primary leading-relaxed">
+                      {line.translatedLangMode === selectedLanguage
+                        ? line.translatedText
+                        : line.sourceLangText}
+                    </p>
+                    {line.translatedLangMode !== selectedLanguage && (
+                      <p className="text-xs text-fg-secondary mt-1">翻訳生成待機中（原文表示）</p>
+                    )}
+                  </>
+                )}
+              </article>
+            )
+          })
         )}
       </div>
 

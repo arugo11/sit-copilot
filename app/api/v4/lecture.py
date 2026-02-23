@@ -33,6 +33,7 @@ from app.models.summary_window import SummaryWindow
 from app.models.visual_event import VisualEvent
 from app.schemas.lecture import (
     MAX_VISUAL_IMAGE_BYTES,
+    LectureSessionDeleteResponse,
     LectureSessionFinalizeRequest,
     LectureSessionFinalizeResponse,
     LectureSessionLangModeUpdateRequest,
@@ -1007,6 +1008,38 @@ async def finalize_lecture_session(
             session_id=request.session_id,
             build_qa_index=request.build_qa_index,
         )
+    except LectureSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
+        ) from exc
+    except LectureSessionStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Lecture session state is invalid.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lecture summary backend is unavailable.",
+        ) from exc
+
+
+@router.delete(
+    "/session/{session_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureSessionDeleteResponse,
+)
+async def delete_lecture_session(
+    session_id: str,
+    service: Annotated[
+        LectureFinalizeService,
+        Depends(get_lecture_finalize_service),
+    ],
+) -> LectureSessionDeleteResponse:
+    """Auto-finalize (if needed) and delete a lecture session."""
+    try:
+        return await service.delete_session(session_id=session_id)
     except LectureSessionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

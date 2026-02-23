@@ -962,6 +962,21 @@ Response
 }
 ```
 
+## DELETE `/api/v4/lecture/session/{session_id}`
+
+講義セッションを削除する. `active/live` は自動で `finalize` 後に削除する.
+削除対象にはセッション本体と関連イベント, 要約, チャンク, `speech_review_histories` を含む.
+
+Response
+
+```json
+{
+  "session_id": "lec_20260301_001",
+  "status": "deleted",
+  "auto_finalized": true
+}
+```
+
 ---
 
 # 10.6 F4, 講義後QA

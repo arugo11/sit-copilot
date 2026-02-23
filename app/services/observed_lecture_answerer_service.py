@@ -11,6 +11,7 @@ from app.services.lecture_answerer_service import (
     LectureAnswererError,
     LectureAnswererService,
 )
+from app.services.observability.llm_usage import LLMUsage
 from app.services.observability.weave_observer_service import WeaveObserverService
 
 __all__ = ["ObservedLectureAnswererService"]
@@ -28,7 +29,7 @@ class ObservedLectureAnswererService:
     Observer failures never block the main answer generation flow.
     """
 
-    __slots__ = ("_inner", "_observer", "_model")
+    __slots__ = ("_inner", "_observer", "_model", "_last_lang_mode")
 
     def __init__(
         self,
@@ -141,6 +142,16 @@ class ObservedLectureAnswererService:
             "lang_mode": getattr(self, "_last_lang_mode", "unknown"),
         }
 
+        # Extract usage from inner service
+        usage: LLMUsage | None = getattr(self._inner, "_last_usage", None)
+        if usage is not None:
+            metadata["prompt_tokens"] = usage.prompt_tokens
+            metadata["completion_tokens"] = usage.completion_tokens
+            metadata["total_tokens"] = usage.total_tokens
+            metadata["prompt_cost_usd"] = usage.prompt_cost
+            metadata["completion_cost_usd"] = usage.completion_cost
+            metadata["total_cost_usd"] = usage.total_cost
+
         try:
             await self._observer.track_llm_call(
                 provider=AZURE_OPENAI_PROVIDER,
@@ -148,8 +159,8 @@ class ObservedLectureAnswererService:
                 prompt=prompt,
                 response=response,
                 latency_ms=latency_ms,
-                tokens_prompt=None,  # Azure OpenAI doesn't return token count by default
-                tokens_completion=None,
+                tokens_prompt=usage.prompt_tokens if usage else None,
+                tokens_completion=usage.completion_tokens if usage else None,
                 metadata=metadata,
             )
         except Exception:

@@ -96,7 +96,9 @@ function getStatusBadge(status: SessionStatus) {
 interface SessionCardProps {
   session: DemoLectureSession
   isFinalizing: boolean
+  isDeleting: boolean
   onFinalize: (sessionId: string) => Promise<void>
+  onDelete: (session: DemoLectureSession) => Promise<void>
 }
 
 function CopyButton({ value, label }: { value: string; label: string }) {
@@ -125,7 +127,15 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
-function SessionCard({ session, isFinalizing, onFinalize }: SessionCardProps) {
+function SessionCard({
+  session,
+  isFinalizing,
+  isDeleting,
+  onFinalize,
+  onDelete,
+}: SessionCardProps) {
+  const isBusy = isFinalizing || isDeleting
+
   return (
     <div className="card p-6 space-y-4 hover:shadow-md transition-shadow">
       {/* Header */}
@@ -134,7 +144,21 @@ function SessionCard({ session, isFinalizing, onFinalize }: SessionCardProps) {
           <h3 className="text-lg font-semibold text-fg-primary line-clamp-2">
             {session.course_name}
           </h3>
-          {getStatusBadge(session.status)}
+          <div className="flex items-center gap-2">
+            {getStatusBadge(session.status)}
+            <button
+              type="button"
+              className="btn btn-ghost min-h-8 min-w-8 p-1.5 text-fg-secondary hover:text-danger"
+              aria-label={`${session.course_name} を削除`}
+              title="セッションを削除"
+              onClick={() => onDelete(session)}
+              disabled={isBusy}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-7 0h8" />
+              </svg>
+            </button>
+          </div>
         </div>
         <CopyButton value={session.session_id} label={`セッション ID ${session.session_id} をコピー`} />
       </div>
@@ -169,15 +193,15 @@ function SessionCard({ session, isFinalizing, onFinalize }: SessionCardProps) {
           <button
             type="button"
             className="btn btn-secondary w-full"
-            disabled={isFinalizing}
+            disabled={isBusy}
             onClick={() => onFinalize(session.session_id)}
             aria-label={`${session.course_name} のセッションを終了`}
           >
-            {isFinalizing ? '終了中...' : 'セッション終了'}
+            {isFinalizing ? '終了中...' : isDeleting ? '削除中...' : 'セッション終了'}
           </button>
         ) : (
           <span className="btn btn-ghost w-full text-center pointer-events-none text-fg-secondary">
-            終了済み
+            {isDeleting ? '削除中...' : '終了済み'}
           </span>
         )}
       </div>
@@ -193,6 +217,9 @@ export function LecturesPage() {
   )
   const [isStarting, setIsStarting] = useState<boolean>(false)
   const [finalizingSessionIds, setFinalizingSessionIds] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [deletingSessionIds, setDeletingSessionIds] = useState<Set<string>>(
     () => new Set()
   )
   const [startErrorMessage, setStartErrorMessage] = useState<string | null>(null)
@@ -277,7 +304,7 @@ export function LecturesPage() {
 
   const handleFinalizeSession = async (sessionId: string): Promise<void> => {
     // Guard: ignore re-click while this session is already being finalized
-    if (finalizingSessionIds.has(sessionId)) return
+    if (finalizingSessionIds.has(sessionId) || deletingSessionIds.has(sessionId)) return
 
     // Add to the set of in-progress finalizations (supports multiple concurrent)
     setFinalizingSessionIds((prev) => new Set(prev).add(sessionId))
@@ -324,6 +351,60 @@ export function LecturesPage() {
     } finally {
       // Remove from the set of in-progress finalizations
       setFinalizingSessionIds((prev) => {
+        const next = new Set(prev)
+        next.delete(sessionId)
+        return next
+      })
+    }
+  }
+
+  const handleDeleteSession = async (session: DemoLectureSession): Promise<void> => {
+    const sessionId = session.session_id
+    if (deletingSessionIds.has(sessionId) || finalizingSessionIds.has(sessionId)) return
+
+    const confirmed = window.confirm(
+      `「${session.course_name}」を削除します。\nライブ中の場合は自動で終了してから削除されます。\nこの操作は取り消せません。`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingSessionIds((prev) => new Set(prev).add(sessionId))
+    try {
+      const result = await demoApi.deleteDemoSession(sessionId)
+      setSessions((prev) => {
+        const nextSessions = prev.filter((item) => item.session_id !== sessionId)
+        saveStoredSessions(nextSessions)
+        return nextSessions
+      })
+      showToast({
+        variant: 'success',
+        title: 'セッションを削除しました',
+        message: result.auto_finalized
+          ? 'ライブ中セッションを自動終了して削除しました。'
+          : undefined,
+      })
+    } catch (error) {
+      const apiErr = error as { status?: number }
+      if (apiErr?.status === 404) {
+        setSessions((prev) => {
+          const nextSessions = prev.filter((item) => item.session_id !== sessionId)
+          saveStoredSessions(nextSessions)
+          return nextSessions
+        })
+        showToast({
+          variant: 'warning',
+          title: 'セッションは既に削除済みです',
+        })
+      } else {
+        showToast({
+          variant: 'danger',
+          title: 'セッション削除に失敗しました',
+          message: getApiErrorMessage(error, 'セッション削除APIに失敗しました。'),
+        })
+      }
+    } finally {
+      setDeletingSessionIds((prev) => {
         const next = new Set(prev)
         next.delete(sessionId)
         return next
@@ -420,7 +501,9 @@ export function LecturesPage() {
                 key={session.session_id}
                 session={session}
                 isFinalizing={finalizingSessionIds.has(session.session_id)}
+                isDeleting={deletingSessionIds.has(session.session_id)}
                 onFinalize={handleFinalizeSession}
+                onDelete={handleDeleteSession}
               />
             ))}
           </div>

@@ -29,6 +29,11 @@ def normalize_openai_endpoint(endpoint: str, account_name: str = "") -> str:
     if host.endswith(".openai.azure.com"):
         return normalized_endpoint
 
+    if host.endswith(".cognitiveservices.azure.com"):
+        resource_name = host.removesuffix(".cognitiveservices.azure.com")
+        if resource_name:
+            return f"https://{resource_name}.openai.azure.com"
+
     if host.endswith(".api.cognitive.microsoft.com") and account_name.strip():
         normalized_account = account_name.strip()
         return f"https://{normalized_account}.openai.azure.com"

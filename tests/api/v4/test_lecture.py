@@ -14,6 +14,7 @@ from app.main import app
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
+from app.models.speech_review_history import SpeechReviewHistory
 from app.models.summary_window import SummaryWindow
 from app.models.visual_event import VisualEvent
 
@@ -1167,6 +1168,163 @@ async def test_post_lecture_session_finalize_accepts_demo_user_alias_headers(
     assert response.json()["status"] == "finalized"
 
 
+@pytest.mark.asyncio
+async def test_delete_lecture_session_returns_200_and_removes_records(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Delete endpoint should remove finalized session and related records."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    chunk_response = await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 15000,
+            "end_ms": 22000,
+            "text": "削除テスト用イベント。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    event_id = chunk_response.json()["event_id"]
+
+    async with session_factory() as session:
+        session.add(
+            SpeechReviewHistory(
+                session_id=session_id,
+                speech_event_id=event_id,
+                attempt_no=1,
+                review_status="reviewed",
+                input_text="削除テスト用イベント。",
+                candidate_text="削除テスト用イベント。",
+                final_text="削除テスト用イベント。",
+                was_corrected=False,
+                failure_reason=None,
+                judge_model="test-judge",
+                judge_confidence=0.9,
+            )
+        )
+        await session.commit()
+
+    await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={"session_id": session_id, "build_qa_index": False},
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.delete(
+        f"/api/v4/lecture/session/{session_id}",
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["status"] == "deleted"
+    assert body["auto_finalized"] is False
+
+    async with session_factory() as session:
+        session_result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+        speech_result = await session.execute(
+            select(SpeechEvent).where(SpeechEvent.session_id == session_id)
+        )
+        review_result = await session.execute(
+            select(SpeechReviewHistory).where(
+                SpeechReviewHistory.session_id == session_id
+            )
+        )
+
+    assert session_result.scalar_one_or_none() is None
+    assert speech_result.scalars().all() == []
+    assert review_result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_lecture_session_auto_finalizes_live_session(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Delete endpoint should auto-finalize active/live session before deletion."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.delete(
+        f"/api/v4/lecture/session/{session_id}",
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "deleted"
+    assert body["auto_finalized"] is True
+
+    async with session_factory() as session:
+        session_result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+    assert session_result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_lecture_session_for_other_user_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    """Delete endpoint should enforce ownership."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=OWNER_A_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.delete(
+        f"/api/v4/lecture/session/{session_id}",
+        headers=OWNER_B_HEADERS,
+    )
+    assert response.status_code == 404
+
+
 # ============================================================================
 # Azure OpenAI Summary Integration Tests
 # ============================================================================
@@ -1478,6 +1636,24 @@ async def test_post_lecture_speech_chunk_audit_apply_updates_persisted_text(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """POST /lecture/speech/chunk/audit-apply should replace subtitle text."""
+    # Override correction + judge dependencies with deterministic fakes
+    from app.api.v4.lecture import (
+        get_japanese_asr_correction_service,
+        get_japanese_asr_hallucination_judge_service,
+    )
+    from app.services.asr_hallucination_judge_service import (
+        NoopJapaneseASRHallucinationJudgeService,
+    )
+
+    class _FakeCorrector:
+        async def correct_minimally(self, text: str) -> str:
+            return text.replace("わ", "は").replace("お", "を")
+
+    app.dependency_overrides[get_japanese_asr_correction_service] = _FakeCorrector
+    app.dependency_overrides[get_japanese_asr_hallucination_judge_service] = (
+        NoopJapaneseASRHallucinationJudgeService
+    )
+
     start_payload = {
         "course_name": "統計学基礎",
         "course_id": None,

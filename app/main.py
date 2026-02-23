@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             import weave
 
-            weave.init(project_name=settings.weave.project)
+            weave_client = weave.init(project_name=settings.weave.project)
             weave_observer = WandBWeaveObserverService(settings.weave)
             # Start dispatcher
             dispatcher: WeaveDispatcher | None = getattr(
@@ -78,6 +78,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if dispatcher is not None:
                 await dispatcher.start()
             logger.info(f"Weave initialized: project={settings.weave.project}")
+
+            # Register gpt-5-nano custom costs for Metrics monitoring
+            # Azure OpenAI Global Standard pricing (USD per 1M tokens)
+            #   Input:  $0.05 → $0.00000005 per token
+            #   Output: $0.40 → $0.0000004  per token
+            try:
+                from datetime import datetime, timezone
+
+                weave_client.add_cost(
+                    llm_id="gpt-5-nano",
+                    prompt_token_cost=0.05 / 1_000_000,
+                    completion_token_cost=0.40 / 1_000_000,
+                    effective_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                )
+                logger.info("weave_custom_cost_registered model=gpt-5-nano")
+            except Exception as cost_err:
+                logger.debug(
+                    "weave_cost_registration_skipped reason=%s", cost_err
+                )
         except Exception as e:
             logger.warning(f"Weave initialization failed: {e}. Using Noop.")
             weave_observer = NoopWeaveObserverService()
