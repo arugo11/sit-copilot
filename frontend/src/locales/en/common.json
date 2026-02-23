@@ -10,14 +10,14 @@
   },
   "landing": {
     "title": "Lecture Support App",
-    "subtitle": "Try a login-free demo with captions, source integration, and post-lecture QA.",
-    "login": "Start Demo",
-    "demo": "Open Demo Sessions",
+    "subtitle": "Start using real-time captions and translation during lectures without login.",
+    "login": "Start Lecture",
+    "demo": "Open Lectures",
     "features": {
       "title": "Key Features",
       "captions": "Real-time Captions & Translation",
-      "materials": "Board & Projection Materials",
-      "qa": "Post-lecture QA with Citations"
+      "materials": "Material View",
+      "qa": "Lecture Assistance"
     },
     "audience": {
       "international": "International Students",

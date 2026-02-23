@@ -357,10 +357,10 @@ class ApiClient {
         if (response.status === 401) {
           if (authScope === 'procedure') {
             message =
-              'Unauthorized. デモトークン設定を確認してください (X-Procedure-Token)。'
+              'Unauthorized. トークン設定を確認してください (X-Procedure-Token)。'
           } else {
             message =
-              'Unauthorized. デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+              'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
           }
         }
         throw new ApiError(response.status, message)

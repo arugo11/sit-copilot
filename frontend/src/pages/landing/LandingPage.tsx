@@ -16,7 +16,7 @@ export function LandingPage() {
               講義支援アプリ
             </h1>
             <p className="text-lg text-fg-secondary">
-              ログイン不要のデモで、字幕・資料連携・講義後QAの体験をすぐに確認できます。
+              ログイン不要で、講義中のリアルタイム字幕と翻訳をすぐに利用できます。
             </p>
 
             {/* Target Audience */}
@@ -36,18 +36,6 @@ export function LandingPage() {
                   </svg>
                   <span>リアルタイム字幕と翻訳</span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-success mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>板書・投影資料の取り込み</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-success mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>講義後の根拠付きQA</span>
-                </li>
               </ul>
             </div>
           </div>
@@ -56,19 +44,12 @@ export function LandingPage() {
           <div className="lg:col-span-2 space-y-6">
             <div className="card p-6 space-y-4">
               <h2 className="text-xl font-semibold text-fg-primary text-center">
-                デモを始める
+                講義を始める
               </h2>
 
-              {/* Demo Start Button */}
+              {/* Lecture Start Button */}
               <Link to="/lectures" className="btn btn-primary w-full text-center block">
-                デモを開始
-              </Link>
-              <Link to="/readiness-check" className="btn btn-secondary w-full text-center block">
-                履修前サポート (F0)
-              </Link>
-
-              <Link to="/procedure" className="btn btn-secondary w-full text-center block">
-                学内手続きQAを試す
+                講義一覧を開く
               </Link>
 
               {/* Language Selector */}
@@ -85,11 +66,6 @@ export function LandingPage() {
                   <option value="en">English</option>
                 </select>
               </div>
-            </div>
-
-            {/* Demo Screenshot Placeholder */}
-            <div className="card bg-bg-muted aspect-video flex items-center justify-center">
-              <p className="text-fg-secondary text-sm">デモスクリーンショット</p>
             </div>
           </div>
         </div>
