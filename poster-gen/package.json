@@ -1,0 +1,33 @@
+{
+  "name": "poster-gen",
+  "version": "1.0.0",
+  "description": "A0 poster generation system using PptxGenJS for SIT Copilot",
+  "type": "module",
+  "scripts": {
+    "generate": "tsx src/app/generate.ts posters/sit-copilot.json",
+    "generate:qr": "tsx src/utils/qr-code.ts",
+    "generate:all": "tsx src/app/generate.ts posters/sit-copilot.json --qr",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "poster",
+    "pptx",
+    "presentation"
+  ],
+  "author": "SIT Copilot Team",
+  "license": "MIT",
+  "dependencies": {
+    "pptxgenjs": "^3.12.0",
+    "qrcode": "^1.5.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.12.7",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.11"
+  },
+  "main": "index.js"
+}

@@ -796,14 +796,16 @@ async def transform_subtitle_for_display(
         session_id=request.session_id,
         user_id=user_id,
     )
-    transformed_text = await transform_service.transform(
+    transform_result = await transform_service.transform(
         text=request.text,
         target_lang_mode=request.target_lang_mode,
     )
     return SubtitleTransformResponse(
         session_id=request.session_id,
         target_lang_mode=request.target_lang_mode,
-        transformed_text=transformed_text,
+        transformed_text=transform_result.text,
+        status=transform_result.status,
+        fallback_reason=transform_result.fallback_reason,
     )
 
 

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -15,6 +15,8 @@ from app.core.azure_openai_config import ValidationResult, validate_openai_confi
 from app.services.observability.llm_usage import LLMUsage, extract_usage
 
 __all__ = [
+    "CaptionTransformResult",
+    "CaptionTransformStatus",
     "CaptionTransformService",
     "AzureOpenAILiveCaptionTransformService",
 ]
@@ -22,15 +24,37 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+CaptionTransformStatus = Literal["translated", "fallback", "passthrough"]
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionTransformResult:
+    """Structured transform result with fallback signaling."""
+
+    text: str
+    status: CaptionTransformStatus
+    fallback_reason: str | None = None
+
+
+class CaptionTransformLLMError(RuntimeError):
+    """Raised when Azure OpenAI transform request fails."""
+
+    def __init__(self, *, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class CaptionTransformService(Protocol):
     """Interface for subtitle language transformation."""
 
-    async def transform(self, text: str, target_lang_mode: str) -> str:
+    async def transform(
+        self, text: str, target_lang_mode: str
+    ) -> CaptionTransformResult:
         """Transform subtitle text according to target language mode."""
         ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _PromptSpec:
     system: str
     user: str
@@ -85,24 +109,41 @@ class AzureOpenAILiveCaptionTransformService:
                 self._validation.reason,
             )
 
-    async def transform(self, text: str, target_lang_mode: str) -> str:
+    async def transform(
+        self, text: str, target_lang_mode: str
+    ) -> CaptionTransformResult:
         """Transform subtitle text for requested mode."""
         normalized_text = text.strip()
         if not normalized_text:
-            return ""
+            return CaptionTransformResult(
+                text="",
+                status="passthrough",
+                fallback_reason=None,
+            )
         if target_lang_mode == "ja":
-            return normalized_text
+            return CaptionTransformResult(
+                text=normalized_text,
+                status="passthrough",
+                fallback_reason=None,
+            )
 
         if target_lang_mode not in {"en", "easy-ja"}:
-            return normalized_text
+            return CaptionTransformResult(
+                text=normalized_text,
+                status="fallback",
+                fallback_reason="unsupported_target_lang_mode",
+            )
 
-        fallback = (
-            self._fallback_en
-            if target_lang_mode == "en"
-            else self._fallback_easy_ja
-        )
         if not self._validation.is_valid:
-            return fallback(normalized_text)
+            fallback_text = self._apply_local_fallback(
+                text=normalized_text,
+                target_lang_mode=target_lang_mode,
+            )
+            return CaptionTransformResult(
+                text=fallback_text,
+                status="fallback",
+                fallback_reason=self._validation.reason,
+            )
 
         prompt = (
             self._build_en_prompt(normalized_text)
@@ -113,15 +154,38 @@ class AzureOpenAILiveCaptionTransformService:
             transformed = await self._call_openai(prompt)
             cleaned = transformed.strip()
             if cleaned:
-                return cleaned
-        except Exception:  # noqa: BLE001
+                return CaptionTransformResult(
+                    text=cleaned,
+                    status="translated",
+                    fallback_reason=None,
+                )
+            fallback_reason = "llm_empty_response"
+        except CaptionTransformLLMError as exc:
+            fallback_reason = exc.reason
             logger.warning(
-                "caption_transform_failed mode=%s",
+                "caption_transform_failed mode=%s reason=%s",
                 target_lang_mode,
+                fallback_reason,
+                exc_info=True,
+            )
+        except Exception:  # noqa: BLE001
+            fallback_reason = "llm_unknown_error"
+            logger.warning(
+                "caption_transform_failed mode=%s reason=%s",
+                target_lang_mode,
+                fallback_reason,
                 exc_info=True,
             )
 
-        return fallback(normalized_text)
+        fallback_text = self._apply_local_fallback(
+            text=normalized_text,
+            target_lang_mode=target_lang_mode,
+        )
+        return CaptionTransformResult(
+            text=fallback_text,
+            status="fallback",
+            fallback_reason=fallback_reason,
+        )
 
     def _build_en_prompt(self, text: str) -> _PromptSpec:
         return _PromptSpec(
@@ -161,13 +225,7 @@ class AzureOpenAILiveCaptionTransformService:
 
     async def _call_openai(self, prompt: _PromptSpec) -> str:
         url = self._build_chat_completion_url()
-        payload = {
-            "messages": [
-                {"role": "system", "content": prompt.system},
-                {"role": "user", "content": prompt.user},
-            ],
-            "max_completion_tokens": 400,
-        }
+        payload = self._build_chat_completion_payload(prompt)
 
         body = json.dumps(payload).encode("utf-8")
         request = Request(
@@ -190,11 +248,34 @@ class AzureOpenAILiveCaptionTransformService:
             self._last_usage = extract_usage(response_json)
             return self._extract_content(response_json)
         except HTTPError as exc:
-            raise RuntimeError("caption transform http error") from exc
+            raise CaptionTransformLLMError(
+                reason="llm_http_error",
+                message="caption transform http error",
+            ) from exc
         except URLError as exc:
-            raise RuntimeError("caption transform network error") from exc
+            raise CaptionTransformLLMError(
+                reason="llm_network_error",
+                message="caption transform network error",
+            ) from exc
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError("caption transform parse error") from exc
+            raise CaptionTransformLLMError(
+                reason="llm_parse_error",
+                message="caption transform parse error",
+            ) from exc
+
+    def _build_chat_completion_payload(
+        self, prompt: _PromptSpec
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "messages": [
+                {"role": "system", "content": prompt.system},
+                {"role": "user", "content": prompt.user},
+            ],
+            "max_completion_tokens": 400,
+        }
+        if self._model.strip().lower().startswith("gpt-5"):
+            payload["reasoning_effort"] = "minimal"
+        return payload
 
     def _build_chat_completion_url(self) -> str:
         endpoint = self._validation.normalized_endpoint.rstrip("/")
@@ -241,6 +322,13 @@ class AzureOpenAILiveCaptionTransformService:
                 return "\n".join(text_parts)
 
         raise ValueError("missing content")
+
+    def _apply_local_fallback(self, *, text: str, target_lang_mode: str) -> str:
+        if target_lang_mode == "en":
+            return self._fallback_en(text)
+        if target_lang_mode == "easy-ja":
+            return self._fallback_easy_ja(text)
+        return text
 
     def _fallback_en(self, text: str) -> str:
         out = text

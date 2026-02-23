@@ -30,6 +30,76 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
+
+### Decision Summary
+
+- Target size: A0 portrait (`841 x 1189 mm`) for academic/technical showcase.
+- Grid system: 12-column master grid with modular rows to balance dense technical content and readability at 1-2m viewing distance.
+- Section structure fixed to:
+  - Background
+  - Objectives
+  - AI Usage (real-time captioning, Q&A, OCR)
+  - Results
+  - Future Plans
+- Architecture visuals should use one primary system diagram plus feature-specific mini-flows, with consistent icon and arrow semantics.
+- Color direction prioritizes technical clarity over decorative style:
+  - neutral light background
+  - blue-cyan primary tones
+  - limited warm accent for key metrics/callouts
+- Typography is optimized for large-format scanning with explicit role-based size tiers (title, section, body, caption).
+
+### Rationale
+
+- Technical poster audiences scan quickly first, then deep-read selected blocks; strong top-down hierarchy and predictable section order reduce cognitive load.
+- A single unified grid makes mixed content (text, charts, architecture diagrams, screenshots) easier to align and compare.
+- High-contrast but restrained colors improve readability under conference venue lighting and long viewing sessions.
+
+### Compatibility Rules
+
+- Diagram labels must use the same terminology as product/API naming (`captioning`, `qa`, `ocr`) to avoid interpretation mismatch.
+- Any screenshot or UI mock should align to grid columns; no floating unaligned visuals.
+- Accent color usage must remain <=10% of poster area to preserve emphasis.
+
+## PptxGenJS A0 Poster Generation Architecture (2026-02-23)
+
+### Decision Summary
+
+- Build a composition-first TypeScript module structure:
+  - `poster/layout.ts`: A0 constants, mm/inch conversion, safe-area and grid calculation.
+  - `poster/theme.ts`: color tokens, typography scale, and default shape/text styles.
+  - `poster/schema.ts`: JSON schema and runtime validator for poster content.
+  - `poster/components/*`: reusable render blocks (`header`, `section`, `text_block`, `figure`, `metric_card`, `footer`).
+  - `poster/renderer/*`: thin PptxGenJS adapters (`addText`, `addShape`, `addImage`) with guardrails.
+  - `poster/build.ts`: orchestration pipeline (`load -> validate -> layout -> render -> write`).
+  - `poster/cli.ts`: CLI entry for config path and output path.
+- Treat poster content as data (JSON), not imperative slide code, to keep presentation logic maintainable.
+- Standardize reusable component contract:
+  - `measure(block, ctx) -> Box`
+  - `render(block, ctx) -> void`
+  - optional `preflight(block, assets) -> ValidationResult`
+- Manage configuration with layered merge order:
+  - `defaults` -> `theme preset` -> `poster config` -> `CLI/env overrides`.
+- Keep PptxGenJS usage constrained to infrastructure layer:
+  - use `defineLayout` for A0 (`33.11 x 46.81 in`);
+  - use `defineSlideMaster` for static branding/backplate;
+  - write output via `writeFile()` in CLI and `write({ outputType: "nodebuffer" })` for tests.
+
+### Rationale
+
+- Data-driven rendering enables content-only updates without touching rendering code.
+- Renderer isolation reduces API-change blast radius and improves testability.
+- Measure/render split prevents overlap regressions on dense A0 layouts.
+- Layered config supports multiple poster variants while preserving shared standards.
+
+### Compatibility Rules
+
+- Centralize all coordinate math in `layout.ts`; do not hardcode dimensions in components.
+- Validate JSON schema before rendering and fail fast with human-readable errors.
+- Avoid deprecated PptxGenJS API aliases; prefer current enum names and option keys.
+- Images must preserve aspect ratio (`contain`/`crop`) and be checked for print-quality DPI.
+- Keep master slide content static; place dynamic research content only through components.
+
 ## Frontend Demo Simplification & Streaming-Ready UI (2026-02-22)
 
 ### Decision Summary
@@ -1797,7 +1867,199 @@ FastAPI Route (Depends)
 | Testing complexity (async timing, background worker behavior, SDK mocking) | High | Medium | Use Protocol-based fake observer + in-memory sink for unit tests, add failure-injection tests (timeout/network/queue-full), ensure `pytest-asyncio` cleanup of worker tasks per test, and run one integration test with real queue + fake transport. |
 | Data privacy leakage (PII in prompts/responses and trace attributes) | High | High | Default `capture_prompts/responses=false` in production, apply allowlist-based payload capture, redact known PII patterns before enqueue, hash user/session identifiers, and define retention/deletion policy aligned to compliance requirements. |
 
+## Live Subtitle Transform Fallback Signaling (2026-02-23)
+
+### Decision Summary
+
+- Expanded live subtitle transform contract to structured output:
+  - `transformed_text`
+  - `status` (`translated` | `fallback` | `passthrough`)
+  - `fallback_reason` (nullable)
+- Updated caption transform service to return structured result and reason-coded fallback states instead of opaque string-only output.
+- Added `reasoning_effort: "minimal"` for GPT-5 deployments in subtitle transform requests to reduce empty completion behavior.
+- Preserved local glossary fallback for `en` / `easy-ja`, but now expose fallback usage explicitly to frontend.
+- Frontend live transcript now:
+  - applies fallback text as display output
+  - shows throttled warning toast on fallback
+  - keeps a persistent "翻訳フォールバック中" badge in transcript header until language reset.
+- Added frontend runtime compatibility normalization for `/subtitle/transform`:
+  - if `status` is missing/invalid, infer `translated` only when output is non-empty and differs from source
+  - otherwise force `fallback` with `fallback_reason=missing_transform_status` to avoid silent Japanese lock-in.
+
+### Rationale
+
+- Users previously saw Japanese text in non-Japanese views with no explanation, making language switch appear broken.
+- Explicit fallback signaling keeps live UX continuous while making degradation observable and debuggable.
+- Structured API response keeps backward compatibility (`transformed_text` retained) while enabling richer client behavior.
+
+### Compatibility Rules
+
+- `/api/v4/lecture/subtitle/transform` must keep existing fields and append new status metadata; do not remove `transformed_text`.
+- Fallback status must not block subtitle rendering; it is a quality signal, not a hard error.
+- This change is scoped to subtitle transform flow only; other Azure OpenAI feature paths remain unchanged.
+- Frontend must treat malformed transform metadata (`status` missing/invalid or translated+empty text) as fallback-safe behavior.
+
 ### Changelog
 
+- 2026-02-23: Added live subtitle transform fallback signaling design (structured transform status, GPT-5 reasoning-effort control, and frontend fallback visibility).
+- 2026-02-23: Added subtitle transform response compatibility guard in frontend to absorb missing/invalid `status` and prevent silent non-Japanese-view failures.
+- 2026-02-23: Runtime operation switched subtitle transform Azure deployment to `gpt-4.1-nano` (`api-version=2025-01-01-preview`) to mitigate persistent fallback behavior.
+- 2026-02-23: Added PptxGenJS A0 poster generation implementation plan with task breakdown, dependencies, and risk mitigation.
+- 2026-02-23: Added PptxGenJS A0 poster generation architecture (module boundaries, JSON schema approach, reusable component contracts, and layered configuration strategy).
+- 2026-02-23: Added A0 technical poster layout decision for SIT Copilot (grid, hierarchy, section flow, visual/diagram strategy, and color/typography direction).
 - 2026-02-22: Added WandB Weave observer architecture for FastAPI with Protocol/Noop patterns, async isolation, local/cloud support, and TDD-first rollout.
 - 2026-02-22: Added Weave async risk matrix (likelihood/impact + concrete mitigations) for performance, memory, isolation, Azure deployment, testing, and privacy.
+
+---
+
+## Poster Creation Implementation Plan (2026-02-23)
+
+### Project: SIT Copilot A0 Poster for AI Innovators Cup
+
+**Goal**: Create presentation-quality A0 poster using PptxGenJS showcasing SIT Copilot for competition.
+
+### Implementation Tasks
+
+| Phase | Task | Description | Dependencies | Effort |
+|-------|------|-------------|--------------|--------|
+| **1. Setup** | 1.1 Initialize TypeScript project | `poster-gen/` dir, package.json, tsconfig, pnpm | None | 30m |
+| | 1.2 Install PptxGenJS | Add `pptxgenjs` and type definitions | 1.1 | 10m |
+| | 1.3 Configure build | Vite or tsx for dev, npm scripts | 1.1 | 20m |
+| **2. Foundation** | 2.1 Implement layout module | A0 constants, mm→inch, grid system (12-col) | 1.2 | 1h |
+| | 2.2 Implement theme tokens | Color palette, typography scale, spacing | None | 45m |
+| | 2.3 Create schema validator | JSON schema + Zod runtime validation | 1.2 | 45m |
+| **3. Components** | 3.1 Build primitive renderers | text-block, shape-block, image-block wrappers | 2.1, 2.2 | 1.5h |
+| | 3.2 Build section component | Container with title, background, grid area | 3.1 | 1h |
+| | 3.3 Build header component | Title, subtitle, authors, logo, QR code | 3.1 | 1h |
+| | 3.4 Build metric-card component | KPI display with accent styling | 3.1 | 45m |
+| | 3.5 Build figure component | Image with caption, fit modes | 3.1 | 45m |
+| **4. Content** | 4.1 Create poster JSON schema | Define content structure for SIT Copilot | 2.3 | 1h |
+| | 4.2 Write poster content JSON | Fill in background, objectives, AI usage, results | 4.1 | 2h |
+| | 4.3 Create architecture diagram | SVG/diagram for system architecture | None | 2h |
+| **5. Integration** | 5.1 Build poster renderer | Orchestrate all components, layout engine | 3.x, 4.2 | 1.5h |
+| | 5.2 Add CLI entry point | Config path, output path, validation | 5.1 | 45m |
+| | 5.3 Create preview script | Generate PPTX and open for review | 5.2 | 30m |
+| **6. Polish** | 6.1 Visual refinement | Adjust spacing, alignment, contrast | 5.3 | 1h |
+| | 6.2 Print preparation | Verify DPI, bleed, export to PDF | 6.1 | 30m |
+| | 6.3 Final review | Competition requirements checklist | 6.2 | 30m |
+
+**Total Estimated Effort**: ~16-18 hours
+
+### Task Dependencies
+
+```
+Phase 1 (Setup)
+    ↓
+Phase 2 (Foundation)
+    ↓
+Phase 3 (Components) ← Phase 4 (Content, can be parallel)
+    ↓           ↓
+Phase 5 (Integration)
+    ↓
+Phase 6 (Polish)
+```
+
+### Risk Mitigation
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| PptxGenJS API limitations | Medium | Medium | Prototype early with text/shapes; verify A0 support |
+| Font rendering issues | Medium | High | Use system fonts; test Japanese text early |
+| Diagram creation bottleneck | High | Medium | Use simple flowchart libraries or manual SVG |
+| Content doesn't fit A0 | Low | High | Grid system prevents overflow; early preview |
+| Print quality issues | Low | High | Verify DPI >300; use vector graphics |
+| Competition req changes | Low | Medium | Keep content in JSON for easy updates |
+
+### File Structure (Final)
+
+```
+poster-gen/
+├── package.json
+├── tsconfig.json
+├── src/
+│   ├── app/
+│   │   ├── build-poster.ts       # Main entry
+│   │   └── cli.ts                # CLI interface
+│   ├── domain/
+│   │   ├── poster-schema.ts      # Type definitions
+│   │   └── validator.ts          # Zod validation
+│   ├── layout/
+│   │   ├── a0.ts                 # A0 dimensions, grid
+│   │   └── placement.ts          # Auto-layout logic
+│   ├── theme/
+│   │   ├── tokens.ts             # Design tokens
+│   │   └── presets/
+│   │       └── tech-blue.ts      # SIT Copilot theme
+│   ├── components/
+│   │   ├── header.ts
+│   │   ├── section.ts
+│   │   ├── text-block.ts
+│   │   ├── figure-block.ts
+│   │   ├── metric-card.ts
+│   │   ├── footer.ts
+│   │   └── registry.ts           # Component registry
+│   ├── renderer/
+│   │   ├── pptx-factory.ts       # PptxGenJS initialization
+│   │   ├── master.ts             # Slide master
+│   │   ├── primitives-text.ts
+│   │   ├── primitives-shape.ts
+│   │   ├── primitives-image.ts
+│   │   └── poster-renderer.ts
+│   ├── config/
+│   │   ├── default.json
+│   │   └── loader.ts
+│   └── infra/
+│       ├── asset-loader.ts
+│       └── logger.ts
+├── posters/
+│   └── sit-2026-a0.json          # Poster content
+├── assets/
+│   ├── images/
+│   │   ├── logo.png
+│   │   └── architecture-diagram.svg
+│   └── icons/
+└── dist/
+    └── sit-copilot-a0.pptx        # Output
+```
+
+### Content Schema Example
+
+```typescript
+interface PosterContent {
+  version: string;
+  posterId: string;
+  page: {
+    size: "A0";
+    orientation: "portrait";
+    grid: { columns: 12; gutterMm: 6; rowMm: 8 };
+  };
+  theme: {
+    preset: "tech-blue";
+    fontFamilyJa: "Noto Sans JP";
+  };
+  header: {
+    title: string;
+    subtitle: string;
+    authors: Array<{ name: string; affiliation: string }>;
+    logo?: string;
+    qrCode?: string;
+  };
+  sections: Array<{
+    id: string;
+    title: string;
+    area: { colStart: number; colSpan: number; rowStart: number; rowSpan: number };
+    blocks: Array<TextBlock | ImageBlock | ShapeBlock | MetricBlock>;
+  }>;
+}
+```
+
+### Success Criteria
+
+- [ ] Poster generates as A0 PPTX file
+- [ ] All sections visible and properly aligned
+- [ ] Japanese text renders correctly
+- [ ] Architecture diagram is clear and readable
+- [ ] QR code for demo video is included
+- [ ] Color contrast meets accessibility standards
+- [ ] Content covers all competition requirements
+- [ ] File size is reasonable for printing (<50MB)

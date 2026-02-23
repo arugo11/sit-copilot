@@ -9,6 +9,9 @@ export function TranscriptPanel() {
   const autoScroll = useLiveSessionStore((state) => state.autoScroll)
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
   const density = useLiveSessionStore((state) => state.transcriptDensity)
+  const translationFallbackActive = useLiveSessionStore(
+    (state) => state.translationFallbackActive
+  )
   const setAutoScroll = useLiveSessionStore((state) => state.setAutoScroll)
   const switchLanguage = useLiveSessionStore((state) => state.switchLanguage)
   const setTranscriptDensity = useLiveSessionStore((state) => state.setTranscriptDensity)
@@ -73,6 +76,9 @@ export function TranscriptPanel() {
           />
           自動スクロール
         </label>
+        {selectedLanguage !== 'ja' && translationFallbackActive && (
+          <span className="badge badge-warning">翻訳フォールバック中</span>
+        )}
       </div>
 
       <div ref={panelRef} className="flex-1 overflow-y-auto p-4 space-y-3" onScroll={handleScroll}>
@@ -115,6 +121,12 @@ export function TranscriptPanel() {
                         ? line.translatedText
                         : line.sourceLangText}
                     </p>
+                    {line.translatedLangMode === selectedLanguage &&
+                      line.translationStatus === 'fallback' && (
+                      <p className="text-xs text-warning mt-1">
+                        翻訳フォールバック表示中
+                      </p>
+                    )}
                     {line.translatedLangMode !== selectedLanguage && (
                       <p className="text-xs text-fg-secondary mt-1">翻訳生成待機中（原文表示）</p>
                     )}

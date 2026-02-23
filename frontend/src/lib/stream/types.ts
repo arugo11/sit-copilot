@@ -17,6 +17,7 @@ export interface TranscriptLine {
   originalLangText?: string
   translatedText?: string
   translatedLangMode?: 'easy-ja' | 'en'
+  translationStatus?: 'translated' | 'fallback' | 'passthrough'
   correctionStatus?: 'pending' | 'reviewed' | 'review_failed'
   confidence?: number
   isPartial: boolean

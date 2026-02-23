@@ -23,6 +23,7 @@ interface LiveSessionStore extends LiveUiState {
   assistTerms: AssistTermPayload[]
   sessionId: string | null
   langMode: 'ja' | 'easy-ja' | 'en'
+  translationFallbackActive: boolean
   setConnection: (connection: ConnectionState) => void
   setAutoScroll: (autoScroll: boolean) => void
   setCameraEnabled: (enabled: boolean) => void
@@ -42,12 +43,14 @@ interface LiveSessionStore extends LiveUiState {
   applyTranslationFinal: (
     lineId: string,
     translatedText: string,
-    translatedLangMode: 'easy-ja' | 'en'
+    translatedLangMode: 'easy-ja' | 'en',
+    translationStatus?: 'translated' | 'fallback' | 'passthrough'
   ) => void
   pushSourceFrame: (frame: SourceFrame) => void
   pushSourceOcr: (ocr: SourceOcrChunk) => void
   setAssistSummary: (summary: AssistSummaryPayload) => void
   setAssistTerms: (terms: AssistTermPayload[]) => void
+  setTranslationFallbackActive: (active: boolean) => void
   summaryEnabled: boolean
   keytermsEnabled: boolean
   toggleSummary: () => void
@@ -78,6 +81,7 @@ const initialState: Pick<
   | 'assistTerms'
   | 'sessionId'
   | 'langMode'
+  | 'translationFallbackActive'
   | 'summaryEnabled'
   | 'keytermsEnabled'
 > = {
@@ -97,6 +101,7 @@ const initialState: Pick<
   assistTerms: [],
   sessionId: null,
   langMode: 'ja',
+  translationFallbackActive: false,
   summaryEnabled: false,
   keytermsEnabled: false,
 }
@@ -111,6 +116,8 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
   setTranscriptDensity: (transcriptDensity) => set({ transcriptDensity }),
   setLeftPanelMode: (leftPanelMode) => set({ leftPanelMode }),
   setSessionId: (sessionId) => set({ sessionId }),
+  setTranslationFallbackActive: (translationFallbackActive) =>
+    set({ translationFallbackActive }),
 
   setLangMode: async (langMode) => {
     const { sessionId } = get()
@@ -130,7 +137,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
 
   switchLanguage: async (langMode) => {
     const { sessionId, selectedLanguage, langMode: previousLangMode } = get()
-    set({ selectedLanguage: langMode, langMode })
+    set({ selectedLanguage: langMode, langMode, translationFallbackActive: false })
 
     if (!sessionId) {
       return
@@ -165,6 +172,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         // regardless of payload shape.
         translatedText: existing?.translatedText ?? line.translatedText,
         translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
+        translationStatus: existing?.translationStatus ?? line.translationStatus,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
@@ -184,6 +192,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         // Preserve existing translation — see applyTranscriptPartial comment.
         translatedText: existing?.translatedText ?? line.translatedText,
         translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
+        translationStatus: existing?.translationStatus ?? line.translationStatus,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
@@ -248,7 +257,12 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       return { transcriptLines: updatedLines }
     }),
 
-  applyTranslationFinal: (lineId, translatedText, translatedLangMode) =>
+  applyTranslationFinal: (
+    lineId,
+    translatedText,
+    translatedLangMode,
+    translationStatus = 'translated'
+  ) =>
     set((state) => {
       let changed = false
       const updatedLines = state.transcriptLines.map((line) => {
@@ -258,13 +272,19 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
 
         if (
           line.translatedText === translatedText &&
-          line.translatedLangMode === translatedLangMode
+          line.translatedLangMode === translatedLangMode &&
+          line.translationStatus === translationStatus
         ) {
           return line
         }
 
         changed = true
-        return { ...line, translatedText, translatedLangMode }
+        return {
+          ...line,
+          translatedText,
+          translatedLangMode,
+          translationStatus,
+        }
       })
 
       if (!changed) {
@@ -322,5 +342,6 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       cameraEnabled: false,
       sessionId: null,
       langMode: 'ja',
+      translationFallbackActive: false,
     }),
 }))

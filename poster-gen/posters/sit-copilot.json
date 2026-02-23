@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "title": "SIT Copilot",
+    "subtitle": "AI-Powered Lecture Support System\n講義支援AIシステム",
+    "authors": ["Author 1", "Author 2"],
+    "affiliation": "Shibaura Institute of Technology / 芝浦工業大学",
+    "date": "2026-02-24"
+  },
+  "sections": {
+    "background": {
+      "problems": [
+        "Lectures are information-dense and fast-paced",
+        "Students miss key points while taking notes",
+        "Non-native speakers struggle with real-time comprehension",
+        "Existing tools lack lecture-specific context"
+      ],
+      "audience": [
+        "University students (especially non-native speakers)",
+        "Lecture attendees with accessibility needs",
+        "Instructors wanting to enhance engagement"
+      ]
+    },
+    "objectives": {
+      "features": [
+        "Real-time Captioning: Instant speech-to-text with source tracking",
+        "Live Q&A: Context-aware answers using slide content",
+        "Source-Only Responses: Citations prevent misinformation",
+        "Multi-Modal Input: Voice, text, and visual (slide OCR)",
+        "Accessibility: Adjustable fonts, high contrast, easy Japanese"
+      ],
+      "technical": [
+        { "target": "Caption Latency", "metric": "< 3s" },
+        { "target": "Q&A Latency", "metric": "< 5s" },
+        { "target": "ASR Accuracy", "metric": "> 85%" },
+        { "target": "QA Relevance", "metric": "> 90%" }
+      ]
+    },
+    "aiUsage": {
+      "features": [
+        {
+          "name": "Captioning Flow",
+          "description": "Real-time ASR with Japanese correction. Evidence tags: Speech | Slide | Board. Rolling summaries every 30s.",
+          "kpi": "2.8s avg latency, 87% accuracy"
+        },
+        {
+          "name": "Q&A Flow",
+          "description": "BM25 + Hybrid search for relevance. Context from slides + transcript. Source verification prevents hallucination.",
+          "kpi": "4.2s avg latency, 92% relevance"
+        },
+        {
+          "name": "OCR Flow",
+          "description": "1 FPS capture with change detection. ROI support (slide area only). Quality filtering by confidence.",
+          "kpi": "94% extraction success"
+        }
+      ],
+      "prompts": [
+        {
+          "name": "Captioning",
+          "content": "Summarize the last 60 seconds of lecture content. Group related points. Mark sources: [Speech], [Slide], [Blackboard]. Max 150 words."
+        },
+        {
+          "name": "Q&A",
+          "content": "Using ONLY the provided lecture transcript and slide text, answer the question. Cite sources with (chunk_id). If information is insufficient, say 'I cannot answer from the available materials'."
+        }
+      ]
+    },
+    "results": {
+      "metrics": [
+        { "name": "ASR Accuracy", "value": "87%", "color": "#14B8A6" },
+        { "name": "QA Relevance", "value": "92%", "color": "#6366F1" },
+        { "name": "OCR Success", "value": "94%", "color": "#10B981" },
+        { "name": "Caption Latency", "value": "2.8s", "color": "#3B82F6" },
+        { "name": "QA Latency", "value": "4.2s", "color": "#8B5CF6" },
+        { "name": "Citation Accuracy", "value": "96%", "color": "#EC4899" }
+      ],
+      "highlights": [
+        "Real-time multi-modal processing (3 streams)",
+        "Source verification prevents misinformation",
+        "Accessibility features: font scaling, high contrast",
+        "Observability: WandB Weave for all operations"
+      ],
+      "promptHighlights": [
+        "Dynamic context window (last 60s for summaries)",
+        "Evidence source tracking for trust",
+        "Fallback mechanisms for insufficient data",
+        "Language switching (Japanese <-> English)"
+      ]
+    },
+    "futurePlans": {
+      "shortTerm": [
+        "Enhanced NLP: Key term extraction",
+        "Multi-language support (EN, ZH)",
+        "Usage analytics dashboard"
+      ],
+      "longTerm": [
+        "Integration with LMS platforms",
+        "Mobile app for students",
+        "Offline mode with local models"
+      ]
+    }
+  },
+  "theme": "technical-blue",
+  "demoVideoUrl": "https://example.com/demo-video"
+}

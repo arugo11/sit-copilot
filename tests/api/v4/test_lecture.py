@@ -1585,6 +1585,53 @@ async def test_post_lecture_subtitle_transform_returns_transformed_text(
     assert body["target_lang_mode"] == "easy-ja"
     assert isinstance(body["transformed_text"], str)
     assert body["transformed_text"].strip() != ""
+    assert body["status"] in {"translated", "fallback"}
+    if body["status"] == "fallback":
+        assert isinstance(body["fallback_reason"], str)
+        assert body["fallback_reason"]
+    else:
+        assert body["fallback_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_subtitle_transform_returns_passthrough_for_ja(
+    async_client: AsyncClient,
+) -> None:
+    """POST /lecture/subtitle/transform should passthrough ja mode."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+    source_text = "この式は分散の定義です。"
+
+    response = await async_client.post(
+        "/api/v4/lecture/subtitle/transform",
+        json={
+            "session_id": session_id,
+            "text": source_text,
+            "target_lang_mode": "ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["target_lang_mode"] == "ja"
+    assert body["transformed_text"] == source_text
+    assert body["status"] == "passthrough"
+    assert body["fallback_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -1849,3 +1896,9 @@ async def test_post_lecture_subtitle_transform_returns_en_text(
     assert isinstance(body["transformed_text"], str)
     assert body["transformed_text"].strip() != ""
     assert body["transformed_text"] != source_text
+    assert body["status"] in {"translated", "fallback"}
+    if body["status"] == "fallback":
+        assert isinstance(body["fallback_reason"], str)
+        assert body["fallback_reason"]
+    else:
+        assert body["fallback_reason"] is None

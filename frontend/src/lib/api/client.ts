@@ -117,6 +117,8 @@ export interface SubtitleTransformResponse {
   session_id: string
   target_lang_mode: 'ja' | 'easy-ja' | 'en'
   transformed_text: string
+  status: 'translated' | 'fallback' | 'passthrough'
+  fallback_reason?: string | null
 }
 
 export interface SubtitleAuditRequest {

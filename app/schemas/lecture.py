@@ -10,6 +10,7 @@ LectureVisualSource = Literal["slide", "board"]
 VisualEventQuality = Literal["good", "warn", "bad"]
 LectureEvidenceType = Literal["speech", "slide", "board"]
 ReviewStatus = Literal["reviewed", "review_failed"]
+SubtitleTransformStatus = Literal["translated", "fallback", "passthrough"]
 
 MAX_SESSION_ID_LENGTH = 64
 MAX_TEXT_LENGTH = 5000
@@ -137,6 +138,8 @@ class SubtitleTransformResponse(BaseModel):
     session_id: str
     target_lang_mode: LangMode
     transformed_text: str
+    status: SubtitleTransformStatus
+    fallback_reason: str | None = None
 
 
 class SubtitleAuditRequest(BaseModel):

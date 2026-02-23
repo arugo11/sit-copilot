@@ -1,0 +1,49 @@
+# Architecture Diagram
+
+This directory should contain images for the poster.
+
+## architecture-diagram.png
+
+The architecture diagram shows the multi-modal integration flow:
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Speech     │     │    Slide     │     │  Question    │
+│  (Azure SDK) │     │   (Vision)   │     │   (Text)     │
+└──────┬───────┘     └──────┬───────┘     └──────┬───────┘
+       │                    │                     │
+       ▼                    ▼                     │
+┌──────────────┐     ┌──────────────┐             │
+│     ASR      │     │     OCR      │             │
+│  (Japanese)  │     │  (Extraction)│             │
+└──────┬───────┘     └──────┬───────┘             │
+       │                    │                     │
+       └────────┬───────────┘                     │
+                │                                 │
+                ▼                                 │
+       ┌──────────────────┐                      │
+       │   Azure AI       │                      │
+       │    Search        │                      │
+       │  (Hybrid + Vec)  │                      │
+       └────────┬─────────┘                      │
+                │                                 │
+                ▼                                 │
+       ┌──────────────────┐                      │
+       │  Azure OpenAI    │◄─────────────────────┘
+       │   (GPT-4o)       │
+       └────────┬─────────┘
+                │
+       ┌────────┴────────┐
+       ▼                 ▼
+┌──────────┐      ┌──────────┐
+│ Caption  │      │  Answer  │
+│ Summary  │      │  (with   │
+│(Source- │      │ Source)  │
+│  tagged) │      └──────────┘
+└──────────┘
+```
+
+To create the actual image:
+1. Use diagrams.net (draw.io), Lucidchart, or similar tool
+2. Export as PNG at 300 DPI minimum
+3. Save as `architecture-diagram.png` in this directory

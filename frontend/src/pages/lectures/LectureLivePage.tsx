@@ -22,6 +22,20 @@ import { demoApi, getApiErrorMessage } from '@/lib/api/client'
 const SUMMARY_TRIGGER_CHUNK_COUNT = 3
 const ERROR_TOAST_THROTTLE_MS = 5000
 
+type SubtitleTransformResult = {
+  text: string
+  status: 'translated' | 'fallback' | 'passthrough'
+  fallbackReason: string | null
+}
+
+function isSubtitleTransformStatus(
+  value: unknown
+): value is SubtitleTransformResult['status'] {
+  return (
+    value === 'translated' || value === 'fallback' || value === 'passthrough'
+  )
+}
+
 function sanitizeTranslatedText(
   text: string,
   mode: 'ja' | 'easy-ja' | 'en'
@@ -61,6 +75,9 @@ export function LectureLivePage() {
   const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
   const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
   const setAssistTerms = useLiveSessionStore((state) => state.setAssistTerms)
+  const setTranslationFallbackActive = useLiveSessionStore(
+    (state) => state.setTranslationFallbackActive
+  )
   const hydrateFromSettings = useLiveSessionStore((state) => state.hydrateFromSettings)
   const resetLiveData = useLiveSessionStore((state) => state.resetLiveData)
   const autoStartAttemptedRef = useRef(false)
@@ -68,6 +85,97 @@ export function LectureLivePage() {
   const previousConnectionRef = useRef(connection)
   const lastReconnectToastAtRef = useRef(0)
   const lastErrorToastAtRef = useRef(0)
+  const lastTranslationFallbackToastAtRef = useRef(0)
+
+  const notifyTranslationFallback = useCallback(
+    (mode: 'easy-ja' | 'en', reason: string | null) => {
+      const nowMs = Date.now()
+      if (
+        nowMs - lastTranslationFallbackToastAtRef.current <
+        ERROR_TOAST_THROTTLE_MS
+      ) {
+        return
+      }
+      lastTranslationFallbackToastAtRef.current = nowMs
+      showToast({
+        variant: 'warning',
+        title: '翻訳フォールバック',
+        message:
+          mode === 'en'
+            ? 'English view の翻訳が不安定なため、フォールバック表示に切り替えました。'
+            : 'やさしい日本語の変換が不安定なため、フォールバック表示に切り替えました。',
+      })
+      console.warn('[subtitle-translation] fallback in use', {
+        sessionId,
+        mode,
+        reason,
+      })
+    },
+    [sessionId, showToast]
+  )
+
+  const transformSubtitleForMode = useCallback(
+    async (
+      text: string,
+      mode: 'ja' | 'easy-ja' | 'en'
+    ): Promise<SubtitleTransformResult> => {
+      const normalizedText = text.trim()
+      if (!normalizedText || mode === 'ja') {
+        return {
+          text: normalizedText,
+          status: 'passthrough',
+          fallbackReason: null,
+        }
+      }
+
+      try {
+        const transformed = await demoApi.transformSubtitle({
+          session_id: sessionId,
+          text: normalizedText,
+          target_lang_mode: mode,
+        })
+        const sanitized = sanitizeTranslatedText(
+          transformed.transformed_text || '',
+          mode
+        )
+        if (!isSubtitleTransformStatus(transformed.status)) {
+          const inferredTranslated =
+            sanitized.length > 0 && sanitized !== normalizedText
+          return {
+            text: sanitized || normalizedText,
+            status: inferredTranslated ? 'translated' : 'fallback',
+            fallbackReason: inferredTranslated
+              ? null
+              : 'missing_transform_status',
+          }
+        }
+        if (transformed.status === 'translated' && !sanitized) {
+          return {
+            text: normalizedText,
+            status: 'fallback',
+            fallbackReason: 'empty_transformed_text',
+          }
+        }
+        return {
+          text: sanitized || normalizedText,
+          status: transformed.status,
+          fallbackReason: transformed.fallback_reason ?? null,
+        }
+      } catch (error) {
+        console.warn('[subtitle-translation] request failed', {
+          sessionId,
+          mode,
+          error,
+        })
+        return {
+          text: normalizedText,
+          status: 'fallback',
+          fallbackReason: 'client_request_failed',
+        }
+      }
+    },
+    [sessionId]
+  )
 
   const handleSpeechResult = useCallback(
     async (transcript: string, isFinal: boolean) => {
@@ -157,26 +265,19 @@ export function LectureLivePage() {
         // やさしい日本語・英語は、補正後テキスト（存在する場合）を翻訳元にする
         const currentMode = useLiveSessionStore.getState().selectedLanguage
         if (currentMode !== 'ja') {
-          try {
-            const transformed = await demoApi.transformSubtitle({
-              session_id: sessionId,
-              text: transcriptForAssist,
-              target_lang_mode: currentMode,
-            })
-            const translated = sanitizeTranslatedText(
-              transformed.transformed_text || '',
-              currentMode
-            )
-            // Only apply if the backend returned a non-empty translation.
-            if (translated) {
-              applyTranslationFinal(ingested.event_id, translated, currentMode)
-            }
-          } catch (translationError) {
-            console.warn('[subtitle-translation] post-correction transform failed', {
-              sessionId,
-              eventId: ingested.event_id,
-              error: translationError,
-            })
+          const transformed = await transformSubtitleForMode(
+            transcriptForAssist,
+            currentMode
+          )
+          applyTranslationFinal(
+            ingested.event_id,
+            transformed.text,
+            currentMode,
+            transformed.status
+          )
+          if (transformed.status === 'fallback') {
+            setTranslationFallbackActive(true)
+            notifyTranslationFallback(currentMode, transformed.fallbackReason)
           }
         }
 
@@ -260,7 +361,11 @@ export function LectureLivePage() {
       replaceTranscriptLineText,
       setTranscriptCorrectionStatus,
       showToast,
+      setAssistSummary,
       setAssistTerms,
+      setTranslationFallbackActive,
+      notifyTranslationFallback,
+      transformSubtitleForMode,
     ]
   )
 
@@ -273,31 +378,6 @@ export function LectureLivePage() {
 
   // 仕様: 入力は常に日本語ASR。表示言語(ja/easy-ja/en)とは独立させる。
   const speechRecognitionLang = 'ja-JP'
-
-  const transformSubtitleForMode = useCallback(
-    async (text: string, mode: 'ja' | 'easy-ja' | 'en'): Promise<string> => {
-      if (mode === 'ja') {
-        return text
-      }
-
-      try {
-        const transformed = await demoApi.transformSubtitle({
-          session_id: sessionId,
-          text,
-          target_lang_mode: mode,
-        })
-        // Return the transformed text, or empty string if the API returned
-        // nothing. Callers compare with source text to detect fallbacks.
-        return sanitizeTranslatedText(transformed.transformed_text || '', mode)
-      } catch {
-        // Return empty string on failure so callers know translation failed
-        // (rather than returning the Japanese source text and pretending
-        // it's a valid translation).
-        return ''
-      }
-    },
-    [sessionId]
-  )
 
   const { isSupported: speechSupported, startListening, stopListening } =
     useSpeechRecognition({
@@ -390,19 +470,27 @@ export function LectureLivePage() {
           const existingLine = useLiveSessionStore.getState().transcriptLines.find(
             (l) => l.id === event.payload.id
           )
-          if (existingLine?.translatedLangMode === currentMode) {
+          if (
+            existingLine?.translatedLangMode === currentMode &&
+            existingLine.translationStatus !== 'fallback'
+          ) {
             return
           }
           void (async () => {
-            const translated = await transformSubtitleForMode(
+            const transformed = await transformSubtitleForMode(
               event.payload.sourceLangText,
               currentMode
             )
-            // Don't mark as translated if empty (API failure)
-            if (!translated.trim()) {
-              return
+            applyTranslationFinal(
+              event.payload.id,
+              transformed.text,
+              currentMode,
+              transformed.status
+            )
+            if (transformed.status === 'fallback') {
+              setTranslationFallbackActive(true)
+              notifyTranslationFallback(currentMode, transformed.fallbackReason)
             }
-            applyTranslationFinal(event.payload.id, translated, currentMode)
           })()
         }
       }),
@@ -452,8 +540,11 @@ export function LectureLivePage() {
     setAssistTerms,
     setConnection,
     setSessionId,
+    setTranslationFallbackActive,
     showToast,
     stopRecording,
+    notifyTranslationFallback,
+    transformSubtitleForMode,
   ])
 
   useEffect(() => {
@@ -462,6 +553,13 @@ export function LectureLivePage() {
     }
     showToast({ variant: 'danger', title: 'マイクエラー', message: lastError })
   }, [lastError, showToast])
+
+  useEffect(() => {
+    if (selectedLanguage !== 'ja') {
+      return
+    }
+    setTranslationFallbackActive(false)
+  }, [selectedLanguage, setTranslationFallbackActive])
 
   useEffect(() => {
     if (selectedLanguage === 'ja') {
@@ -476,24 +574,34 @@ export function LectureLivePage() {
     }
 
     lines.forEach((line) => {
-      if (line.translatedLangMode === selectedLanguage) {
+      if (
+        line.translatedLangMode === selectedLanguage &&
+        line.translationStatus !== 'fallback'
+      ) {
         return
       }
       void (async () => {
-        const translated = await transformSubtitleForMode(
+        const transformed = await transformSubtitleForMode(
           line.sourceLangText,
           selectedLanguage
         )
-        // Don't mark as "translated" if empty (API failure).
-        if (!translated.trim()) {
-          return
+        applyTranslationFinal(
+          line.id,
+          transformed.text,
+          selectedLanguage,
+          transformed.status
+        )
+        if (transformed.status === 'fallback') {
+          setTranslationFallbackActive(true)
+          notifyTranslationFallback(selectedLanguage, transformed.fallbackReason)
         }
-        applyTranslationFinal(line.id, translated, selectedLanguage)
       })()
     })
   }, [
     applyTranslationFinal,
+    notifyTranslationFallback,
     selectedLanguage,
+    setTranslationFallbackActive,
     transformSubtitleForMode,
   ])
 
