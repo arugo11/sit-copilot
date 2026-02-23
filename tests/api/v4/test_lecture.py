@@ -1298,6 +1298,48 @@ async def test_delete_lecture_session_auto_finalizes_live_session(
 
 
 @pytest.mark.asyncio
+async def test_delete_lecture_session_accepts_legacy_ended_status(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Delete endpoint should remove legacy ended session rows."""
+    session_id = "lec_legacy_ended_001"
+    async with session_factory() as session:
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="demo_user",
+                course_id=None,
+                course_name="統計学基礎",
+                lang_mode="ja",
+                status="ended",
+                camera_enabled=True,
+                slide_roi=[100, 80, 900, 520],
+                board_roi=[80, 560, 920, 980],
+                consent_acknowledged=True,
+            )
+        )
+        await session.commit()
+
+    response = await async_client.delete(
+        f"/api/v4/lecture/session/{session_id}",
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["session_id"] == session_id
+    assert body["status"] == "deleted"
+    assert body["auto_finalized"] is False
+
+    async with session_factory() as session:
+        session_result = await session.execute(
+            select(LectureSession).where(LectureSession.id == session_id)
+        )
+    assert session_result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
 async def test_delete_lecture_session_for_other_user_returns_404(
     async_client: AsyncClient,
 ) -> None:

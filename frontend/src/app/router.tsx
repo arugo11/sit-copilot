@@ -4,15 +4,13 @@
  */
 
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { Navigate, createBrowserRouter, RouterProvider } from 'react-router-dom'
 
 // Lazy load pages for code splitting
 const LandingPage = lazy(() => import('@/pages/landing/LandingPage').then(m => ({ default: m.LandingPage })))
 const LecturesPage = lazy(() => import('@/pages/lectures/LecturesPage').then(m => ({ default: m.LecturesPage })))
 const LectureLivePage = lazy(() => import('@/pages/lectures/LectureLivePage').then(m => ({ default: m.LectureLivePage })))
-const LectureReviewPage = lazy(() => import('@/pages/lectures/LectureReviewPage').then(m => ({ default: m.LectureReviewPage })))
 const LectureSourcesPage = lazy(() => import('@/pages/lectures/LectureSourcesPage').then(m => ({ default: m.LectureSourcesPage })))
-const LectureQAPage = lazy(() => import('@/pages/lectures/LectureQAPage').then(m => ({ default: m.LectureQAPage })))
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const ProcedurePage = lazy(() => import('@/pages/procedure/ProcedurePage').then(m => ({ default: m.ProcedurePage })))
 const ReadinessCheckPage = lazy(() => import('@/pages/readiness/ReadinessCheckPage').then(m => ({ default: m.ReadinessCheckPage })))
@@ -46,7 +44,7 @@ const router = createBrowserRouter([
   },
   {
     path: '/lectures/:id/review',
-    element: <LectureReviewPage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '/lectures/:id/sources',
@@ -54,11 +52,11 @@ const router = createBrowserRouter([
   },
   {
     path: '/lecture/:session_id/qa',
-    element: <LectureQAPage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '/lectures/:id/qa',
-    element: <LectureQAPage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '/settings',

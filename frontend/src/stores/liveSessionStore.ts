@@ -14,6 +14,25 @@ import type {
 
 const MAX_HISTORY = 10
 
+function assignSubtitleSerials(lines: TranscriptLine[]): TranscriptLine[] {
+  let serial = 0
+  return lines.map((line) => {
+    if (line.isPartial) {
+      return line
+    }
+
+    serial += 1
+    if (line.subtitleSerial === serial) {
+      return line
+    }
+
+    return {
+      ...line,
+      subtitleSerial: serial,
+    }
+  })
+}
+
 interface LiveSessionStore extends LiveUiState {
   cameraEnabled: boolean
   sourceFrames: SourceFrame[]
@@ -173,6 +192,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         translatedText: existing?.translatedText ?? line.translatedText,
         translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
         translationStatus: existing?.translationStatus ?? line.translationStatus,
+        subtitleSerial: existing?.subtitleSerial,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
@@ -193,12 +213,16 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         translatedText: existing?.translatedText ?? line.translatedText,
         translatedLangMode: existing?.translatedLangMode ?? line.translatedLangMode,
         translationStatus: existing?.translationStatus ?? line.translationStatus,
+        subtitleSerial: existing?.subtitleSerial,
         originalLangText:
           line.originalLangText ?? existing?.originalLangText ?? line.sourceLangText,
       }
       const without = state.transcriptLines.filter((item) => item.id !== line.id)
+      const sortedLines = [...without, mergedLine].sort(
+        (a, b) => a.tsStartMs - b.tsStartMs
+      )
       return {
-        transcriptLines: [...without, mergedLine].sort((a, b) => a.tsStartMs - b.tsStartMs),
+        transcriptLines: assignSubtitleSerials(sortedLines),
         transcriptLagMs: 120,
       }
     }),

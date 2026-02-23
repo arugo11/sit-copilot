@@ -485,6 +485,50 @@ async def test_delete_session_auto_finalizes_and_removes_related_records(
 
 
 @pytest.mark.asyncio
+async def test_delete_session_accepts_legacy_ended_status(
+    db_session: AsyncSession,
+    mock_summary_generator,
+) -> None:
+    """Delete should accept legacy ended status as already-finalized."""
+    session = LectureSession(
+        id="lec_delete_legacy_ended",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="ended",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+        ended_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    summary_service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
+    service = SqlAlchemyLectureFinalizeService(
+        db=db_session,
+        user_id="demo_user",
+        summary_service=summary_service,
+        index_service=SuccessfulIndexService(),
+    )
+
+    response = await service.delete_session(session_id=session.id)
+
+    assert response.status == "deleted"
+    assert response.auto_finalized is False
+
+    session_result = await db_session.execute(
+        select(LectureSession).where(LectureSession.id == session.id)
+    )
+    assert session_result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
 async def test_delete_session_rejects_invalid_status(
     db_session: AsyncSession,
     mock_summary_generator,

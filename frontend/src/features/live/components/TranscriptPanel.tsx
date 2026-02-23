@@ -3,6 +3,10 @@ import { SegmentedControl } from '@/components/ui'
 import { formatTime } from '@/lib/utils'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
 
+function formatSubtitleId(serial: number): string {
+  return `S-${String(serial).padStart(3, '0')}`
+}
+
 export function TranscriptPanel() {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
@@ -97,6 +101,11 @@ export function TranscriptPanel() {
                 className={`card ${density === 'compact' ? 'p-3' : 'p-4'} ${line.isPartial ? 'opacity-60' : ''}`}
               >
                 <div className="text-xs text-fg-secondary flex items-center gap-2 mb-1">
+                  {typeof line.subtitleSerial === 'number' && (
+                    <span className="badge badge-default">
+                      字幕ID {formatSubtitleId(line.subtitleSerial)}
+                    </span>
+                  )}
                   <span>{formatTime(line.tsStartMs)}</span>
                   {line.speakerLabel ? <span>• {line.speakerLabel}</span> : null}
                   {line.isPartial ? <span className="badge badge-warning">partial</span> : <span className="badge badge-success">final</span>}

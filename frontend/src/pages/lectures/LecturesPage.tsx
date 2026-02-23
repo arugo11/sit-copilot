@@ -179,16 +179,18 @@ function SessionCard({
 
       {/* Actions */}
       <div className="space-y-2">
-        <Link
-          to={
-            session.status === 'live'
-              ? `/lectures/${session.session_id}/live`
-              : `/lectures/${session.session_id}/review`
-          }
-          className="btn btn-primary w-full text-center"
-        >
-          {session.status === 'live' ? '講義に入る' : 'レビューを見る'}
-        </Link>
+        {session.status === 'live' ? (
+          <Link
+            to={`/lectures/${session.session_id}/live`}
+            className="btn btn-primary w-full text-center"
+          >
+            講義に入る
+          </Link>
+        ) : (
+          <span className="btn btn-primary w-full text-center pointer-events-none opacity-60">
+            終了済み（遷移なし）
+          </span>
+        )}
         {session.status === 'live' ? (
           <button
             type="button"
