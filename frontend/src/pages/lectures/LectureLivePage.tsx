@@ -9,7 +9,6 @@ import { useTranslation } from 'react-i18next'
 import { useConnectionAnnouncer, useQaAnnouncer } from '@/hooks/useLiveRegion'
 import { useToast } from '@/components/common/Toast'
 import { AppShell } from '@/components/common/AppShell'
-import { SourcePanel } from '@/features/live/components/SourcePanel'
 import { TranscriptPanel } from '@/features/live/components/TranscriptPanel'
 import { AssistPanel } from '@/features/live/components/AssistPanel'
 import {
@@ -138,7 +137,7 @@ export function LectureLivePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { id } = useParams()
-  const sessionId = id ?? 'demo-session'
+  const sessionId = id ?? 'session'
   const { showToast } = useToast()
   const { announceConnection } = useConnectionAnnouncer()
   const { announceQaStatus } = useQaAnnouncer()
@@ -148,10 +147,8 @@ export function LectureLivePage() {
   const connection = useLiveSessionStore((state) => state.connection)
   const transcriptLagMs = useLiveSessionStore((state) => state.transcriptLagMs)
   const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
-  const cameraEnabled = useLiveSessionStore((state) => state.cameraEnabled)
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
   const setConnection = useLiveSessionStore((state) => state.setConnection)
-  const setCameraEnabled = useLiveSessionStore((state) => state.setCameraEnabled)
   const setSessionId = useLiveSessionStore((state) => state.setSessionId)
   const applyTranscriptPartial = useLiveSessionStore((state) => state.applyTranscriptPartial)
   const applyTranscriptFinal = useLiveSessionStore((state) => state.applyTranscriptFinal)
@@ -371,7 +368,7 @@ export function LectureLivePage() {
             variant: 'danger',
             title: '認証エラー',
             message:
-              'デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。',
+              'トークン設定を確認してください (X-Lecture-Token / X-User-Id)。',
           })
           return
         }
@@ -958,14 +955,6 @@ export function LectureLivePage() {
             >
               {isRecording ? t('live.stream.stopRecording') : t('live.stream.startRecording')}
             </button>
-            <button
-              type="button"
-              className={`btn ${cameraEnabled ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setCameraEnabled(!cameraEnabled)}
-              aria-pressed={cameraEnabled}
-            >
-              {cameraEnabled ? t('live.stream.cameraOn') : t('live.stream.cameraOff')}
-            </button>
             {/* Audio level bars */}
             <div className="flex items-end gap-0.5 h-5" aria-label={`入力レベル ${Math.round(audioLevel * 100)}%`} title={`入力 ${Math.round(audioLevel * 100)}%`}>
               {Array.from({ length: audioBarCount }, (_, i) => (
@@ -985,7 +974,6 @@ export function LectureLivePage() {
           </div>
         </div>
       }
-      sidebar={cameraEnabled ? <SourcePanel /> : undefined}
       rightRail={
         <AssistPanel
           onAskMiniQuestion={handleMiniQuestion}

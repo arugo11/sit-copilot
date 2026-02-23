@@ -85,7 +85,7 @@ export function ReadinessCheckPage() {
     <AppShell
       topbar={
         <div className="py-3 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold">履修前サポート (F0)</h1>
+          <h1 className="text-lg font-semibold">Readiness Check</h1>
           <div className="flex gap-2">
             <Link to="/lectures" className="btn btn-secondary">
               講義一覧

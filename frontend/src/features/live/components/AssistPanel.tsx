@@ -18,8 +18,6 @@ const LANG_MODE_OPTIONS = [
 
 const SUMMARY_REFRESH_INTERVAL_MS = 30000 // 30 seconds
 
-const QUICK_QUESTIONS = ['この式の意味', 'もう一度説明して', 'この単語を日本語で']
-
 const QA_STATUS_LABELS: Record<QaStreamStatus, string> = {
   idle: '待機中',
   streaming: '回答生成中…',
@@ -161,7 +159,6 @@ export function AssistPanel({
         <StatusRow label="録音" value={isRecording ? 'ON' : 'OFF'} ok={isRecording} />
         <StatusRow label="文字起こし" value="稼働中" ok />
         <StatusRow label="翻訳" value="稼働中" ok />
-        <StatusRow label="資料OCR" value="稼働中" ok />
         <StatusRow label="接続" value={connection} ok={connection === 'live'} />
         <div className="mt-2">
           <div className="text-xs text-fg-secondary mb-1">マイク入力レベル</div>
@@ -222,7 +219,7 @@ export function AssistPanel({
 
       <section className="card p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">質問候補</h2>
+          <h2 className="text-sm font-semibold">質問</h2>
           <span
             className={`badge ${
               qaStatus === 'streaming'
@@ -234,19 +231,6 @@ export function AssistPanel({
           >
             {QA_STATUS_LABELS[qaStatus]}
           </span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {QUICK_QUESTIONS.map((question) => (
-            <button
-              key={question}
-              type="button"
-              className="badge badge-default cursor-pointer"
-              onClick={() => onAskMiniQuestion(question)}
-              disabled={isQaSubmitting}
-            >
-              {question}
-            </button>
-          ))}
         </div>
         <div className="pt-2 border-t border-border">
           <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">ミニ質問</label>

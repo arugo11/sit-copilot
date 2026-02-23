@@ -87,7 +87,7 @@ export function ProcedurePage() {
           showToast({
             variant: 'danger',
             title: '認証エラー',
-            message: 'デモトークン設定を確認してください (X-Procedure-Token)。',
+            message: 'トークン設定を確認してください (X-Procedure-Token)。',
           })
           return
         }
@@ -166,7 +166,7 @@ export function ProcedurePage() {
     <AppShell
       topbar={
         <div className="py-3 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold">学内手続きQA</h1>
+          <h1 className="text-lg font-semibold">手続きサポートQA</h1>
           <div className="flex gap-2">
             <Link to="/lectures" className="btn btn-secondary">
               講義一覧

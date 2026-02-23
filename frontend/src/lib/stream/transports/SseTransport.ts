@@ -3,7 +3,7 @@ import type { StreamTransport, WsEvent } from '../types'
 
 const STREAM_ENDPOINT = '/api/v4/lecture/events/stream'
 const UNAUTHORIZED_MESSAGE =
-  'Unauthorized. デモトークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+  'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
 
 function buildStreamUrl(sessionId: string): string {
   const resolvedBase = API_BASE_URL

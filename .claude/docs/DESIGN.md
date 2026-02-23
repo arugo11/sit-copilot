@@ -2227,3 +2227,98 @@ interface PosterContent {
 ### Changelog
 
 - 2026-02-23: Added backend delete compatibility for legacy `ended` lecture session rows to prevent `409` failures from UI delete actions.
+
+---
+
+## Production Live-Only UI Scope Reduction (2026-02-23)
+
+### Decision Summary
+
+- Narrowed frontend product scope to real-time lecture support only.
+- Removed non-live entry points from landing: pre-course support (F0), procedure QA, demo screenshot, and non-live feature bullets.
+- Locked down `/procedure` and `/readiness-check` routes by redirecting both to `/lectures`.
+- Removed lecture-list readiness score surface and removed readiness pre-check call from session start flow.
+- Removed live left sidebar (`SourcePanel`) and camera toggle from live top bar to hide OCR/material panel functionality in production UI.
+- Removed predefined quick-question chips from `AssistPanel`; kept free-text mini QA input.
+- Replaced user-facing "demo" wording across frontend UI/error messages with production-neutral wording.
+
+### Rationale
+
+- Production launch requires a single clear use case and minimal operator confusion during live classes.
+- Hiding non-target functionality at route and UI levels reduces accidental usage and expectation mismatch.
+- Keeping backend/internal identifiers unchanged lowers migration risk while allowing immediate UI hardening.
+
+### Compatibility Rules
+
+- Internal API/service identifiers (e.g., `demoApi`, `DEMO_USER_ID`) remain unchanged in this phase.
+- Route behavior changes are intentional: direct access to `/procedure` and `/readiness-check` is no longer available.
+- Existing live transcript and mini QA backend flows stay intact; this change only narrows visible UI scope.
+
+### Changelog
+
+- 2026-02-23: Restricted production UI scope to real-time lecture support and removed non-live landing entry points.
+- 2026-02-23: Redirected `/procedure` and `/readiness-check` to `/lectures` and removed live SourcePanel/camera toggle from UI.
+- 2026-02-23: Removed readiness score UI/pre-check call and replaced user-facing "demo" wording with production-neutral text.
+
+---
+
+## Lecture Session Panel Recovery Rules (2026-02-23)
+
+### Decision Summary
+
+- Added resilient recovery for lecture-list session actions (`finalize`, `delete`) against stale local sessions and state drift.
+- Normalized persisted session statuses in localStorage:
+  - `active`/`live` -> `live`
+  - `finalized`/`ended` -> `ended`
+- On finalize:
+  - `409` keeps idempotent behavior and marks local card as ended.
+  - `404` removes stale local card and notifies user.
+- On delete:
+  - `404` removes stale local card.
+  - `409` triggers one recovery attempt (`finalize` -> `delete` retry), then applies standard error handling.
+
+### Rationale
+
+- Local session cards can become stale after backend restarts, user-id changes, or legacy status data.
+- Without recovery, users can get stuck with non-operable cards and repeated failure to close/delete sessions.
+- The recovery path keeps UI operable without changing backend APIs.
+
+### Compatibility Rules
+
+- Backend API contracts remain unchanged (`/session/start`, `/session/finalize`, `DELETE /session/{id}`).
+- Internal naming (`demoApi`, storage key) remains unchanged in this phase.
+- Recovery behavior is local-UI only and does not alter session ownership checks on server side.
+
+### Changelog
+
+- 2026-02-23: Added lecture-list finalize/delete recovery for stale sessions and legacy persisted status values.
+
+---
+
+## Auto Session Title from Lecture Content (2026-02-23)
+
+### Decision Summary
+
+- Added automatic session title generation on lecture finalize in `LecturesPage`.
+- Auto-title runs only when the current title is still the placeholder pattern (`講義セッション ...`).
+- Title source is `GET /api/v4/lecture/summary/latest`:
+  - Prefer first key term + first summary sentence.
+  - Fallback to first summary sentence only.
+- Generated title is normalized (whitespace/punctuation cleanup) and truncated to UI-safe length.
+- If summary is unavailable (`no_data`) or API fails, current title is kept unchanged.
+
+### Rationale
+
+- Placeholder session names are not meaningful in production review flow.
+- Finalize timing ensures enough lecture context is available to generate a useful title.
+- Restricting auto-title to placeholder names avoids overwriting curated/custom titles.
+
+### Compatibility Rules
+
+- No backend API/schema changes required; uses existing summary endpoint.
+- Storage key and session list persistence format stay compatible with prior data.
+- Auto-title is best-effort and non-blocking; finalize behavior remains unchanged if title generation fails.
+
+### Changelog
+
+- 2026-02-23: Added finalize-time automatic session title generation from lecture summary/key terms for placeholder-titled sessions.

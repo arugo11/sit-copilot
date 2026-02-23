@@ -12,8 +12,6 @@ const LecturesPage = lazy(() => import('@/pages/lectures/LecturesPage').then(m =
 const LectureLivePage = lazy(() => import('@/pages/lectures/LectureLivePage').then(m => ({ default: m.LectureLivePage })))
 const LectureSourcesPage = lazy(() => import('@/pages/lectures/LectureSourcesPage').then(m => ({ default: m.LectureSourcesPage })))
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
-const ProcedurePage = lazy(() => import('@/pages/procedure/ProcedurePage').then(m => ({ default: m.ProcedurePage })))
-const ReadinessCheckPage = lazy(() => import('@/pages/readiness/ReadinessCheckPage').then(m => ({ default: m.ReadinessCheckPage })))
 
 import { Skeleton } from '@/components/common/Skeleton'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -64,11 +62,11 @@ const router = createBrowserRouter([
   },
   {
     path: '/procedure',
-    element: <ProcedurePage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '/readiness-check',
-    element: <ReadinessCheckPage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '*',

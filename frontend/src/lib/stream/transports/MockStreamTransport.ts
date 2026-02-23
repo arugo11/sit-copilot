@@ -3,18 +3,18 @@ import type { StreamTransport, WsEvent } from '../types'
 const SAMPLE_TEXT = [
   {
     speaker: '先生',
-    ja: 'これはデモ文です（リアルタイム字幕サンプル1）。',
-    en: 'This is demo text (realtime subtitle sample 1).',
+    ja: 'これは講義字幕サンプルです（リアルタイム字幕1）。',
+    en: 'This is lecture subtitle sample text (realtime subtitle 1).',
   },
   {
     speaker: '先生',
-    ja: 'これはデモ文です（リアルタイム字幕サンプル2）。',
-    en: 'This is demo text (realtime subtitle sample 2).',
+    ja: 'これは講義字幕サンプルです（リアルタイム字幕2）。',
+    en: 'This is lecture subtitle sample text (realtime subtitle 2).',
   },
   {
     speaker: '先生',
-    ja: 'これはデモ文です（リアルタイム字幕サンプル3）。',
-    en: 'This is demo text (realtime subtitle sample 3).',
+    ja: 'これは講義字幕サンプルです（リアルタイム字幕3）。',
+    en: 'This is lecture subtitle sample text (realtime subtitle 3).',
   },
 ]
 
@@ -63,8 +63,8 @@ export class MockStreamTransport implements StreamTransport {
     const answerId = `qa_${Date.now()}`
     const chunks = [
       `質問「${question}」への回答です。`,
-      'これはデモ文です（QAストリームサンプル1）。',
-      'これはデモ文です（QAストリームサンプル2）。',
+      'これはQAストリームのサンプル回答1です。',
+      'これはQAストリームのサンプル回答2です。',
     ]
 
     let chunkIndex = 0
@@ -80,7 +80,7 @@ export class MockStreamTransport implements StreamTransport {
           type: 'qa.answer.done',
           payload: {
             answerId,
-            followups: ['これはデモ文です（フォローアップ1）', 'これはデモ文です（フォローアップ2）'],
+            followups: ['関連質問の候補1', '関連質問の候補2'],
           },
         })
         return
@@ -201,7 +201,7 @@ export class MockStreamTransport implements StreamTransport {
           frameId: `frame_board_${lineId}`,
           source: 'board',
           timestampMs: this.currentMs,
-          text: 'これはデモ文です（OCRイベント）',
+          text: 'これはOCRイベントのサンプルです',
         },
       })
 
@@ -210,8 +210,8 @@ export class MockStreamTransport implements StreamTransport {
         payload: {
           timestampMs: this.currentMs,
           points: [
-            'これはデモ文です（要約ポイント1）',
-            'これはデモ文です（要約ポイント2）',
+            '講義要約サンプルのポイント1',
+            '講義要約サンプルのポイント2',
           ],
         },
       })
@@ -219,8 +219,8 @@ export class MockStreamTransport implements StreamTransport {
       this.emit({
         type: 'assist.term',
         payload: [
-          { term: 'デモ用語1', explanation: 'これはデモ文です', translation: 'Demo Term 1' },
-          { term: 'デモ用語2', explanation: 'これはデモ文です', translation: 'Demo Term 2' },
+          { term: '用語1', explanation: '講義中のサンプル説明です', translation: 'Term 1' },
+          { term: '用語2', explanation: '講義中のサンプル説明です', translation: 'Term 2' },
         ],
       })
 
