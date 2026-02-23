@@ -1982,6 +1982,42 @@ FastAPI Route (Depends)
 
 ---
 
+## GitHub Actions Main Push Auto Deployment (2026-02-23)
+
+### Decision Summary
+
+- Added `.github/workflows/deploy-main.yml` to trigger production deployment on every push to `main`.
+- Added path-based deployment split:
+  - backend targets: `app/**`, `pyproject.toml`, `uv.lock`, `Dockerfile`
+  - frontend target: `frontend/**`
+- Enforced backend quality gate before deploy: `uv run pytest`.
+- Enforced frontend quality gate before deploy: `npm run build`.
+- Backend deploy pipeline uses Azure OIDC login + ACR remote build + Container Apps image update.
+- Frontend deploy pipeline uploads prebuilt `frontend/dist` artifact to Azure Static Web Apps with deployment token.
+- Deployment order is fixed to `API -> frontend` when both backend and frontend changes are present.
+
+### Compatibility Rules
+
+- Required GitHub repository variables:
+  - `AZURE_CLIENT_ID`
+  - `AZURE_TENANT_ID`
+  - `AZURE_SUBSCRIPTION_ID`
+  - `PROD_API_BASE_URL`
+- Required GitHub repository secret:
+  - `AZURE_STATIC_WEB_APPS_API_TOKEN`
+- Production resources remain fixed:
+  - `acrsitc02210594`
+  - `ca-sitc-api-02210594`
+  - `rg-sitcopilot-dev-02210594`
+  - `swa-sitc-02210594`
+- `frontend` build and `api` smoke test both read `PROD_API_BASE_URL`; this value must point to the active production API endpoint.
+
+### Changelog
+
+- 2026-02-23: Added main-branch push auto deployment workflow (OIDC for API deploy + SWA deployment token), with path-based conditional execution and ordered `API -> frontend` rollout.
+
+---
+
 ## Poster Creation Implementation Plan (2026-02-23)
 
 ### Project: SIT Copilot A0 Poster for AI Innovators Cup

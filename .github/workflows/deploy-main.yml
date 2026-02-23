@@ -1,0 +1,213 @@
+name: Deploy on main push
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-main-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect_changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      backend_changed: ${{ steps.filter.outputs.backend }}
+      frontend_changed: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - "app/**"
+              - "pyproject.toml"
+              - "uv.lock"
+              - "Dockerfile"
+            frontend:
+              - "frontend/**"
+
+  api_test:
+    name: API test
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend_changed == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Run pytest
+        run: uv run pytest
+
+  api_deploy:
+    name: API deploy
+    runs-on: ubuntu-latest
+    needs:
+      - detect_changes
+      - api_test
+    if: needs.detect_changes.outputs.backend_changed == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RESOURCE_GROUP: rg-sitcopilot-dev-02210594
+      CONTAINER_APP_NAME: ca-sitc-api-02210594
+      ACR_NAME: acrsitc02210594
+      IMAGE_REPOSITORY: sit-copilot-api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image to ACR
+        id: build_image
+        run: |
+          IMAGE_TAG="${GITHUB_SHA}"
+          IMAGE_URI="${ACR_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+
+          az acr build \
+            --registry "${ACR_NAME}" \
+            --image "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+            .
+
+          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --image "${{ steps.build_image.outputs.image_uri }}"
+
+  api_smoke:
+    name: API smoke test
+    runs-on: ubuntu-latest
+    needs:
+      - detect_changes
+      - api_deploy
+    if: needs.detect_changes.outputs.backend_changed == 'true'
+    env:
+      PROD_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+    steps:
+      - name: Verify health endpoint
+        run: |
+          curl --fail --show-error --silent \
+            "${PROD_API_BASE_URL}/api/v4/health" \
+            > health.json
+
+          grep -q '"status"' health.json
+          grep -q '"version"' health.json
+
+  frontend_build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.frontend_changed == 'true'
+    env:
+      VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+
+  frontend_deploy:
+    name: Frontend deploy (SWA)
+    runs-on: ubuntu-latest
+    needs:
+      - detect_changes
+      - frontend_build
+      - api_deploy
+      - api_smoke
+    if: |
+      always() &&
+      needs.detect_changes.outputs.frontend_changed == 'true' &&
+      needs.frontend_build.result == 'success' &&
+      (
+        needs.detect_changes.outputs.backend_changed != 'true' ||
+        (
+          needs.api_deploy.result == 'success' &&
+          needs.api_smoke.result == 'success'
+        )
+      )
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Resolve app directory
+        id: resolve_app_dir
+        run: |
+          APP_DIR="frontend/dist"
+          if [ -f "${APP_DIR}/index.html" ]; then
+            echo "app_dir=${APP_DIR}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ -f "${APP_DIR}/dist/index.html" ]; then
+            echo "app_dir=${APP_DIR}/dist" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "index.html not found in downloaded artifact."
+          find frontend -maxdepth 4 -type f | head -n 200
+          exit 1
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: ${{ steps.resolve_app_dir.outputs.app_dir }}
+          skip_app_build: true
+          skip_api_build: true
