@@ -178,7 +178,8 @@ export function LectureLivePage() {
   const failAnswer = useReviewQaStore((state) => state.failAnswer)
   const retryAnswer = useReviewQaStore((state) => state.retryAnswer)
   const resetReviewQa = useReviewQaStore((state) => state.reset)
-  const autoStartAttemptedRef = useRef(false)
+  const autoStartedSessionIdRef = useRef<string | null>(null)
+  const previousSessionIdRef = useRef<string | null>(null)
   const chunkIndexRef = useRef(0)
   const successfulTurnCountRef = useRef(0)
   const lastQaIndexBuildAtRef = useRef(0)
@@ -717,10 +718,20 @@ export function LectureLivePage() {
   }, [hydrateFromSettings, userSettings])
 
   useEffect(() => {
-    if (autoStartAttemptedRef.current || isRecording) {
+    const previousSessionId = previousSessionIdRef.current
+    if (previousSessionId && previousSessionId !== sessionId) {
+      stopRecording()
+      resetLiveData()
+      setSessionId(null)
+    }
+    previousSessionIdRef.current = sessionId
+  }, [resetLiveData, sessionId, setSessionId, stopRecording])
+
+  useEffect(() => {
+    if (isRecording || autoStartedSessionIdRef.current === sessionId) {
       return
     }
-    autoStartAttemptedRef.current = true
+    autoStartedSessionIdRef.current = sessionId
     setSessionId(sessionId)
     void startRecording()
   }, [isRecording, startRecording, sessionId, setSessionId])
@@ -820,9 +831,6 @@ export function LectureLivePage() {
     return () => {
       subscriptions.forEach((unsubscribe) => unsubscribe())
       streamClient.disconnect()
-      stopRecording()
-      resetLiveData()
-      setSessionId(null)
     }
   }, [
     announceConnection,
@@ -831,20 +839,27 @@ export function LectureLivePage() {
     applyTranslationFinal,
     pushSourceFrame,
     pushSourceOcr,
-    resetLiveData,
     sessionId,
     setAssistSummary,
     setAssistTerms,
     setConnection,
-    setSessionId,
     setTranslationFallbackActive,
     showToast,
-    stopRecording,
     t,
     uiLocale,
     notifyTranslationFallback,
     transformSubtitleForMode,
   ])
+
+  useEffect(() => {
+    return () => {
+      stopRecording()
+      resetLiveData()
+      setSessionId(null)
+      autoStartedSessionIdRef.current = null
+      previousSessionIdRef.current = null
+    }
+  }, [resetLiveData, setSessionId, stopRecording])
 
   useEffect(() => {
     if (!lastError) {

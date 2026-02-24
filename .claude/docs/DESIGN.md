@@ -2393,3 +2393,41 @@ interface PosterContent {
 ### Changelog
 
 - 2026-02-24: Added `scripts/dev-server.sh` and documented quick startup/restart workflow in README.
+
+---
+
+## Live Session Lifecycle Stabilization (2026-02-24)
+
+### Decision Summary
+
+- Fixed live-page microphone/speech lifecycle to auto-start per `sessionId` instead of one-time-per-component:
+  - replaced boolean `autoStartAttemptedRef` with session-scoped tracking.
+  - added explicit session-switch cleanup (`stopRecording`, `resetLiveData`, `setSessionId(null)`).
+- Isolated stream-subscription cleanup from microphone teardown:
+  - stream reconnect/re-subscribe cleanup now only unsubscribes/disconnects stream transport.
+  - microphone/live-state teardown is handled on session switch and component unmount only.
+- Hardened lecture-list local persistence scope:
+  - moved session storage key to scoped format (`v2` + API base + demo user id).
+  - deduplicates persisted entries by `session_id` when loading.
+- Updated finalize error policy in lecture list:
+  - `409` is no longer treated as implicit success/ended-state.
+  - surface `409` as warning/failure to avoid creating phantom local state drift.
+
+### Rationale
+
+- Intermittent "no response after entering a new session" was caused by lifecycle races:
+  - recording could be stopped by stream-effect cleanup during re-subscription,
+  - while auto-start guard prevented re-start in the same component lifecycle.
+- Session finalize/delete confusion was amplified by global localStorage scope and optimistic `409` handling.
+- Session-scoped auto-start + scoped storage + strict `409` handling keeps UI state closer to server truth.
+
+### Compatibility Rules
+
+- Backend lecture API contracts remain unchanged.
+- Existing persisted lecture-list entries under legacy key are intentionally not auto-migrated.
+- New storage scope is per `(API base, demo user id)` to avoid cross-environment/session contamination.
+
+### Changelog
+
+- 2026-02-24: Stabilized live session audio lifecycle and prevented stream cleanup from stopping microphone unexpectedly.
+- 2026-02-24: Scoped lecture-list storage key (v2) and removed optimistic finalize-on-409 local state mutation.
