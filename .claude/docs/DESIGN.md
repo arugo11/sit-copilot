@@ -2378,6 +2378,10 @@ interface PosterContent {
   - PID files: `backend.pid`, `frontend.pid`
   - Logs: `backend.log`, `frontend.log`
 - Backend startup via script defaults to `WEAVE_ENABLED=false` for stable local startup, while allowing override through environment variable.
+- Updated process launch mode to improve detach stability:
+  - prefer `setsid` for backend/frontend detached startup.
+  - frontend starts `node_modules/.bin/vite` directly (no `npm run` wrapper).
+  - frontend uses `--strictPort` to fail-fast on port mismatch instead of auto-port hopping.
 
 ### Rationale
 
@@ -2393,6 +2397,7 @@ interface PosterContent {
 ### Changelog
 
 - 2026-02-24: Added `scripts/dev-server.sh` and documented quick startup/restart workflow in README.
+- 2026-02-24: Hardened `scripts/dev-server.sh` detached launch (`setsid`, direct `vite`, strict port) to prevent intermittent local `ERR_CONNECTION_REFUSED` due process drop.
 
 ---
 
