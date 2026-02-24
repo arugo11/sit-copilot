@@ -15,6 +15,7 @@ __all__ = [
     "LectureKeyTermsService",
     "AzureOpenAILectureKeyTermsService",
     "UnavailableLectureKeyTermsService",
+    "ResilientLectureKeyTermsService",
     "LectureKeyTermsResult",
     "LectureKeyTermsError",
 ]
@@ -70,15 +71,20 @@ class UnavailableLectureKeyTermsService:
         transcript_text: str,
         lang_mode: str,
     ) -> LectureKeyTermsResult:
+        logger.info(
+            "keyterms_fallback_used reason=%s transcript_len=%s",
+            self._reason,
+            len(transcript_text),
+        )
         del transcript_text, lang_mode
-        raise LectureKeyTermsError(self._reason)
+        return LectureKeyTermsResult(key_terms=[], detected_terms=[])
 
 
 class AzureOpenAILectureKeyTermsService:
     """Azure OpenAI-based key terms extractor with explanations."""
 
     DEFAULT_MODEL = "gpt-5-nano"
-    DEFAULT_MAX_TOKENS = 500
+    DEFAULT_MAX_TOKENS = 800
     DEFAULT_TEMPERATURE = 0
     DEFAULT_TIMEOUT_SECONDS = 30
     DEFAULT_API_VERSION = "2024-05-01-preview"
@@ -143,7 +149,7 @@ class AzureOpenAILectureKeyTermsService:
         prompt = self._build_prompt(transcript_text, lang_mode)
         response_json = await self._call_openai(prompt)
 
-        return self._parse_response(response_json)
+        return self._parse_response(response_json, transcript_text=transcript_text)
 
     def _build_prompt(
         self,
@@ -165,6 +171,7 @@ class AzureOpenAILectureKeyTermsService:
 - {instructions}
 - 専門用語や重要な概念を最大3つ抽出してください
 - すべての用語を説明する必要はありません。理解するのが難しい用語や、講義の理解に重要な用語のみを選択してください
+- 抽出する term は、必ず上記トランスクリプトに実際に登場する語句をそのまま使ってください（言い換え・補完・推測で新しい語を追加しない）
 - 用語がない場合は空のリストを返してください
 
 出力形式 (JSON):
@@ -214,6 +221,7 @@ JSONのみを出力してください。"""
                 {"role": "user", "content": prompt},
             ],
             "max_completion_tokens": self._max_tokens,
+            "reasoning_effort": "minimal",
             "response_format": {"type": "json_object"},
         }
         body = json.dumps(payload).encode("utf-8")
@@ -275,7 +283,10 @@ JSONのみを出力してください。"""
         )
 
     def _parse_response(
-        self, response_json: dict[str, object]
+        self,
+        response_json: dict[str, object],
+        *,
+        transcript_text: str,
     ) -> LectureKeyTermsResult:
         """Parse Azure OpenAI JSON response and validate structure.
 
@@ -310,9 +321,25 @@ JSONのみを出力してください。"""
             # Parse the JSON content
             result = json.loads(content)
 
+            # Some model variants may return a simplified schema such as:
+            # {"keywords": ["...", "..."]} or {"important_words": [...]}
+            simplified_terms: list[str] = []
+            for candidate_key in ("keywords", "important_words", "重要語"):
+                candidate = result.get(candidate_key)
+                if isinstance(candidate, list):
+                    simplified_terms = [
+                        item.strip()
+                        for item in candidate
+                        if isinstance(item, str) and item.strip()
+                    ]
+                    if simplified_terms:
+                        break
+
             key_terms = result.get("key_terms", [])
             if not isinstance(key_terms, list):
                 raise ValueError("key_terms must be a list")
+
+            transcript_compact = self._compact_text(transcript_text)
 
             # Validate key_terms
             validated_key_terms: list[dict[str, str]] = []
@@ -322,22 +349,59 @@ JSONのみを出力してください。"""
                 term_value = term.get("term", "")
                 if not isinstance(term_value, str) or not term_value.strip():
                     continue
+                cleaned_term = term_value.strip()
+                # Fail-closed: only keep terms explicitly present in transcript.
+                if cleaned_term not in transcript_text and self._compact_text(
+                    cleaned_term
+                ) not in transcript_compact:
+                    continue
                 validated_key_terms.append(
                     {
-                        "term": term_value.strip(),
-                        "explanation": term.get("explanation", ""),
-                        "translation": term.get("translation", term_value.strip()),
+                        "term": cleaned_term,
+                        "explanation": (
+                            term.get("explanation", "")
+                            if isinstance(term.get("explanation", ""), str)
+                            else ""
+                        ),
+                        "translation": (
+                            term.get("translation", term_value.strip())
+                            if isinstance(term.get("translation", term_value.strip()), str)
+                            else term_value.strip()
+                        ),
                     }
                 )
 
+            if not validated_key_terms and simplified_terms:
+                validated_key_terms = [
+                    {
+                        "term": term,
+                        "explanation": "",
+                        "translation": term,
+                    }
+                    for term in simplified_terms
+                    if (
+                        term in transcript_text
+                        or self._compact_text(term) in transcript_compact
+                    )
+                ]
+
             detected_terms = result.get("detected_terms", [])
             if not isinstance(detected_terms, list):
-                raise ValueError("detected_terms must be a list")
+                detected_terms = []
 
             validated_detected_terms: list[str] = []
             for term in detected_terms:
-                if isinstance(term, str) and term.strip():
-                    validated_detected_terms.append(term.strip())
+                if not isinstance(term, str) or not term.strip():
+                    continue
+                cleaned_term = term.strip()
+                if cleaned_term not in transcript_text and self._compact_text(
+                    cleaned_term
+                ) not in transcript_compact:
+                    continue
+                validated_detected_terms.append(cleaned_term)
+
+            if not validated_detected_terms and validated_key_terms:
+                validated_detected_terms = [term["term"] for term in validated_key_terms]
 
             return LectureKeyTermsResult(
                 key_terms=validated_key_terms,
@@ -349,3 +413,39 @@ JSONのみを出力してください。"""
             raise LectureKeyTermsError(
                 "azure openai key terms response parse failure"
             ) from exc
+
+    @staticmethod
+    def _compact_text(value: str) -> str:
+        return "".join(value.split())
+
+
+class ResilientLectureKeyTermsService:
+    """Primary + fallback key terms extractor with graceful degradation."""
+
+    def __init__(
+        self,
+        primary: LectureKeyTermsService,
+        fallback: LectureKeyTermsService,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def extract_key_terms(
+        self,
+        transcript_text: str,
+        lang_mode: str,
+    ) -> LectureKeyTermsResult:
+        try:
+            return await self._primary.extract_key_terms(
+                transcript_text=transcript_text,
+                lang_mode=lang_mode,
+            )
+        except Exception as exc:  # pragma: no cover - runtime safety
+            logger.warning(
+                "keyterms_primary_failed_fallback_used error=%s",
+                exc.__class__.__name__,
+            )
+            return await self._fallback.extract_key_terms(
+                transcript_text=transcript_text,
+                lang_mode=lang_mode,
+            )

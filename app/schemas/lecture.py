@@ -389,7 +389,8 @@ class LectureSummaryLatestResponse(BaseModel):
     summary: str
     key_terms: list[LectureSummaryKeyTerm]
     evidence: list[LectureSummaryEvidence]
-    status: Literal["ok", "no_data"] = "ok"
+    status: Literal["ok", "no_data", "off"] = "ok"
+    reason: str | None = None
 
 
 class LectureSessionFinalizeRequest(BaseModel):
@@ -478,3 +479,5 @@ class TranscriptKeyTermsResponse(BaseModel):
 
     key_terms: list[LectureSummaryKeyTerm]
     detected_terms: list[str]  # Terms that were detected as needing explanation
+    status: Literal["ok", "no_data", "off"] = "ok"
+    reason: str | None = None

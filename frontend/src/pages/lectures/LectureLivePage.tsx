@@ -32,6 +32,10 @@ import {
   lectureQaApi,
 } from '@/lib/api/client'
 import type { QaAnswerChunk } from '@/lib/stream/types'
+import {
+  mapSummaryKeyTermsToAssistTerms,
+  mapSummaryResponseToAssist,
+} from '@/features/live/utils/assistSupport'
 
 const SUMMARY_TRIGGER_CHUNK_COUNT = 3
 const ERROR_TOAST_THROTTLE_MS = 5000
@@ -164,7 +168,7 @@ export function LectureLivePage() {
   const pushSourceFrame = useLiveSessionStore((state) => state.pushSourceFrame)
   const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
   const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
-  const setAssistTerms = useLiveSessionStore((state) => state.setAssistTerms)
+  const appendAssistTerms = useLiveSessionStore((state) => state.appendAssistTerms)
   const setTranslationFallbackActive = useLiveSessionStore(
     (state) => state.setTranslationFallbackActive
   )
@@ -579,14 +583,14 @@ export function LectureLivePage() {
             })
 
             // 用語サポートを更新
-            if (keytermsResult.key_terms.length > 0) {
-              setAssistTerms(
-                keytermsResult.key_terms.map((term) => ({
-                  term: term.term,
-                  explanation: term.explanation || '',
-                  translation: term.translation || term.term,
-                }))
-              )
+            if (keytermsResult.status === 'ok' && keytermsResult.key_terms.length > 0) {
+              appendAssistTerms(mapSummaryKeyTermsToAssistTerms(keytermsResult.key_terms))
+            } else if (keytermsResult.status !== 'ok') {
+              console.info('[keyterms] ingest trigger non-ok status', {
+                sessionId,
+                status: keytermsResult.status,
+                reason: keytermsResult.reason,
+              })
             }
           } catch (keytermsError) {
             // 専門用語分析が失敗しても、字幕自体は正常に処理されたのでエラーは無視
@@ -603,26 +607,17 @@ export function LectureLivePage() {
           try {
             const summaryResult = await demoApi.getLatestSummary(sessionId)
             if (summaryResult.status === 'ok') {
+              const mapped = mapSummaryResponseToAssist(summaryResult)
               setAssistSummary({
                 timestampMs: Date.now(),
-                points: summaryResult.summary
-                  .split('。')
-                  .filter(Boolean)
-                  .slice(0, 3),
+                points: mapped.points,
               })
-              setAssistTerms(
-                summaryResult.key_terms.map((term) => ({
-                  term: typeof term === 'string' ? term : term.term,
-                  explanation:
-                    typeof term === 'string'
-                      ? ''
-                      : term.explanation || '',
-                  translation:
-                    typeof term === 'string'
-                      ? term
-                      : term.translation || term.term,
-                }))
-              )
+            } else {
+              console.info('[summary] 3-chunk trigger non-ok status', {
+                sessionId,
+                status: summaryResult.status,
+                reason: summaryResult.reason,
+              })
             }
           } catch (summaryError) {
             console.warn('[summary] 3-chunk trigger failed:', summaryError)
@@ -649,7 +644,7 @@ export function LectureLivePage() {
       setTranscriptCorrectionStatus,
       showToast,
       setAssistSummary,
-      setAssistTerms,
+      appendAssistTerms,
       setTranslationFallbackActive,
       notifyTranslationFallback,
       t,
@@ -807,7 +802,7 @@ export function LectureLivePage() {
       streamClient.subscribe('source.frame', (event) => pushSourceFrame(event.payload)),
       streamClient.subscribe('source.ocr', (event) => pushSourceOcr(event.payload)),
       streamClient.subscribe('assist.summary', (event) => setAssistSummary(event.payload)),
-      streamClient.subscribe('assist.term', (event) => setAssistTerms(event.payload)),
+      streamClient.subscribe('assist.term', (event) => appendAssistTerms(event.payload)),
       streamClient.subscribe('error', (event) => {
         showToast({
           variant: event.payload.recoverable ? 'warning' : 'danger',
@@ -841,7 +836,7 @@ export function LectureLivePage() {
     pushSourceOcr,
     sessionId,
     setAssistSummary,
-    setAssistTerms,
+    appendAssistTerms,
     setConnection,
     setTranslationFallbackActive,
     showToast,

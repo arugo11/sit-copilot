@@ -13,6 +13,11 @@ import type {
 } from '@/lib/stream'
 
 const MAX_HISTORY = 10
+const MAX_ASSIST_TERMS = 20
+
+function normalizeAssistTermKey(term: string): string {
+  return term.replace(/[\s　]+/g, '').trim().toLowerCase()
+}
 
 function assignSubtitleSerials(lines: TranscriptLine[]): TranscriptLine[] {
   let serial = 0
@@ -69,9 +74,12 @@ interface LiveSessionStore extends LiveUiState {
   pushSourceOcr: (ocr: SourceOcrChunk) => void
   setAssistSummary: (summary: AssistSummaryPayload) => void
   setAssistTerms: (terms: AssistTermPayload[]) => void
+  appendAssistTerms: (terms: AssistTermPayload[]) => void
   setTranslationFallbackActive: (active: boolean) => void
   summaryEnabled: boolean
   keytermsEnabled: boolean
+  setSummaryEnabled: (enabled: boolean) => void
+  setKeytermsEnabled: (enabled: boolean) => void
   toggleSummary: () => void
   toggleKeyterms: () => void
   hydrateFromSettings: (settings: {
@@ -336,7 +344,36 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
   setAssistSummary: (summary) =>
     set({ summaryPoints: summary.points.slice(0, 3) }),
 
-  setAssistTerms: (assistTerms) => set({ assistTerms: assistTerms.slice(0, 4) }),
+  setAssistTerms: (assistTerms) =>
+    set({ assistTerms: assistTerms.slice(0, MAX_ASSIST_TERMS) }),
+
+  appendAssistTerms: (incomingTerms) =>
+    set((state) => {
+      if (!incomingTerms.length) {
+        return state
+      }
+
+      const merged = [...state.assistTerms]
+      const existingKeys = new Set(
+        merged.map((item) => normalizeAssistTermKey(item.term))
+      )
+
+      for (const term of incomingTerms) {
+        const key = normalizeAssistTermKey(term.term)
+        if (!key || existingKeys.has(key)) {
+          continue
+        }
+        merged.push(term)
+        existingKeys.add(key)
+      }
+
+      return {
+        assistTerms: merged.slice(0, MAX_ASSIST_TERMS),
+      }
+    }),
+
+  setSummaryEnabled: (summaryEnabled) => set({ summaryEnabled }),
+  setKeytermsEnabled: (keytermsEnabled) => set({ keytermsEnabled }),
 
   toggleSummary: () => set((state) => ({ summaryEnabled: !state.summaryEnabled })),
   toggleKeyterms: () => set((state) => ({ keytermsEnabled: !state.keytermsEnabled })),

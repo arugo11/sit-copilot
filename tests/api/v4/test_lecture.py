@@ -677,6 +677,17 @@ async def test_get_lecture_summary_latest_returns_200_and_persists_window(
     session_id = start_response.json()["session_id"]
 
     await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": True,
+                "assistKeytermsEnabled": True,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    await async_client.post(
         "/api/v4/lecture/speech/chunk",
         json={
             "session_id": session_id,
@@ -740,6 +751,53 @@ async def test_get_lecture_summary_latest_with_unknown_session_returns_404(
 
 
 @pytest.mark.asyncio
+async def test_get_lecture_summary_latest_returns_off_when_summary_disabled(
+    async_client: AsyncClient,
+) -> None:
+    """Summary latest endpoint should return off when assist summary is disabled."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": False,
+                "assistKeytermsEnabled": True,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "assist_summary_disabled"
+    assert body["summary"] == ""
+    assert body["key_terms"] == []
+    assert body["evidence"] == []
+
+
+@pytest.mark.asyncio
 async def test_get_lecture_summary_latest_without_token_returns_401(
     async_client: AsyncClient,
 ) -> None:
@@ -787,6 +845,33 @@ async def test_get_lecture_summary_latest_with_runtime_error_returns_503(
     """Summary latest should map backend runtime errors to 503."""
     from app.api.v4.lecture import get_lecture_summary_service
 
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": True,
+                "assistKeytermsEnabled": True,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
     class FailingSummaryService:
         async def get_latest_summary(self, session_id: str, user_id: str) -> None:
             del session_id, user_id
@@ -800,7 +885,7 @@ async def test_get_lecture_summary_latest_with_runtime_error_returns_503(
     try:
         response = await async_client.get(
             "/api/v4/lecture/summary/latest",
-            params={"session_id": "lec_test"},
+            params={"session_id": session_id},
             headers=AUTH_HEADERS,
         )
     finally:
@@ -810,6 +895,148 @@ async def test_get_lecture_summary_latest_with_runtime_error_returns_503(
     assert response.status_code == 503
     assert body["error"]["code"] == "http_error"
     assert body["error"]["message"] == "Lecture summary backend is unavailable."
+
+
+@pytest.mark.asyncio
+async def test_post_transcript_analyze_keyterms_returns_off_when_keyterms_disabled(
+    async_client: AsyncClient,
+) -> None:
+    """Key terms endpoint should return off when assist key terms is disabled."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": True,
+                "assistKeytermsEnabled": False,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/transcript/analyze-keyterms",
+        json={
+            "session_id": session_id,
+            "transcript_text": "外れ値を検出します。",
+            "lang_mode": "ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "assist_keyterms_disabled"
+    assert body["key_terms"] == []
+    assert body["detected_terms"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_respects_demo_user_alias_for_settings(
+    async_client: AsyncClient,
+) -> None:
+    """Summary settings should apply across demo_user/demo-user aliases."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": False,
+                "assistKeytermsEnabled": True,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=LEGACY_DEMO_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "assist_summary_disabled"
+
+
+@pytest.mark.asyncio
+async def test_post_transcript_analyze_keyterms_respects_demo_user_alias_for_settings(
+    async_client: AsyncClient,
+) -> None:
+    """Key terms settings should apply across demo_user/demo-user aliases."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": True,
+                "assistKeytermsEnabled": False,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/transcript/analyze-keyterms",
+        json={
+            "session_id": session_id,
+            "transcript_text": "外れ値を検出します。",
+            "lang_mode": "ja",
+        },
+        headers=LEGACY_DEMO_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "assist_keyterms_disabled"
 
 
 @pytest.mark.asyncio
@@ -1460,6 +1687,17 @@ async def test_get_lecture_summary_latest_with_azure_disabled_uses_deterministic
         headers=AUTH_HEADERS,
     )
     session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={
+            "settings": {
+                "assistSummaryEnabled": True,
+                "assistKeytermsEnabled": True,
+            }
+        },
+        headers=AUTH_HEADERS,
+    )
 
     await async_client.post(
         "/api/v4/lecture/speech/chunk",
