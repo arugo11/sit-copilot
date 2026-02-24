@@ -141,9 +141,15 @@ start_backend() {
 
   (
     cd "${ROOT_DIR}"
-    WEAVE_ENABLED="${WEAVE_ENABLED_DEFAULT}" \
-      nohup uv run uvicorn app.main:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" \
-      >"${BACKEND_LOG}" 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+      setsid env WEAVE_ENABLED="${WEAVE_ENABLED_DEFAULT}" \
+        uv run uvicorn app.main:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" \
+        >"${BACKEND_LOG}" 2>&1 < /dev/null &
+    else
+      env WEAVE_ENABLED="${WEAVE_ENABLED_DEFAULT}" \
+        nohup uv run uvicorn app.main:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" \
+        >"${BACKEND_LOG}" 2>&1 < /dev/null &
+    fi
     sync_pid_file "${BACKEND_PID_FILE}" "$!"
   )
 
@@ -190,9 +196,20 @@ start_frontend() {
   fi
 
   (
-    cd "${ROOT_DIR}"
-    nohup npm run dev --prefix frontend -- --host "${FRONTEND_HOST}" --port "${FRONTEND_PORT}" \
-      >"${FRONTEND_LOG}" 2>&1 &
+    cd "${ROOT_DIR}/frontend"
+    local vite_bin="./node_modules/.bin/vite"
+    if [[ ! -x "${vite_bin}" ]]; then
+      echo "frontend start failed: vite binary not found at ${ROOT_DIR}/frontend/node_modules/.bin/vite" >&2
+      return 1
+    fi
+
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "${vite_bin}" --host "${FRONTEND_HOST}" --port "${FRONTEND_PORT}" --strictPort \
+        >"${FRONTEND_LOG}" 2>&1 < /dev/null &
+    else
+      nohup "${vite_bin}" --host "${FRONTEND_HOST}" --port "${FRONTEND_PORT}" --strictPort \
+        >"${FRONTEND_LOG}" 2>&1 < /dev/null &
+    fi
     sync_pid_file "${FRONTEND_PID_FILE}" "$!"
   )
 

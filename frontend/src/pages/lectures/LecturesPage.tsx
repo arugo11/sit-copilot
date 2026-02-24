@@ -9,14 +9,16 @@ import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useToast } from '@/components/common/Toast'
 import {
+  API_BASE_URL,
   ApiError,
+  DEMO_USER_ID,
   demoApi,
   getApiErrorMessage,
   lectureQaApi,
   type LectureQaLangMode,
 } from '@/lib/api/client'
 
-const DEMO_SESSIONS_STORAGE_KEY = 'sit_copilot_demo_sessions_v1'
+const DEMO_SESSIONS_STORAGE_KEY_PREFIX = 'sit_copilot_demo_sessions_v2'
 const DEFAULT_SESSION_TITLE_PREFIXES = ['講義セッション ', 'Lecture Session ']
 const MIN_AUTO_SESSION_TITLE_LENGTH = 2
 const MAX_AUTO_SESSION_TITLE_LENGTH = 28
@@ -111,6 +113,11 @@ interface DemoLectureSession {
   course_name: string
   started_at: string
   status: SessionStatus
+}
+
+function buildDemoSessionsStorageKey(): string {
+  const apiScope = API_BASE_URL || 'same-origin'
+  return `${DEMO_SESSIONS_STORAGE_KEY_PREFIX}:${apiScope}:${DEMO_USER_ID}`
 }
 
 function normalizeSessionStatus(value: unknown): SessionStatus | null {
@@ -426,8 +433,9 @@ function extractAutoTitleTriggerSessionId(state: unknown): string | null {
 }
 
 function loadStoredSessions(): DemoLectureSession[] {
+  const storageKey = buildDemoSessionsStorageKey()
   try {
-    const raw = localStorage.getItem(DEMO_SESSIONS_STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey)
     if (!raw) {
       return []
     }
@@ -435,7 +443,7 @@ function loadStoredSessions(): DemoLectureSession[] {
     if (!Array.isArray(parsed)) {
       return []
     }
-    return parsed
+    const normalized = parsed
       .filter(isDemoLectureSession)
       .map((session) => {
         const normalizedStatus = normalizeSessionStatus(
@@ -446,14 +454,25 @@ function loadStoredSessions(): DemoLectureSession[] {
           status: normalizedStatus ?? 'live',
         }
       })
+    const deduped: DemoLectureSession[] = []
+    const seenSessionIds = new Set<string>()
+    for (const session of normalized) {
+      if (seenSessionIds.has(session.session_id)) {
+        continue
+      }
+      seenSessionIds.add(session.session_id)
+      deduped.push(session)
+    }
+    return deduped
   } catch {
     return []
   }
 }
 
 function saveStoredSessions(sessions: DemoLectureSession[]): void {
+  const storageKey = buildDemoSessionsStorageKey()
   try {
-    localStorage.setItem(DEMO_SESSIONS_STORAGE_KEY, JSON.stringify(sessions))
+    localStorage.setItem(storageKey, JSON.stringify(sessions))
   } catch {
     // Ignore storage persistence failures in session mode
   }
@@ -878,8 +897,9 @@ export function LecturesPage() {
           payload,
         })
       } catch (error) {
+        const apiError = error instanceof ApiError ? error : null
         const disableLogging =
-          error instanceof ApiError && (error.status === 404 || error.status === 0)
+          apiError !== null && (apiError.status === 404 || apiError.status === 0)
 
         if (!disableLogging) {
           return
@@ -892,7 +912,9 @@ export function LecturesPage() {
 
         autoTitleDebugLogWarnedSessionIdsRef.current.add(sessionId)
         const reason =
-          error.status === 404 ? 'autotitle_log_endpoint_not_found' : 'autotitle_log_network_error'
+          apiError.status === 404
+            ? 'autotitle_log_endpoint_not_found'
+            : 'autotitle_log_network_error'
         console.warn('[auto-title-debug-log] logging disabled for this session.', {
           sessionId,
           reason,
@@ -1595,10 +1617,13 @@ export function LecturesPage() {
     } catch (error) {
       const apiErr = error as { status?: number }
       if (apiErr?.status === 409) {
-        markSessionEndedLocally(sessionId)
         showToast({
-          variant: 'success',
-          title: t('lectures.messages.sessionAlreadyFinalized'),
+          variant: 'warning',
+          title: t('lectures.messages.sessionFinalizeFailed'),
+          message: getApiErrorMessage(
+            error,
+            t('lectures.messages.sessionFinalizeApiFailed')
+          ),
         })
       } else if (apiErr?.status === 404) {
         removeSessionLocally(sessionId)
