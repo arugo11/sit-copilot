@@ -91,12 +91,12 @@ export class BackgroundSection implements Component {
 
     const problemText = new TextComponent(this.pptx, {
       text: this.content.problems.map((p) => `• ${p}`),
-      fontSize: FONTS.body,
+      fontSize: FONTS.subsection,
       color: COLORS.text,
-      lineSpacing: 1.4,
+      lineSpacing: 1.6,
     });
     problemText.render(
-      { x: box.x + 0.2, y: box.y + 1.8, w: box.w - 0.4, h: 2.5 },
+      { x: box.x + 0.3, y: box.y + 1.8, w: box.w - 0.6, h: 3 },
       slide,
     );
 
@@ -114,12 +114,12 @@ export class BackgroundSection implements Component {
 
     const audienceText = new TextComponent(this.pptx, {
       text: this.content.audience.map((a) => `• ${a}`),
-      fontSize: FONTS.body,
+      fontSize: FONTS.subsection,
       color: COLORS.text,
-      lineSpacing: 1.4,
+      lineSpacing: 1.6,
     });
     audienceText.render(
-      { x: box.x + 0.2, y: box.y + 5.1, w: box.w - 0.4, h: 2.5 },
+      { x: box.x + 0.3, y: box.y + 5.3, w: box.w - 0.6, h: 2.5 },
       slide,
     );
   }
@@ -133,15 +133,13 @@ export function createDefaultBackgroundSection(
 ): BackgroundSection {
   const defaultContent: BackgroundContent = {
     problems: [
-      '講義は情報密度が高く、進行が早い',
-      'ノートを取りながら重要なポイントを見逃す',
-      '日本語が第二言語の学生はリアルタイム理解が困難',
-      '既存ツールは講義文脈に特化していない',
+      '講義は情報密度が高く、聞き漏らしが発生しやすい',
+      '非母語話者はリアルタイムでの理解が困難',
+      '既存ツールには講義固有の文脈理解がない',
     ],
     audience: [
-      '大学生（特に留学生・非日本語話者）',
+      '大学生全般（特に留学生）',
       'アクセシビリティ支援が必要な受講者',
-      '授業への関与を高めたい教員',
     ],
   };
   return new BackgroundSection(pptx, defaultContent);

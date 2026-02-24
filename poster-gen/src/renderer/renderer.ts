@@ -114,7 +114,7 @@ export class PosterRenderer {
       subtitle: content.meta.subtitle,
       authors: content.meta.authors,
       affiliation: content.meta.affiliation,
-      event: 'AI Innovators Cup @ Shibaura 2026',
+      event: 'AI Innovators Cup @ 芝浦工業大学 2026',
     };
     const header = new HeaderComponent(pptx, headerContent, this.layout.headerHeight);
     header.render({ x: 0, y: 0, w: 33.1, h: this.layout.headerHeight }, slide);

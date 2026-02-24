@@ -105,7 +105,7 @@ export class ResultsSection implements Component {
     const metricsY = box.y + 1.3;
     const metricsPerRow = 3;
     const metricW = (box.w - 0.6) / metricsPerRow;
-    const metricH = 1;
+    const metricH = 1.4;
 
     this.content.metrics.forEach((metric, i) => {
       const row = Math.floor(i / metricsPerRow);
@@ -118,7 +118,7 @@ export class ResultsSection implements Component {
       metricBox.render(
         {
           x: box.x + 0.2 + col * (metricW + 0.1),
-          y: metricsY + row * (metricH + 0.2),
+          y: metricsY + row * (metricH + 0.3),
           w: metricW,
           h: metricH,
         },
@@ -127,7 +127,7 @@ export class ResultsSection implements Component {
 
       const metricName = new TextComponent(this.pptx, {
         text: metric.name,
-        fontSize: FONTS.caption,
+        fontSize: FONTS.body,
         color: COLORS.white,
         bold: false,
         align: 'center',
@@ -135,16 +135,16 @@ export class ResultsSection implements Component {
       metricName.render(
         {
           x: box.x + 0.2 + col * (metricW + 0.1),
-          y: metricsY + row * (metricH + 0.1) + 0.1,
+          y: metricsY + row * (metricH + 0.3) + 0.15,
           w: metricW,
-          h: 0.35,
+          h: 0.45,
         },
         slide,
       );
 
       const metricValue = new TextComponent(this.pptx, {
         text: metric.value,
-        fontSize: FONTS.subsection,
+        fontSize: FONTS.section,
         color: COLORS.white,
         bold: true,
         align: 'center',
@@ -153,9 +153,9 @@ export class ResultsSection implements Component {
       metricValue.render(
         {
           x: box.x + 0.2 + col * (metricW + 0.1),
-          y: metricsY + row * (metricH + 0.1) + 0.4,
+          y: metricsY + row * (metricH + 0.3) + 0.55,
           w: metricW,
-          h: 0.6,
+          h: 0.8,
         },
         slide,
       );
@@ -228,23 +228,20 @@ export function createDefaultResultsSection(pptx: PptxInstance): ResultsSection 
   const defaultContent: ResultsContent = {
     metrics: [
       { name: 'ASR精度', value: '87%', color: '#14B8A6' },
-      { name: 'Q&A関連度', value: '92%', color: '#6366F1' },
-      { name: 'OCR成功率', value: '94%', color: '#10B981' },
+      { name: 'QA関連性', value: '92%', color: '#6366F1' },
       { name: '字幕遅延', value: '2.8s', color: '#3B82F6' },
-      { name: 'Q&A遅延', value: '4.2s', color: '#8B5CF6' },
-      { name: '引用精度', value: '96%', color: '#EC4899' },
+      { name: 'QA遅延', value: '4.2s', color: '#8B5CF6' },
+      { name: 'Citation精度', value: '96%', color: '#EC4899' },
     ],
     highlights: [
-      'リアルタイムマルチモーダル処理（3ストリーム同時）',
-      '情報源検証によるハルシネーション抑制',
-      'アクセシビリティ機能（文字サイズ・ハイコントラスト）',
-      'WandB Weaveによる全操作の可観測性',
+      'source-only設計による根拠のない回答の排除',
+      'Verifierによるハルシネーション抑制',
+      'アクセシビリティ対応（文字サイズ・高コントラスト・やさしい日本語）',
     ],
     promptHighlights: [
       '動的コンテキストウィンドウ（要約: 直近60秒）',
-      '信頼性のためのエビデンスソース追跡',
-      'データ不足時のフォールバックメカニズム',
-      '言語切替（日本語 ↔ 英語）',
+      '根拠不足時のフォールバック機構',
+      '3言語リアルタイム切替',
     ],
   };
   return new ResultsSection(pptx, defaultContent);

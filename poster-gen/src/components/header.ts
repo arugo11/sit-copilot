@@ -239,10 +239,10 @@ export function createDefaultHeader(
 ): HeaderComponent {
   const defaultContent: HeaderContent = {
     title: 'SIT Copilot',
-    subtitle: 'AI-Powered Lecture Support System\n講義支援AIシステム',
-    authors: ['[Author Names]'],
-    affiliation: 'Shibaura Institute of Technology / 芝浦工業大学',
-    event: 'AI Innovators Cup @ Shibaura 2026',
+    subtitle: '講義支援AIシステム',
+    authors: ['嶋中雄大'],
+    affiliation: '芝浦工業大学',
+    event: 'AI Innovators Cup @ 芝浦工業大学 2026',
     // logoPath: 'assets/logos/sit-logo.png',
     // logoPath2: 'assets/logos/team-logo.png',
   };

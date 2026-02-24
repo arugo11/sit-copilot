@@ -94,12 +94,12 @@ export class ObjectivesSection implements Component {
 
     const featuresText = new TextComponent(this.pptx, {
       text: this.content.features,
-      fontSize: FONTS.body,
+      fontSize: FONTS.subsection,
       color: COLORS.text,
-      lineSpacing: 1.4,
+      lineSpacing: 1.5,
     });
     featuresText.render(
-      { x: box.x + 0.2, y: box.y + 1.8, w: box.w - 0.4, h: 3 },
+      { x: box.x + 0.3, y: box.y + 1.8, w: box.w - 0.6, h: 3.5 },
       slide,
     );
 
@@ -176,17 +176,17 @@ export function createDefaultObjectivesSection(
 ): ObjectivesSection {
   const defaultContent: ObjectivesContent = {
     features: [
-      'リアルタイム字幕生成（音声認識+補正）',
-      '講義スライドを活用した文脈理解Q&A',
-      '情報源の明示によるハルシネーション抑制',
-      'マルチモーダル入力（音声・スライド画像・テキスト）',
-      'アクセシビリティ機能（文字サイズ調整・ハイコントラスト）',
+      'リアルタイム字幕: 音声認識と日本語自動補正',
+      'AIアシスト: 30秒ごとの自動要約と専門用語抽出',
+      '根拠付きミニQA: 講義内容のみを根拠に回答',
+      '3言語対応: 日本語・やさしい日本語・英語の即時切替',
+      'アクセシビリティ: テーマ・文字サイズ・高コントラスト対応',
     ],
     technical: [
-      { target: '字幕生成', metric: '< 3秒' },
-      { target: 'Q&A応答', metric: '< 5秒' },
+      { target: '字幕遅延', metric: '< 3秒' },
+      { target: 'QA遅延', metric: '< 5秒' },
       { target: 'ASR精度', metric: '> 85%' },
-      { target: 'Q&A関連度', metric: '> 90%' },
+      { target: 'QA関連性', metric: '> 90%' },
     ],
   };
   return new ObjectivesSection(pptx, defaultContent);

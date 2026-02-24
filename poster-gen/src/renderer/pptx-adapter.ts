@@ -45,9 +45,9 @@ export class PptxAdapter {
     this.pptx.layout = 'A0';
 
     // Set presentation metadata
-    this.pptx.author = 'SIT Copilot Team';
-    this.pptx.title = 'SIT Copilot Poster';
-    this.pptx.subject = 'AI Innovators Cup @ Shibaura 2026';
+    this.pptx.author = '嶋中雄大';
+    this.pptx.title = 'SIT Copilot ポスター';
+    this.pptx.subject = 'AI Innovators Cup @ 芝浦工業大学 2026';
 
     // Create a PptxInstance wrapper for components
     this.pptxInstance = {
@@ -78,7 +78,7 @@ export class PptxAdapter {
         {
           // Footer line with event name
           text: {
-            text: 'AI Innovators Cup @ Shibaura 2026',
+            text: 'AI Innovators Cup @ 芝浦工業大学 2026',
             options: {
               x: 0,
               y: A0_HEIGHT - 0.5,

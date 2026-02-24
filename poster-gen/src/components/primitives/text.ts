@@ -93,7 +93,7 @@ export class TextComponent {
       align: this.options.align || 'left',
       valign: this.options.valign || 'top',
       fontFace: this.options.fontFace || FONT_FAMILIES.primary,
-      lineSpacing: this.options.lineSpacing || 1.2,
+      lineSpacingMultiple: this.options.lineSpacing || 1.2,
     });
   }
 }

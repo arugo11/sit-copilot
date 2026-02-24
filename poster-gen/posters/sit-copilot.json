@@ -1,104 +1,89 @@
 {
   "meta": {
     "title": "SIT Copilot",
-    "subtitle": "AI-Powered Lecture Support System\n講義支援AIシステム",
-    "authors": ["Author 1", "Author 2"],
-    "affiliation": "Shibaura Institute of Technology / 芝浦工業大学",
+    "subtitle": "講義支援AIシステム",
+    "authors": ["嶋中雄大"],
+    "affiliation": "芝浦工業大学",
     "date": "2026-02-24"
   },
   "sections": {
     "background": {
       "problems": [
-        "Lectures are information-dense and fast-paced",
-        "Students miss key points while taking notes",
-        "Non-native speakers struggle with real-time comprehension",
-        "Existing tools lack lecture-specific context"
+        "講義は情報密度が高く、聞き漏らしが発生しやすい",
+        "非母語話者はリアルタイムでの理解が困難",
+        "既存ツールには講義固有の文脈理解がない"
       ],
       "audience": [
-        "University students (especially non-native speakers)",
-        "Lecture attendees with accessibility needs",
-        "Instructors wanting to enhance engagement"
+        "大学生全般（特に留学生）",
+        "アクセシビリティ支援が必要な受講者"
       ]
     },
     "objectives": {
       "features": [
-        "Real-time Captioning: Instant speech-to-text with source tracking",
-        "Live Q&A: Context-aware answers using slide content",
-        "Source-Only Responses: Citations prevent misinformation",
-        "Multi-Modal Input: Voice, text, and visual (slide OCR)",
-        "Accessibility: Adjustable fonts, high contrast, easy Japanese"
+        "リアルタイム字幕: 音声認識と日本語自動補正",
+        "AIアシスト: 30秒ごとの自動要約と専門用語抽出",
+        "根拠付きミニQA: 講義内容のみを根拠に回答",
+        "3言語対応: 日本語・やさしい日本語・英語の即時切替",
+        "アクセシビリティ: テーマ・文字サイズ・高コントラスト対応"
       ],
       "technical": [
-        { "target": "Caption Latency", "metric": "< 3s" },
-        { "target": "Q&A Latency", "metric": "< 5s" },
-        { "target": "ASR Accuracy", "metric": "> 85%" },
-        { "target": "QA Relevance", "metric": "> 90%" }
+        { "target": "字幕遅延", "metric": "< 3s" },
+        { "target": "QA遅延", "metric": "< 5s" },
+        { "target": "ASR精度", "metric": "> 85%" },
+        { "target": "QA関連性", "metric": "> 90%" }
       ]
     },
     "aiUsage": {
       "features": [
         {
-          "name": "Captioning Flow",
-          "description": "Real-time ASR with Japanese correction. Evidence tags: Speech | Slide | Board. Rolling summaries every 30s.",
-          "kpi": "2.8s avg latency, 87% accuracy"
+          "name": "字幕生成フロー",
+          "description": "Azure Speech SDKによるリアルタイム音声認識。LLMによる日本語補正。30秒ごとのローリング要約生成。",
+          "kpi": "目標: 遅延 < 3秒 / 精度 > 85%"
         },
         {
-          "name": "Q&A Flow",
-          "description": "BM25 + Hybrid search for relevance. Context from slides + transcript. Source verification prevents hallucination.",
-          "kpi": "4.2s avg latency, 92% relevance"
-        },
-        {
-          "name": "OCR Flow",
-          "description": "1 FPS capture with change detection. ROI support (slide area only). Quality filtering by confidence.",
-          "kpi": "94% extraction success"
+          "name": "Q&Aフロー",
+          "description": "BM25+ベクトル検索のハイブリッド検索。講義記録のみを根拠としたsource-only回答。LLM as a Judgeによる根拠一致検証。",
+          "kpi": "目標: 遅延 < 5秒 / 関連性 > 90%"
         }
       ],
       "prompts": [
         {
-          "name": "Captioning",
-          "content": "Summarize the last 60 seconds of lecture content. Group related points. Mark sources: [Speech], [Slide], [Blackboard]. Max 150 words."
+          "name": "要約",
+          "content": "直近60秒の講義内容を要約。関連するポイントをグループ化。最大150語。"
         },
         {
           "name": "Q&A",
-          "content": "Using ONLY the provided lecture transcript and slide text, answer the question. Cite sources with (chunk_id). If information is insufficient, say 'I cannot answer from the available materials'."
+          "content": "提供された講義記録のみを使用して質問に回答。(chunk_id)でソースを引用。根拠が不十分な場合は「講義内では確認できない」と回答。"
         }
       ]
     },
     "results": {
-      "metrics": [
-        { "name": "ASR Accuracy", "value": "87%", "color": "#14B8A6" },
-        { "name": "QA Relevance", "value": "92%", "color": "#6366F1" },
-        { "name": "OCR Success", "value": "94%", "color": "#10B981" },
-        { "name": "Caption Latency", "value": "2.8s", "color": "#3B82F6" },
-        { "name": "QA Latency", "value": "4.2s", "color": "#8B5CF6" },
-        { "name": "Citation Accuracy", "value": "96%", "color": "#EC4899" }
-      ],
+      "metrics": [],
       "highlights": [
-        "Real-time multi-modal processing (3 streams)",
-        "Source verification prevents misinformation",
-        "Accessibility features: font scaling, high contrast",
-        "Observability: WandB Weave for all operations"
+        "source-only設計: 講義記録に存在する情報のみで回答を生成し、根拠のない回答を構造的に排除",
+        "Verifier二重検証: GPT-4oが生成した回答を別プロンプトで検証し、根拠とのずれがあれば棄却",
+        "ASRハルシネーション判定: 音声認識の明らかな誤認識を自動検出し、補正候補を提示",
+        "日本語自動補正: GPT-4oで専門用語・固有名詞の認識ミスをリアルタイム補正",
+        "ローリング要約: 直近30秒の発話を60秒のコンテキストウィンドウで自動要約"
       ],
       "promptHighlights": [
-        "Dynamic context window (last 60s for summaries)",
-        "Evidence source tracking for trust",
-        "Fallback mechanisms for insufficient data",
-        "Language switching (Japanese <-> English)"
+        "動的コンテキストウィンドウ: 要約は直近60秒、QAはハイブリッド検索で取得した上位チャンクのみ",
+        "根拠不足時のフォールバック: 検索結果が不十分な場合「講義内では確認できない」と明示的に回答",
+        "chunk_id引用: 回答に(chunk_id)を付与し、ユーザーが元の発話箇所を追跡可能"
       ]
     },
     "futurePlans": {
       "shortTerm": [
-        "Enhanced NLP: Key term extraction",
-        "Multi-language support (EN, ZH)",
-        "Usage analytics dashboard"
+        "履修前サポート機能の有効化",
+        "学内手続きQA機能の有効化",
+        "スライドOCR統合"
       ],
       "longTerm": [
-        "Integration with LMS platforms",
-        "Mobile app for students",
-        "Offline mode with local models"
+        "LMSプラットフォーム連携",
+        "モバイル対応"
       ]
     }
   },
   "theme": "technical-blue",
-  "demoVideoUrl": "https://example.com/demo-video"
+  "demoVideoUrl": "https://example.com/mock-demo"
 }

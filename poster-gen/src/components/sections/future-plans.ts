@@ -110,12 +110,12 @@ export class FuturePlansSection implements Component {
 
     const shortTermText = new TextComponent(this.pptx, {
       text: this.content.shortTerm.map((p) => `• ${p}`),
-      fontSize: FONTS.body,
+      fontSize: FONTS.subsection,
       color: COLORS.text,
-      lineSpacing: 1.3,
+      lineSpacing: 1.5,
     });
     shortTermText.render(
-      { x: box.x + 0.2, y: shortTermY + 0.6, w: box.w - 0.4, h: 2.5 },
+      { x: box.x + 0.3, y: shortTermY + 0.6, w: box.w - 0.6, h: 2.5 },
       slide,
     );
   }
@@ -139,12 +139,12 @@ export class FuturePlansSection implements Component {
 
     const longTermText = new TextComponent(this.pptx, {
       text: this.content.longTerm.map((p) => `• ${p}`),
-      fontSize: FONTS.body,
+      fontSize: FONTS.subsection,
       color: COLORS.text,
-      lineSpacing: 1.3,
+      lineSpacing: 1.5,
     });
     longTermText.render(
-      { x: box.x + 0.2, y: longTermY + 0.6, w: box.w - 0.4, h: 2 },
+      { x: box.x + 0.3, y: longTermY + 0.6, w: box.w - 0.6, h: 2 },
       slide,
     );
   }
@@ -237,14 +237,13 @@ export function createDefaultFuturePlansSection(
 ): FuturePlansSection {
   const defaultContent: FuturePlansContent = {
     shortTerm: [
-      '高度なNLP機能（キーワード抽出）',
-      '多言語対応（英語・中国語）',
-      '使用分析ダッシュボード',
+      '履修前サポート機能の有効化',
+      '学内手続QA機能の有効化',
+      'スライドOCR統合',
     ],
     longTerm: [
       'LMSプラットフォーム連携',
-      '学生用モバイルアプリ',
-      'ローカルモデルによるオフラインモード',
+      'モバイル対応',
     ],
     // qrCodePath: 'assets/images/demo-qr.png', // Optional
   };

@@ -136,6 +136,33 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 - In development, API base defaults to same-origin (`VITE_API_BASE_URL` unset) so Vite proxy can avoid CORS setup overhead.
 - SSE client must use fetch-stream parsing (not `EventSource`) because auth requires custom headers.
 
+## Web-Only Demo Scenario with Session A/B Title Generation (2026-02-24)
+
+### Decision Summary
+
+- Demo recording flow is constrained to publicly routed web pages only:
+  - `/`, `/lectures`, `/lectures/:id/live`, `/lectures/:id/sources`, `/settings`
+- Non-public routes are treated as out-of-scope for demo:
+  - `/procedure`, `/readiness-check`, `/lectures/:id/qa`, `/lecture/:session_id/qa`
+- Recording starts from zero sessions and uses one-tab operation.
+- Session A is used to trigger auto-title generation in background.
+- Session B is used for feature walkthrough while Session A title candidates are generated.
+- Auto-title trigger requirement is fixed:
+  - return from live view using in-page "Lectures" button (`autoTitleSessionId` navigation state),
+  - do not rely on browser back navigation for the trigger.
+
+### Rationale
+
+- Public-only operations align the demo with visible product scope and avoid over-claiming.
+- A/B split keeps the auto-title wait time productive and removes dead air during recording.
+- One-tab workflow minimizes operator complexity while preserving reproducibility.
+
+### Compatibility Rules
+
+- Do not include API direct calls, CLI-only evidence, or hidden routes in the recorded demo.
+- Keep Session A title unchanged until candidate generation is shown.
+- If auto-title progress is delayed, continue Session B list-level operations while waiting.
+
 ### Review QA Real API Integration (2026-02-21)
 
 #### Decision Summary
@@ -2297,33 +2324,99 @@ interface PosterContent {
 
 ---
 
-## Auto Session Title from Lecture Content (2026-02-23)
+## Auto Session Title from Lecture Content (2026-02-23, updated 2026-02-24)
 
 ### Decision Summary
 
-- Added automatic session title generation on lecture finalize in `LecturesPage`.
+- Added automatic session title generation when exiting lecture live and returning to lecture list.
 - Auto-title runs only when the current title is still the placeholder pattern (`講義セッション ...`).
-- Title source is `GET /api/v4/lecture/summary/latest`:
-  - Prefer first key term + first summary sentence.
-  - Fallback to first summary sentence only.
-- Generated title is normalized (whitespace/punctuation cleanup) and truncated to UI-safe length.
-- If summary is unavailable (`no_data`) or API fails, current title is kept unchanged.
+- Trigger path is explicit navigation from `LectureLivePage` to `LecturesPage` with location state (`autoTitleSessionId`).
+- During generation, the session card title is immediately switched to an in-progress label:
+  - ja: `タイトル作成中...`
+  - en: `Generating title...`
+- Title source moved to lecture QA endpoint:
+  - warmup: `POST /api/v4/lecture/qa/index/build` (`rebuild=false`)
+  - generate: `POST /api/v4/lecture/qa/ask` once per candidate slot (up to 3)
+- Prompt policy now uses single-word generation per request:
+  - output format: `<word>...</word>` (single line)
+  - one word only, max 28 chars, no explanation/prefix/label
+  - already collected candidates are provided as exclusion hints to diversify outputs
+- Added LLM-as-a-judge step per generated candidate:
+  - judge prompt asks whether the candidate is exactly one word
+  - verdict format: `<judge>OK</judge>` or `<judge>NG</judge>`
+  - only `OK` candidates are retained
+- Generation is retried up to 3 attempts (total 3 asks).
+- Retry attempts now include delay (`~1.5s`) to reduce immediate no-source failures while index/search catches up.
+- Candidate title validation for user-select flow enforces:
+  - normalized length within `2..28`
+  - one-word policy (no whitespace + allowed character class)
+  - known fallback sentences are rejected
+- Candidate acceptance now treats QA `fallback` as non-authoritative metadata:
+  - non-empty `fallback` alone does not reject candidates
+  - rejection requires either `sources.length == 0` or known fallback sentence match (`answer`/`fallback`)
+- QA candidate normalization now:
+  - prefers `<word>...</word>` payloads
+  - falls back to `<title>...</title>` and first-line extraction
+  - strips common boilerplate prefixes (e.g., `講義資料では`) before candidate registration
+  - extracts first word token and trims trailing Japanese particle suffixes (`は/が/を/...`) to avoid phrase-like outputs
+  - additionally cuts phrase tails at Japanese-particle + alnum boundary (e.g. `トランスフォーマーは2017...` -> `トランスフォーマー`)
+- Summary fallback candidates are normalized through the same one-word extraction pipeline for consistency.
+- Auto-title is no longer auto-applied immediately when candidates are available.
+  - UI shows up to 3 clickable candidates on the session card.
+  - User click adopts the selected candidate as the final session title.
+- Added best-effort debug logging pipeline for auto-title diagnostics:
+  - frontend emits structured events for trigger/attempt/reject/judge/fallback/final result
+  - backend appends JSONL records via `POST /api/v4/lecture/qa/autotitle/log`
+  - log destination is repo-local `.log/auto-title-debug.log` (auto-created)
+- Judge policy is fail-open except explicit NG:
+  - `<judge>NG</judge>` is the only hard reject path
+  - judge API failure / unparsable response / fallback-mixed judge response is treated as inconclusive and candidate stays accepted if local validation passed
+- Debug logging transport is fail-open:
+  - when `/lecture/qa/autotitle/log` returns `404` or network error, frontend disables further debug-log posts for that session
+  - one-time `console.warn` is emitted; title-generation flow itself continues
+- If QA attempts fail, frontend performs a best-effort summary fallback using `GET /api/v4/lecture/summary/latest` and derives a short title from summary/key terms.
+- On repeated failure, title falls back to locale default:
+  - ja: `講義セッション`
+  - en: `Lecture Session`
+- Placeholder detection now treats exact default/in-progress labels as auto-managed titles, so failed sessions can be eligible for regeneration in later returns.
+- Session status is kept `live` during generation, so re-entering lecture remains available.
+- Lecture entry action is available for both `live` and `ended` sessions, enabling post-end re-entry from lecture list.
+- Added manual session title editing on lecture cards (inline input with save/cancel).
+- Manual edits are authoritative: ongoing async auto-title jobs must not overwrite manually edited titles.
 
 ### Rationale
 
 - Placeholder session names are not meaningful in production review flow.
-- Finalize timing ensures enough lecture context is available to generate a useful title.
-- Restricting auto-title to placeholder names avoids overwriting curated/custom titles.
+- Returning from live screen indicates enough session context may be available without forcing finalize.
+- Reusing lecture QA keeps title generation grounded in session evidence with no new backend API.
+- Summary fallback reduces hard-fail rate when QA evidence is temporarily unavailable after returning from live view.
+- Placeholder-only overwrite rule avoids clobbering user-curated/non-placeholder names.
+- Retry + summary fallback + default fallback keeps UX deterministic even when QA/index backends are unstable.
 
 ### Compatibility Rules
 
-- No backend API/schema changes required; uses existing summary endpoint.
+- Auto-title debug API is additive only (`/lecture/qa/autotitle/log`) and does not affect existing QA/finalize/session contracts.
 - Storage key and session list persistence format stay compatible with prior data.
-- Auto-title is best-effort and non-blocking; finalize behavior remains unchanged if title generation fails.
+- Auto-title is best-effort and non-blocking; session lifecycle (live/finalize) behavior remains unchanged if title generation fails.
+- Generation still uses existing APIs (`/lecture/qa/index/build`, `/lecture/qa/ask`, `/lecture/summary/latest`) plus optional debug-log append API.
+- Operational check for debug logging:
+  - after backend restart/deploy, verify `/openapi.json` contains `/api/v4/lecture/qa/autotitle/log`
+  - if missing (404 at runtime), treat as stale backend process and restart service before debugging
 
 ### Changelog
 
 - 2026-02-23: Added finalize-time automatic session title generation from lecture summary/key terms for placeholder-titled sessions.
+- 2026-02-24: Switched auto-title source to lecture QA ask flow with in-progress label, validation gate, 3-attempt retry, and locale default fallback.
+- 2026-02-24: Moved auto-title trigger from finalize action to live->list return flow and kept lecture re-entry enabled during generation.
+- 2026-02-24: Added delayed QA retries + summary fallback for title-generation resilience, and added inline manual title editing with manual-overwrite guard.
+- 2026-02-24: Enabled lecture re-entry link from lecture list even for ended sessions.
+- 2026-02-24: Switched QA title prompt to strict single-word/title-only output and tightened QA candidate normalization to reduce length-overflow failures.
+- 2026-02-24: Strengthened QA title constraints with strict wrapper format and boilerplate-token rejection to prevent explanatory fragments from being used as titles.
+- 2026-02-24: Switched to 3-candidate clickable selection flow on lecture cards to avoid hard-fail from strict auto-apply validation.
+- 2026-02-24: Tightened 3-candidate prompt and normalization to single-word extraction focused on keyword-only outputs.
+- 2026-02-24: Switched to per-candidate generation requests and added LLM-as-a-judge validation (`OK/NG`) for single-word enforcement.
+- 2026-02-24: Added `.log/auto-title-debug.log` structured diagnostics (frontend event emission + backend append endpoint) to analyze generation failures.
+- 2026-02-24: Adjusted candidate acceptance to require sources and known-fallback match only (non-empty fallback no longer auto-rejected), switched judge handling to explicit-NG-only rejection, and added per-session fail-open debug-log transport fallback for stale backend/connection errors.
 
 ---
 
@@ -2372,24 +2465,95 @@ interface PosterContent {
 
 ### Decision Summary
 
-- Added unified local runtime script: `scripts/dev-server.sh`.
-- Script supports `start|stop|restart|status|logs` for `backend|frontend|all`.
-- Runtime artifacts are centralized under `.runtime/`:
-  - PID files: `backend.pid`, `frontend.pid`
-  - Logs: `backend.log`, `frontend.log`
-- Backend startup via script defaults to `WEAVE_ENABLED=false` for stable local startup, while allowing override through environment variable.
+- `scripts/dev-server.sh` remains available as an optional helper for local operations.
+- Manual startup is documented as the primary verification path:
+  - Backend: `WEAVE_ENABLED=false uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`
+  - Frontend: `npm run dev --prefix frontend -- --host 127.0.0.1 --port 3000 --strictPort`
+- Primary health checks for troubleshooting are:
+  - `GET http://127.0.0.1:8000/api/v4/health`
+  - `GET http://127.0.0.1:3000/api/v4/health` (via Vite proxy)
+- Runtime artifacts under `.runtime/` are script-related and optional.
 
 ### Rationale
 
-- Repeated manual startup/restart commands increased operational friction during verification loops.
-- Single command entrypoint reduces human error and speeds up local QA iteration.
-- Disabling Weave by default in script avoids startup hangs in environments without reliable Weave connectivity.
+- Direct process startup makes `ERR_CONNECTION_REFUSED` diagnosis explicit (which process/port is missing).
+- Manual foreground execution keeps logs visible in real time and avoids stale PID-file confusion.
+- Script workflow is still useful for convenience but should not be required for local QA.
 
 ### Compatibility Rules
 
-- Existing manual startup commands remain valid and documented in README as fallback.
-- Script is intended for local development; production/deployment flows are unchanged.
+- Manual startup commands are first-class and stable.
+- Script usage is optional and does not change backend/frontend runtime contracts.
+- Production/deployment flows are unchanged.
 
 ### Changelog
 
 - 2026-02-24: Added `scripts/dev-server.sh` and documented quick startup/restart workflow in README.
+- 2026-02-24: Switched README local verification flow to manual startup/testing as the primary path.
+
+---
+
+## Frontend Responsive Architecture (React 19 + Tailwind v4) (2026-02-24)
+
+### Decision Summary
+
+- Adopt a mobile-first responsive contract with three layout tiers:
+  - `base` (`<768px`): single-column interaction-first UI
+  - `md` (`>=768px`): two-pane transitional layout
+  - `lg+` (`>=1024px`): desktop multi-pane layout
+- Keep Tailwind default breakpoints as primary system (`sm/md/lg/xl/2xl`) and add only one optional custom breakpoint:
+  - `3xl: 1920px` for ultra-wide density tuning.
+- Use a hybrid responsive-variant policy:
+  - CSS-only classes for spacing/typography/grid changes.
+  - Explicit `variant` props only when behavior/semantics differ (e.g., `dialog` vs `bottom-sheet`).
+  - Conditional component trees only when interaction models differ (e.g., persistent rail vs drawer).
+- Standardize mobile navigation to:
+  - Top bar with hamburger opening off-canvas app drawer.
+  - Bottom tab bar for primary routes (max 4-5 destinations).
+- Standardize component behavior on mobile:
+  - Sidebar/right-rail -> off-canvas drawer.
+  - Modal -> bottom sheet.
+  - Tabs -> horizontal scroll tablist first, dropdown fallback only when labels overflow severely.
+  - Tables -> card list at `base`, table at `md+` (horizontal scroll fallback for dense admin tables).
+- Live page (`TranscriptPanel`, `AssistPanel`, `SourcePanel`) becomes mode-based on mobile:
+  - One active panel at a time via segmented top switcher (`Transcript | Assist | Source`).
+  - Keep panel state mounted to avoid stream/context resets.
+  - Desktop keeps persistent transcript + right rail composition.
+
+### Rationale
+
+- Existing shell uses fixed side widths (`w-64`, `w-80`), which is efficient for desktop but over-constrains small screens.
+- Existing live page keeps transcript as primary pane and right rail as secondary; this maps well to desktop but needs explicit mode switching on mobile.
+- Existing component inventory already includes primitives needed for migration (`Modal`, `SideSheet`, `Tabs`, `SegmentedControl`), reducing rewrite risk.
+- Breakpoint minimization reduces design drift and testing matrix complexity while still covering `320px -> 1920px+`.
+
+### Compatibility Rules
+
+- Preserve current desktop composition and route structure; mobile behavior is additive.
+- Keep accessibility minimum touch targets at `44x44px` for interactive elements.
+- Keep responsive state in dedicated UI store/context to avoid prop drilling through page trees.
+- Maintain existing i18n and live-region behavior across responsive variants.
+
+### Implementation Plan
+
+1. Foundation
+   - Define responsive layout tokens and optional `3xl` breakpoint in `globals.css` `@theme`.
+   - Normalize shared touch-target utility classes to `min-h/min-w >= 44px`.
+2. Shell and Navigation
+   - Extend `AppShell` with responsive slots (`mobileNav`, `desktopSidebar`, `desktopRightRail`).
+   - Add app drawer + bottom navigation and hide desktop rails on `base`.
+3. Component Variants
+   - Add `presentation` variants for `Modal` (`center|sheet`) and `SideSheet` (`right|bottom`).
+   - Upgrade `Tabs` with horizontal-scroll tablist behavior and overflow affordance.
+4. Live Page Responsive Modes
+   - Introduce `livePanelMode` state (`transcript|assist|source`) for mobile.
+   - Render mode switcher on `base`; keep desktop transcript + right rail layout on `lg+`.
+5. Data Tables and Dense Lists
+   - Create shared `ResponsiveTable` pattern (`cards@base`, `table@md+`).
+6. QA + Verification
+   - Add viewport regression checks (320/375/390/768/1024/1280/1536/1920).
+   - Add interaction checks for drawer, bottom nav, modal sheet, keyboard traversal, and focus traps.
+
+### Changelog
+
+- 2026-02-24: Added responsive architecture baseline (breakpoint policy, navigation pattern, component variant rules, live-page mobile mode strategy, and phased implementation plan).

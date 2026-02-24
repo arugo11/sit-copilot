@@ -123,29 +123,60 @@ export class AIUsageSection implements Component {
   }
 
   /**
-   * Render the multi-modal flow diagram
+   * Render the dual-flow diagram (Captioning flow + QA flow)
    */
   private renderFlowDiagram(box: Box, slide: Slide): void {
     const diagramY = box.y + 2.2;
-    const nodeW = 2.5;
-    const nodeH = 0.8;
-    const centerX = box.x + box.w / 2;
+    const nodeW = 3.0;
+    const nodeH = 0.9;
 
-    // Define flow nodes (multi-modal integration)
-    const nodes: FlowNode[] = [
-      { label: 'Speech\n🎤', color: '#3B82F6', x: centerX - 10, y: diagramY },
-      { label: 'Slide\n📄', color: '#8B5CF6', x: centerX - 5, y: diagramY },
-      { label: 'Question\n❓', color: '#EC4899', x: centerX + 2, y: diagramY },
-      { label: 'ASR', color: '#14B8A6', x: centerX - 9, y: diagramY + 1.5 },
-      { label: 'OCR', color: '#F59E0B', x: centerX - 4, y: diagramY + 1.5 },
-      { label: 'AI Search\n🔍', color: '#6366F1', x: centerX - 2, y: diagramY + 2.8 },
-      { label: 'GPT-4o\n🤖', color: '#8B5CF6', x: centerX - 2, y: diagramY + 3.8 },
-      { label: 'Caption', color: '#10B981', x: centerX - 8, y: diagramY + 4.8 },
-      { label: 'Answer', color: '#3B82F6', x: centerX - 1, y: diagramY + 4.8 },
+    // === Left flow: Captioning (columns 0-5) ===
+    const leftX = box.x + 1.5;
+
+    // Flow label
+    const captionFlowLabel = new TextComponent(this.pptx, {
+      text: '[ 字幕生成フロー ]',
+      fontSize: FONTS.caption,
+      color: COLORS.secondary,
+      bold: true,
+      align: 'center',
+    });
+    captionFlowLabel.render(
+      { x: leftX - 0.5, y: diagramY - 0.5, w: nodeW + 1, h: 0.4 },
+      slide,
+    );
+
+    const captionNodes: FlowNode[] = [
+      { label: '音声入力',         color: '#3B82F6', x: leftX, y: diagramY },
+      { label: '音声認識 (ASR)',    color: '#14B8A6', x: leftX, y: diagramY + 1.4 },
+      { label: '日本語補正',        color: '#6366F1', x: leftX, y: diagramY + 2.8 },
+      { label: '字幕・要約',        color: '#10B981', x: leftX, y: diagramY + 4.2 },
     ];
 
-    // Render nodes
-    nodes.forEach((node) => {
+    // === Right flow: QA (columns 6-11) ===
+    const rightX = box.x + box.w - nodeW - 1.5;
+
+    const qaFlowLabel = new TextComponent(this.pptx, {
+      text: '[ Q&A フロー ]',
+      fontSize: FONTS.caption,
+      color: '#EC4899',
+      bold: true,
+      align: 'center',
+    });
+    qaFlowLabel.render(
+      { x: rightX - 0.5, y: diagramY - 0.5, w: nodeW + 1, h: 0.4 },
+      slide,
+    );
+
+    const qaNodes: FlowNode[] = [
+      { label: '質問入力',           color: '#EC4899', x: rightX, y: diagramY },
+      { label: 'ハイブリッド検索',    color: '#6366F1', x: rightX, y: diagramY + 1.4 },
+      { label: 'GPT-4o',            color: '#8B5CF6', x: rightX, y: diagramY + 2.8 },
+      { label: '根拠付き回答',       color: '#3B82F6', x: rightX, y: diagramY + 4.2 },
+    ];
+
+    // Render all nodes
+    [...captionNodes, ...qaNodes].forEach((node) => {
       const nodeBg = new BoxComponent(this.pptx, {
         fill: node.color,
         border: { color: COLORS.primary, width: 1 },
@@ -169,14 +200,37 @@ export class AIUsageSection implements Component {
       );
     });
 
-    // Add flow arrows (using line shapes)
-    this.addArrow(slide, centerX - 8.5, diagramY + 0.8, centerX - 8.5, diagramY + 1.4);
-    this.addArrow(slide, centerX - 3.5, diagramY + 0.8, centerX - 3.5, diagramY + 1.4);
-    this.addArrow(slide, centerX - 8.5, diagramY + 2.4, centerX - 2, diagramY + 2.7);
-    this.addArrow(slide, centerX - 3.5, diagramY + 2.4, centerX - 2, diagramY + 2.7);
-    this.addArrow(slide, centerX + 0.5, diagramY + 0.8, centerX - 0.5, diagramY + 3.7);
-    this.addArrow(slide, centerX - 2, diagramY + 3.7, centerX - 7, diagramY + 4.7);
-    this.addArrow(slide, centerX - 2, diagramY + 3.7, centerX, diagramY + 4.7);
+    // Caption flow arrows (vertical)
+    const lMid = leftX + nodeW / 2;
+    this.addArrow(slide, lMid, diagramY + nodeH, lMid, diagramY + 1.4);
+    this.addArrow(slide, lMid, diagramY + 1.4 + nodeH, lMid, diagramY + 2.8);
+    this.addArrow(slide, lMid, diagramY + 2.8 + nodeH, lMid, diagramY + 4.2);
+
+    // QA flow arrows (vertical)
+    const rMid = rightX + nodeW / 2;
+    this.addArrow(slide, rMid, diagramY + nodeH, rMid, diagramY + 1.4);
+    this.addArrow(slide, rMid, diagramY + 1.4 + nodeH, rMid, diagramY + 2.8);
+    this.addArrow(slide, rMid, diagramY + 2.8 + nodeH, rMid, diagramY + 4.2);
+
+    // Cross-flow arrow: Caption transcript feeds into QA search
+    this.addArrow(slide, leftX + nodeW, diagramY + 2.8 + nodeH / 2, rightX, diagramY + 1.4 + nodeH / 2);
+
+    // Cross-flow label
+    const crossLabel = new TextComponent(this.pptx, {
+      text: '講義記録を検索対象として利用',
+      fontSize: FONTS.small,
+      color: COLORS.mediumGray,
+      align: 'center',
+    });
+    crossLabel.render(
+      {
+        x: leftX + nodeW + 0.2,
+        y: diagramY + 1.8,
+        w: rightX - leftX - nodeW - 0.4,
+        h: 0.4,
+      },
+      slide,
+    );
   }
 
   /**
@@ -199,15 +253,16 @@ export class AIUsageSection implements Component {
   }
 
   /**
-   * Render feature breakdown boxes
+   * Render feature breakdown boxes (2 features side by side)
    */
   private renderFeatureBoxes(box: Box, slide: Slide): void {
     const boxY = box.y + 7.5;
     const boxH = 2.5;
-    const boxW = (box.w - 0.6) / 3;
+    const featureCount = Math.min(this.content.features.length, 2);
+    const boxW = (box.w - 0.6) / featureCount;
     const gap = 0.2;
 
-    this.content.features.slice(0, 3).forEach((feature, i) => {
+    this.content.features.slice(0, featureCount).forEach((feature, i) => {
       const featureBox = new BoxComponent(this.pptx, {
         fill: COLORS.white,
         border: { color: COLORS.secondary, width: 1 },
@@ -254,8 +309,8 @@ export class AIUsageSection implements Component {
       );
 
       const kpi = new TextComponent(this.pptx, {
-        text: `KPI: ${feature.kpi}`,
-        fontSize: FONTS.caption,
+        text: feature.kpi,
+        fontSize: FONTS.body,
         color: COLORS.accent,
         bold: true,
       });
@@ -319,28 +374,23 @@ export function createDefaultAIUsageSection(pptx: PptxInstance): AIUsageSection 
     features: [
       {
         name: '字幕生成フロー',
-        description: 'リアルタイムASR・補正・ソースタグ付け',
-        kpi: '2.8秒 / 87%',
+        description: 'リアルタイムASR・日本語補正・30秒ローリング要約',
+        kpi: '遅延 2.8秒 / 精度 87%',
       },
       {
         name: 'Q&Aフロー',
-        description: '文脈理解・情報源検証・引用表示',
-        kpi: '4.2秒 / 92%',
-      },
-      {
-        name: 'OCRフロー',
-        description: 'スライド抽出・ROI対応・品質フィルタ',
-        kpi: '94%成功率',
+        description: 'ハイブリッド検索・source-only回答・Verifier検証',
+        kpi: '遅延 4.2秒 / 関連性 92%',
       },
     ],
     prompts: [
       {
-        name: '字幕',
-        content: '直近60秒の講義内容を要約。関連ポイントをグループ化。ソースを明記: [音声][スライド][板書]',
+        name: '要約',
+        content: '直近60秒の講義内容を要約。関連ポイントをグループ化。最大150語。',
       },
       {
         name: 'Q&A',
-        content: '提供された講義記録とスライドテキストのみを使用して質問に答える。(chunk_id)でソースを引用',
+        content: '講義記録のみを使用して質問に回答。(chunk_id)でソースを引用。根拠不足時は「講義内では確認できない」と回答。',
       },
     ],
   };

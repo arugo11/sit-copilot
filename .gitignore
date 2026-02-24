@@ -63,3 +63,6 @@ Thumbs.db
 # Poster generation artifacts
 poster-gen/dist/
 poster-gen/*.pptx
+
+# runtime
+.runtime/
