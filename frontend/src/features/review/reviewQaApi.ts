@@ -12,9 +12,15 @@ export function createReviewAnswerId(): string {
 }
 
 export function resolveReviewQaLangMode(
-  language: 'ja' | 'en' | undefined
+  language: 'ja' | 'easy-ja' | 'en' | undefined
 ): LectureQaLangMode {
-  return language === 'en' ? 'en' : 'ja'
+  if (language === 'en') {
+    return 'en'
+  }
+  if (language === 'easy-ja') {
+    return 'easy-ja'
+  }
+  return 'ja'
 }
 
 export async function warmupReviewQaIndex(sessionId: string): Promise<void> {
@@ -27,7 +33,7 @@ export async function warmupReviewQaIndex(sessionId: string): Promise<void> {
 export async function requestReviewQaAnswer(params: {
   sessionId: string
   question: string
-  language: 'ja' | 'en' | undefined
+  language: 'ja' | 'easy-ja' | 'en' | undefined
   hasSuccessfulTurn: boolean
 }) {
   const { sessionId, question, language, hasSuccessfulTurn } = params

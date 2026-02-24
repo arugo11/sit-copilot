@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error'
@@ -27,10 +28,22 @@ export function AppShell({
   topbar,
   sidebar,
   rightRail,
-  locale = 'ja',
-  skipLinkLabel = { ja: 'コンテンツへスキップ', en: 'Skip to main content' },
+  locale,
+  skipLinkLabel,
 }: AppShellProps) {
+  const { t, i18n } = useTranslation()
   const { theme, toggleTheme } = useTheme()
+  const resolvedLocale: 'ja' | 'en' =
+    locale ??
+    ((i18n.resolvedLanguage ?? i18n.language).startsWith('en') ? 'en' : 'ja')
+  const jaT = i18n.getFixedT('ja')
+  const enT = i18n.getFixedT('en')
+  const effectiveSkipLinkLabel =
+    skipLinkLabel ?? {
+      ja: jaT('a11y.skipToMain'),
+      en: enT('a11y.skipToMain'),
+    }
+
   return (
     <div className="min-h-screen bg-bg-page">
       {/* Skip to main content link for keyboard users */}
@@ -42,7 +55,7 @@ export function AppShell({
           document.getElementById('main-content')?.focus()
         }}
       >
-        {skipLinkLabel[locale]}
+        {effectiveSkipLinkLabel[resolvedLocale]}
       </a>
 
       {/* Top Bar */}
@@ -58,8 +71,16 @@ export function AppShell({
               type="button"
               onClick={toggleTheme}
               className="ml-2 btn btn-ghost p-2 text-fg-secondary hover:text-fg-primary"
-              aria-label={theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
-              title={theme === 'dark' ? 'ライトモード' : 'ダークモード'}
+              aria-label={
+                theme === 'dark'
+                  ? t('appShell.theme.switchToLight')
+                  : t('appShell.theme.switchToDark')
+              }
+              title={
+                theme === 'dark'
+                  ? t('appShell.theme.light')
+                  : t('appShell.theme.dark')
+              }
             >
               {theme === 'dark'
                 ? /* Sun icon */
@@ -83,7 +104,7 @@ export function AppShell({
           <aside
             className="w-64 bg-bg-surface border-r border-border min-h-[calc(100vh-60px)]"
             role="complementary"
-            aria-label="サイドバー"
+            aria-label={t('appShell.sidebarLabel')}
           >
             <div className="p-4">
               {sidebar}
@@ -108,7 +129,7 @@ export function AppShell({
           <aside
             className="w-80 bg-bg-surface border-l border-border min-h-[calc(100vh-60px)]"
             role="complementary"
-            aria-label="補足情報"
+            aria-label={t('appShell.rightRailLabel')}
           >
             <div className="p-4">
               {rightRail}
@@ -140,7 +161,7 @@ export function AppShell({
         aria-atomic="true"
         className="sr-only"
         id="connection-status-region"
-        aria-label="Connection status"
+        aria-label={t('appShell.connectionStatusRegion')}
       />
     </div>
   )

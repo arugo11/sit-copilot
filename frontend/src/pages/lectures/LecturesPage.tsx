@@ -5,17 +5,20 @@
 
 import { Link } from 'react-router-dom'
 import { useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useToast } from '@/components/common/Toast'
 import { demoApi, getApiErrorMessage } from '@/lib/api/client'
 
 const DEMO_SESSIONS_STORAGE_KEY = 'sit_copilot_demo_sessions_v1'
-const DEFAULT_SESSION_TITLE_PREFIX = '講義セッション '
+const DEFAULT_SESSION_TITLE_PREFIXES = ['講義セッション ', 'Lecture Session ']
 const MAX_AUTO_SESSION_TITLE_LENGTH = 28
 
 type SessionStatus = 'live' | 'ended'
 type FilterType = 'all' | SessionStatus
 type PersistedSessionStatus = SessionStatus | 'active' | 'finalized'
+
+type UiLanguage = 'ja' | 'en'
 
 interface DemoLectureSession {
   session_id: string
@@ -35,7 +38,7 @@ function normalizeSessionStatus(value: unknown): SessionStatus | null {
 }
 
 function isPlaceholderSessionTitle(title: string): boolean {
-  return title.startsWith(DEFAULT_SESSION_TITLE_PREFIX)
+  return DEFAULT_SESSION_TITLE_PREFIXES.some((prefix) => title.startsWith(prefix))
 }
 
 function normalizeTitleText(text: string): string {
@@ -112,12 +115,14 @@ function saveStoredSessions(sessions: DemoLectureSession[]): void {
   }
 }
 
-function formatDateTime(isoDatetime: string): string {
+function formatDateTime(isoDatetime: string, language: UiLanguage): string {
   const date = new Date(isoDatetime)
   if (Number.isNaN(date.getTime())) {
     return isoDatetime
   }
-  return new Intl.DateTimeFormat('ja-JP', {
+
+  const locale = language === 'en' ? 'en-US' : 'ja-JP'
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -126,24 +131,21 @@ function formatDateTime(isoDatetime: string): string {
   }).format(date)
 }
 
-function getStatusBadge(status: SessionStatus) {
-  const variants = {
-    live: 'badge-live',
-    ended: 'badge-muted',
-  }
-  const labels = {
-    live: 'ライブ中',
-    ended: '終了',
-  }
-  return (
-    <span className={`badge ${variants[status]}`}>
-      {labels[status]}
-    </span>
-  )
+function buildSessionStartTitle(startedAt: Date, language: UiLanguage): string {
+  const locale = language === 'en' ? 'en-US' : 'ja-JP'
+  const prefix = language === 'en' ? 'Lecture Session ' : '講義セッション '
+  const formatted = new Intl.DateTimeFormat(locale, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(startedAt)
+  return `${prefix}${formatted}`
 }
 
 interface SessionCardProps {
   session: DemoLectureSession
+  locale: UiLanguage
   isFinalizing: boolean
   isDeleting: boolean
   onFinalize: (sessionId: string) => Promise<void>
@@ -151,6 +153,7 @@ interface SessionCardProps {
 }
 
 function CopyButton({ value, label }: { value: string; label: string }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(value)
@@ -171,35 +174,43 @@ function CopyButton({ value, label }: { value: string; label: string }) {
           : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
         }
       </svg>
-      {copied ? 'コピー済み' : 'ID をコピー'}
+      {copied ? t('lectures.actions.copied') : t('lectures.actions.copyId')}
     </button>
   )
 }
 
 function SessionCard({
   session,
+  locale,
   isFinalizing,
   isDeleting,
   onFinalize,
   onDelete,
 }: SessionCardProps) {
+  const { t } = useTranslation()
   const isBusy = isFinalizing || isDeleting
+
+  const statusLabel =
+    session.status === 'live'
+      ? t('lectures.status.live')
+      : t('lectures.status.ended')
 
   return (
     <div className="card p-6 space-y-4 hover:shadow-md transition-shadow">
-      {/* Header */}
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-lg font-semibold text-fg-primary line-clamp-2">
             {session.course_name}
           </h3>
           <div className="flex items-center gap-2">
-            {getStatusBadge(session.status)}
+            <span className={`badge ${session.status === 'live' ? 'badge-live' : 'badge-muted'}`}>
+              {statusLabel}
+            </span>
             <button
               type="button"
               className="btn btn-ghost min-h-8 min-w-8 p-1.5 text-fg-secondary hover:text-danger"
-              aria-label={`${session.course_name} を削除`}
-              title="セッションを削除"
+              aria-label={t('lectures.actions.deleteSessionAria', { courseName: session.course_name })}
+              title={t('lectures.actions.deleteSessionTitle')}
               onClick={() => onDelete(session)}
               disabled={isBusy}
             >
@@ -209,29 +220,30 @@ function SessionCard({
             </button>
           </div>
         </div>
-        <CopyButton value={session.session_id} label={`セッション ID ${session.session_id} をコピー`} />
+        <CopyButton
+          value={session.session_id}
+          label={t('lectures.actions.copySessionIdAria', { sessionId: session.session_id })}
+        />
       </div>
 
-      {/* Details */}
       <div className="space-y-1 text-sm text-fg-secondary">
         <p>
-          <span role="img" aria-label="開始時刻">🕐</span>{' '}
-          {formatDateTime(session.started_at)}
+          <span role="img" aria-label={t('lectures.details.startedAt')}>🕐</span>{' '}
+          {formatDateTime(session.started_at, locale)}
         </p>
       </div>
 
-      {/* Actions */}
       <div className="space-y-2">
         {session.status === 'live' ? (
           <Link
             to={`/lectures/${session.session_id}/live`}
             className="btn btn-primary w-full text-center"
           >
-            講義に入る
+            {t('lectures.actions.enter')}
           </Link>
         ) : (
           <span className="btn btn-primary w-full text-center pointer-events-none opacity-60">
-            終了済み（遷移なし）
+            {t('lectures.actions.endedNoTransition')}
           </span>
         )}
         {session.status === 'live' ? (
@@ -240,13 +252,17 @@ function SessionCard({
             className="btn btn-secondary w-full"
             disabled={isBusy}
             onClick={() => onFinalize(session.session_id)}
-            aria-label={`${session.course_name} のセッションを終了`}
+            aria-label={t('lectures.actions.finalizeAria', { courseName: session.course_name })}
           >
-            {isFinalizing ? '終了中...' : isDeleting ? '削除中...' : 'セッション終了'}
+            {isFinalizing
+              ? t('lectures.actions.finalizing')
+              : isDeleting
+                ? t('lectures.actions.deleting')
+                : t('lectures.actions.finalize')}
           </button>
         ) : (
           <span className="btn btn-ghost w-full text-center pointer-events-none text-fg-secondary">
-            {isDeleting ? '削除中...' : '終了済み'}
+            {isDeleting ? t('lectures.actions.deleting') : t('lectures.status.ended')}
           </span>
         )}
       </div>
@@ -255,7 +271,11 @@ function SessionCard({
 }
 
 export function LecturesPage() {
+  const { t, i18n } = useTranslation()
   const { showToast } = useToast()
+  const locale: UiLanguage =
+    (i18n.resolvedLanguage ?? i18n.language).startsWith('en') ? 'en' : 'ja'
+
   const [filter, setFilter] = useState<FilterType>('all')
   const [sessions, setSessions] = useState<DemoLectureSession[]>(() =>
     loadStoredSessions()
@@ -315,14 +335,14 @@ export function LecturesPage() {
         renameSessionLocally(sessionId, autoTitle)
         showToast({
           variant: 'info',
-          title: 'タイトルを自動更新しました',
+          title: t('lectures.messages.autoTitleUpdated'),
           message: autoTitle,
         })
       } catch {
         // Ignore auto-title failures and keep placeholder title.
       }
     },
-    [renameSessionLocally, showToast]
+    [renameSessionLocally, showToast, t]
   )
 
   const handleStartSession = async (): Promise<void> => {
@@ -330,12 +350,7 @@ export function LecturesPage() {
     setStartErrorMessage(null)
 
     const startedAt = new Date()
-    const courseName = `講義セッション ${new Intl.DateTimeFormat('ja-JP', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(startedAt)}`
+    const courseName = buildSessionStartTitle(startedAt, locale)
 
     try {
       const startResponse = await demoApi.startDemoSession({
@@ -351,7 +366,7 @@ export function LecturesPage() {
         started_at: startedAt.toISOString(),
         status: 'live',
       }
-      // Use functional updater to avoid stale closure over sessions
+
       setSessions((prev) => {
         const nextSessions = [
           newSession,
@@ -360,17 +375,18 @@ export function LecturesPage() {
         saveStoredSessions(nextSessions)
         return nextSessions
       })
+
       showToast({
         variant: 'success',
-        title: 'セッションを開始しました',
-        message: `Session ID: ${startResponse.session_id}`,
+        title: t('lectures.messages.sessionStarted'),
+        message: t('lectures.messages.sessionId', { sessionId: startResponse.session_id }),
       })
     } catch (error) {
-      const message = getApiErrorMessage(error, 'セッション開始に失敗しました。')
+      const message = getApiErrorMessage(error, t('lectures.messages.sessionStartFailed'))
       setStartErrorMessage(message)
       showToast({
         variant: 'danger',
-        title: 'セッション開始に失敗しました',
+        title: t('lectures.messages.sessionStartFailed'),
         message,
       })
     } finally {
@@ -379,19 +395,17 @@ export function LecturesPage() {
   }
 
   const handleFinalizeSession = async (sessionId: string): Promise<void> => {
-    // Guard: ignore re-click while this session is already being finalized
     if (finalizingSessionIds.has(sessionId) || deletingSessionIds.has(sessionId)) return
+
     const shouldAutoTitle = sessions.some(
       (session) =>
         session.session_id === sessionId &&
         isPlaceholderSessionTitle(session.course_name)
     )
 
-    // Add to the set of in-progress finalizations (supports multiple concurrent)
     setFinalizingSessionIds((prev) => new Set(prev).add(sessionId))
     try {
       await demoApi.finalizeDemoSession(sessionId)
-      // Use functional updater to avoid stale closure over sessions
       setSessions((prev) => {
         const nextSessions = prev.map((session) =>
           session.session_id === sessionId
@@ -403,14 +417,13 @@ export function LecturesPage() {
       })
       showToast({
         variant: 'success',
-        title: 'セッションを終了しました',
+        title: t('lectures.messages.sessionFinalized'),
       })
       if (shouldAutoTitle) {
         void updateSessionTitleFromContent(sessionId)
       }
     } catch (error) {
       const apiErr = error as { status?: number }
-      // 409 means session was already finalized on the server — update local state
       if (apiErr?.status === 409) {
         setSessions((prev) => {
           const nextSessions = prev.map((session) =>
@@ -423,7 +436,7 @@ export function LecturesPage() {
         })
         showToast({
           variant: 'success',
-          title: 'セッションは既に終了済みです',
+          title: t('lectures.messages.sessionAlreadyFinalized'),
         })
         if (shouldAutoTitle) {
           void updateSessionTitleFromContent(sessionId)
@@ -432,18 +445,17 @@ export function LecturesPage() {
         removeSessionLocally(sessionId)
         showToast({
           variant: 'warning',
-          title: 'セッションが見つかりません',
-          message: 'サーバー上に存在しないため一覧から削除しました。',
+          title: t('lectures.messages.sessionNotFound'),
+          message: t('lectures.messages.sessionRemovedAfterNotFound'),
         })
       } else {
         showToast({
           variant: 'danger',
-          title: 'セッション終了に失敗しました',
-          message: getApiErrorMessage(error, 'セッション終了APIに失敗しました。'),
+          title: t('lectures.messages.sessionFinalizeFailed'),
+          message: getApiErrorMessage(error, t('lectures.messages.sessionFinalizeApiFailed')),
         })
       }
     } finally {
-      // Remove from the set of in-progress finalizations
       setFinalizingSessionIds((prev) => {
         const next = new Set(prev)
         next.delete(sessionId)
@@ -457,7 +469,7 @@ export function LecturesPage() {
     if (deletingSessionIds.has(sessionId) || finalizingSessionIds.has(sessionId)) return
 
     const confirmed = window.confirm(
-      `「${session.course_name}」を削除します。\nライブ中の場合は自動で終了してから削除されます。\nこの操作は取り消せません。`
+      t('lectures.messages.confirmDelete', { courseName: session.course_name })
     )
     if (!confirmed) {
       return
@@ -469,9 +481,9 @@ export function LecturesPage() {
       removeSessionLocally(sessionId)
       showToast({
         variant: 'success',
-        title: 'セッションを削除しました',
+        title: t('lectures.messages.sessionDeleted'),
         message: result.auto_finalized
-          ? 'ライブ中セッションを自動終了して削除しました。'
+          ? t('lectures.messages.sessionAutoFinalizedAndDeleted')
           : undefined,
       })
     } catch (error) {
@@ -480,7 +492,7 @@ export function LecturesPage() {
         removeSessionLocally(sessionId)
         showToast({
           variant: 'warning',
-          title: 'セッションは既に削除済みです',
+          title: t('lectures.messages.sessionAlreadyDeleted'),
         })
       } else if (apiErr?.status === 409) {
         try {
@@ -489,10 +501,10 @@ export function LecturesPage() {
           removeSessionLocally(sessionId)
           showToast({
             variant: 'success',
-            title: 'セッションを削除しました',
+            title: t('lectures.messages.sessionDeleted'),
             message: retryResult.auto_finalized
-              ? 'ライブ中セッションを自動終了して削除しました。'
-              : '状態を同期後に削除しました。',
+              ? t('lectures.messages.sessionAutoFinalizedAndDeleted')
+              : t('lectures.messages.sessionDeletedAfterSync'),
           })
         } catch (retryError) {
           const retryApiErr = retryError as { status?: number }
@@ -500,15 +512,15 @@ export function LecturesPage() {
             removeSessionLocally(sessionId)
             showToast({
               variant: 'warning',
-              title: 'セッションは既に削除済みです',
+              title: t('lectures.messages.sessionAlreadyDeleted'),
             })
           } else {
             showToast({
               variant: 'danger',
-              title: 'セッション削除に失敗しました',
+              title: t('lectures.messages.sessionDeleteFailed'),
               message: getApiErrorMessage(
                 retryError,
-                'セッション状態の同期後も削除できませんでした。'
+                t('lectures.messages.sessionDeleteFailedAfterSync')
               ),
             })
           }
@@ -516,8 +528,8 @@ export function LecturesPage() {
       } else {
         showToast({
           variant: 'danger',
-          title: 'セッション削除に失敗しました',
-          message: getApiErrorMessage(error, 'セッション削除APIに失敗しました。'),
+          title: t('lectures.messages.sessionDeleteFailed'),
+          message: getApiErrorMessage(error, t('lectures.messages.sessionDeleteApiFailed')),
         })
       }
     } finally {
@@ -535,9 +547,11 @@ export function LecturesPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-fg-primary mb-2">講義一覧</h1>
+        <h1 className="text-3xl font-bold text-fg-primary mb-2">{t('lectures.title')}</h1>
         <p className="text-fg-secondary">
-          {hasSessions ? '実APIで開始したセッションを一覧表示します' : 'ログイン不要でセッションを開始し、講義画面へ遷移できます'}
+          {hasSessions
+            ? t('lectures.pageDescription.withSessions')
+            : t('lectures.pageDescription.withoutSessions')}
         </p>
       </div>
 
@@ -548,83 +562,89 @@ export function LecturesPage() {
           disabled={isStarting}
           className="btn btn-primary"
         >
-          {isStarting ? '開始中...' : 'セッション開始'}
+          {isStarting ? t('lectures.actions.starting') : t('lectures.actions.startSession')}
         </button>
         {startErrorMessage && (
           <span className="text-sm text-danger">{startErrorMessage}</span>
         )}
       </div>
 
-      {/* No data / error state */}
       {!hasSessions && (
         <EmptyState
           variant={startErrorMessage ? 'error' : 'no-data'}
-          title={startErrorMessage ? '講義データの取得に失敗しました' : 'セッションがありません'}
-          description={startErrorMessage ?? '「セッション開始」を押すと実APIでセッションを作成します。'}
+          title={
+            startErrorMessage
+              ? t('lectures.messages.fetchFailedTitle')
+              : t('lectures.empty.title')
+          }
+          description={
+            startErrorMessage
+              ? startErrorMessage
+              : t('lectures.empty.description')
+          }
           action={
             startErrorMessage ? (
-              <button onClick={handleStartSession} className="btn btn-primary">再試行</button>
+              <button onClick={handleStartSession} className="btn btn-primary">{t('common.retry')}</button>
             ) : undefined
           }
         />
       )}
 
-      {/* Filters (only when sessions exist) */}
       {hasSessions && (
         <>
-        <div className="flex flex-wrap gap-4 mb-6" role="group" aria-label="講義フィルター">
-          <button
-            type="button"
-            onClick={() => setFilter('all')}
-            className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
-            aria-pressed={filter === 'all'}
-          >
-            すべて
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('live')}
-            className={`btn ${filter === 'live' ? 'btn-primary' : 'btn-ghost'}`}
-            aria-pressed={filter === 'live'}
-          >
-            ライブ中
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('ended')}
-            className={`btn ${filter === 'ended' ? 'btn-primary' : 'btn-ghost'}`}
-            aria-pressed={filter === 'ended'}
-          >
-            終了
-          </button>
-        </div>
-
-        {/* Session Cards Grid */}
-        {isFilteredEmpty ? (
-          <EmptyState
-            variant="no-results"
-            title="該当するセッションがありません"
-            description="フィルタ条件を変更するか、フィルタ解除を押してください。"
-            action={
-              <button type="button" className="btn btn-secondary" onClick={() => setFilter('all')}>
-                フィルタ解除
-              </button>
-            }
-          />
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSessions.map((session) => (
-              <SessionCard
-                key={session.session_id}
-                session={session}
-                isFinalizing={finalizingSessionIds.has(session.session_id)}
-                isDeleting={deletingSessionIds.has(session.session_id)}
-                onFinalize={handleFinalizeSession}
-                onDelete={handleDeleteSession}
-              />
-            ))}
+          <div className="flex flex-wrap gap-4 mb-6" role="group" aria-label={t('lectures.filters.ariaLabel')}>
+            <button
+              type="button"
+              onClick={() => setFilter('all')}
+              className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={filter === 'all'}
+            >
+              {t('lectures.filters.all')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter('live')}
+              className={`btn ${filter === 'live' ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={filter === 'live'}
+            >
+              {t('lectures.filters.live')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter('ended')}
+              className={`btn ${filter === 'ended' ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={filter === 'ended'}
+            >
+              {t('lectures.filters.ended')}
+            </button>
           </div>
-        )}
+
+          {isFilteredEmpty ? (
+            <EmptyState
+              variant="no-results"
+              title={t('lectures.empty.noResultsTitle')}
+              description={t('lectures.empty.noResultsDescription')}
+              action={
+                <button type="button" className="btn btn-secondary" onClick={() => setFilter('all')}>
+                  {t('lectures.empty.clearFilter')}
+                </button>
+              }
+            />
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredSessions.map((session) => (
+                <SessionCard
+                  key={session.session_id}
+                  session={session}
+                  locale={locale}
+                  isFinalizing={finalizingSessionIds.has(session.session_id)}
+                  isDeleting={deletingSessionIds.has(session.session_id)}
+                  onFinalize={handleFinalizeSession}
+                  onDelete={handleDeleteSession}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

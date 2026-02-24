@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from time import perf_counter
 from typing import Literal, Protocol
 
@@ -111,6 +112,10 @@ class SqlAlchemyLectureQAService:
         """Execute retrieval + answer + verify + persist."""
         await self._ensure_session_owned(session_id=session_id, user_id=user_id)
         started_at = perf_counter()
+        effective_lang_mode = self._effective_lang_mode(
+            lang_mode=lang_mode,
+            question=question,
+        )
 
         # Retrieve relevant sources
         sources = await self._retriever.retrieve(
@@ -143,12 +148,15 @@ class SqlAlchemyLectureQAService:
         try:
             draft = await self._answerer.answer(
                 question=question,
-                lang_mode=lang_mode,
+                lang_mode=effective_lang_mode,
                 sources=sources,
                 history="",
             )
         except LectureAnswererError:
-            response = self._build_local_grounded_response(sources=sources)
+            response = self._build_local_grounded_response(
+                sources=sources,
+                lang_mode=effective_lang_mode,
+            )
             await self._persist_turn(
                 session_id=session_id,
                 question=question,
@@ -215,6 +223,10 @@ class SqlAlchemyLectureQAService:
         """Answer follow-up question with conversation context."""
         await self._ensure_session_owned(session_id=session_id, user_id=user_id)
         started_at = perf_counter()
+        effective_lang_mode = self._effective_lang_mode(
+            lang_mode=lang_mode,
+            question=question,
+        )
 
         # Resolve follow-up to standalone query
         resolution = await self._followup.resolve_query(
@@ -256,12 +268,15 @@ class SqlAlchemyLectureQAService:
         try:
             draft = await self._answerer.answer(
                 question=resolution.standalone_query,
-                lang_mode=lang_mode,
+                lang_mode=effective_lang_mode,
                 sources=sources,
                 history=resolution.history_context,
             )
         except LectureAnswererError:
-            base_response = self._build_local_grounded_response(sources=sources)
+            base_response = self._build_local_grounded_response(
+                sources=sources,
+                lang_mode=effective_lang_mode,
+            )
             await self._persist_turn(
                 session_id=session_id,
                 question=question,
@@ -332,39 +347,94 @@ class SqlAlchemyLectureQAService:
         )
 
     def _build_local_grounded_response(
-        self, *, sources: list[LectureSource]
+        self,
+        *,
+        sources: list[LectureSource],
+        lang_mode: str,
     ) -> LectureAskResponse:
         """Build a local grounded response from sources when Azure OpenAI fails."""
+        is_english = lang_mode == "en"
         snippets = [
             source.text.strip().replace("\n", " ")[:120]
             for source in sources[:2]
             if source.text.strip()
         ]
         if not snippets:
+            fallback_answer = (
+                "An error occurred while generating the answer. "
+                "Please check the lecture materials directly."
+                if is_english
+                else self._backend_failure_fallback
+            )
+            fallback_summary = (
+                "Answer generation failed."
+                if is_english
+                else "回答生成に失敗しました。"
+            )
+            fallback_action = (
+                "Please ask another question."
+                if is_english
+                else self._no_source_action_next
+            )
             return LectureAskResponse(
-                answer=self._backend_failure_fallback,
+                answer=fallback_answer,
                 confidence="low",
                 sources=sources,
-                verification_summary="回答生成に失敗しました。",
-                action_next=self._no_source_action_next,
-                fallback=self._backend_failure_fallback,
+                verification_summary=fallback_summary,
+                action_next=fallback_action,
+                fallback=fallback_answer,
             )
 
         if len(snippets) == 1:
-            answer = f"講義資料では「{snippets[0]}」と説明されています。"
-        else:
             answer = (
-                f"講義資料では「{snippets[0]}」および「{snippets[1]}」"
-                "の内容が関連しています。"
+                f'The lecture materials explain that "{snippets[0]}".'
+                if is_english
+                else f"講義資料では「{snippets[0]}」と説明されています。"
             )
+        else:
+            if is_english:
+                answer = (
+                    f'The lecture materials explain that "{snippets[0]}" and '
+                    f'"{snippets[1]}" are relevant.'
+                )
+            else:
+                answer = (
+                    f"講義資料では「{snippets[0]}」および「{snippets[1]}」"
+                    "の内容が関連しています。"
+                )
+        verification_summary = (
+            "Answer generation failed, so the response quotes the lecture materials directly."
+            if is_english
+            else "回答生成に失敗したため、資料から直接抜粋しました。"
+        )
+        action_next = (
+            "Please ask another question."
+            if is_english
+            else self._no_source_action_next
+        )
         return LectureAskResponse(
             answer=answer,
             confidence="low",
             sources=sources,
-            verification_summary="回答生成に失敗したため、資料から直接抜粋しました。",
-            action_next=self._no_source_action_next,
+            verification_summary=verification_summary,
+            action_next=action_next,
             fallback="",
         )
+
+    @classmethod
+    def _effective_lang_mode(cls, *, lang_mode: str, question: str) -> str:
+        if cls._is_english_question(question):
+            return "en"
+        return lang_mode
+
+    @staticmethod
+    def _is_english_question(question: str) -> bool:
+        stripped = question.strip()
+        if not stripped:
+            return False
+        has_latin = bool(re.search(r"[A-Za-z]", stripped))
+        has_japanese = bool(re.search(r"[ぁ-んァ-ン一-龥]", stripped))
+        return has_latin and not has_japanese
 
     async def _safe_verify(
         self,

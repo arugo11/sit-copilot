@@ -3,6 +3,8 @@
  * Base API client for backend communication
  */
 
+import i18n from '@/lib/i18n'
+
 function resolveApiBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE_URL
   if (typeof configured === 'string') {
@@ -264,6 +266,22 @@ interface ApiRequestOptions extends RequestInit {
   authScope?: AuthScope
 }
 
+function isEnglishUi(): boolean {
+  const language = i18n.resolvedLanguage ?? i18n.language
+  return language.startsWith('en')
+}
+
+export function getUnauthorizedMessage(scope: 'lecture' | 'procedure'): string {
+  if (scope === 'procedure') {
+    return isEnglishUi()
+      ? 'Unauthorized. Check token settings (X-Procedure-Token).'
+      : 'Unauthorized. トークン設定を確認してください (X-Procedure-Token)。'
+  }
+  return isEnglishUi()
+    ? 'Unauthorized. Check token settings (X-Lecture-Token / X-User-Id).'
+    : 'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+}
+
 function normalizeUserSettings(value: unknown): UserSettings {
   if (!value || typeof value !== 'object') {
     return {}
@@ -296,7 +314,9 @@ function normalizeUserSettings(value: unknown): UserSettings {
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.status === 0) {
-      return 'Network error: APIサーバーに接続できません。バックエンド起動と VITE_API_BASE_URL を確認してください。'
+      return isEnglishUi()
+        ? 'Network error: cannot reach API server. Check backend startup and VITE_API_BASE_URL.'
+        : 'Network error: APIサーバーに接続できません。バックエンド起動と VITE_API_BASE_URL を確認してください。'
     }
     return error.message
   }
@@ -355,13 +375,9 @@ class ApiClient {
           message = response.statusText || message
         }
         if (response.status === 401) {
-          if (authScope === 'procedure') {
-            message =
-              'Unauthorized. トークン設定を確認してください (X-Procedure-Token)。'
-          } else {
-            message =
-              'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
-          }
+          message = getUnauthorizedMessage(
+            authScope === 'procedure' ? 'procedure' : 'lecture'
+          )
         }
         throw new ApiError(response.status, message)
       }

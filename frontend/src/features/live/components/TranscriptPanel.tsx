@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { SegmentedControl } from '@/components/ui'
 import { formatTime } from '@/lib/utils'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
@@ -8,6 +9,7 @@ function formatSubtitleId(serial: number): string {
 }
 
 export function TranscriptPanel() {
+  const { t } = useTranslation()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
   const autoScroll = useLiveSessionStore((state) => state.autoScroll)
@@ -24,6 +26,7 @@ export function TranscriptPanel() {
     () => [...transcriptLines].sort((a, b) => a.tsStartMs - b.tsStartMs),
     [transcriptLines]
   )
+
   useEffect(() => {
     if (!autoScroll || !panelRef.current) {
       return
@@ -51,43 +54,43 @@ export function TranscriptPanel() {
     <div className="h-full flex flex-col relative">
       <div className="p-3 border-b border-border bg-bg-surface flex flex-wrap gap-3 items-center">
         <SegmentedControl
-          ariaLabel="language"
+          ariaLabel={t('transcriptPanel.languageAria')}
           value={selectedLanguage}
           onChange={(value) => {
             const mode = value as 'ja' | 'easy-ja' | 'en'
             void switchLanguage(mode)
           }}
           options={[
-            { value: 'ja', label: '日本語表示' },
-            { value: 'easy-ja', label: 'やさしい日本語' },
-            { value: 'en', label: 'English view' },
+            { value: 'ja', label: t('transcriptPanel.language.ja') },
+            { value: 'easy-ja', label: t('transcriptPanel.language.easyJa') },
+            { value: 'en', label: t('transcriptPanel.language.en') },
           ]}
         />
         <SegmentedControl
-          ariaLabel="density"
+          ariaLabel={t('transcriptPanel.densityAria')}
           value={density}
           onChange={(value) => setTranscriptDensity(value as 'comfortable' | 'compact')}
           options={[
-            { value: 'comfortable', label: '標準' },
-            { value: 'compact', label: 'コンパクト' },
+            { value: 'comfortable', label: t('transcriptPanel.density.comfortable') },
+            { value: 'compact', label: t('transcriptPanel.density.compact') },
           ]}
         />
         <label className="text-sm text-fg-secondary inline-flex items-center gap-2">
           <input
             type="checkbox"
             checked={autoScroll}
-            onChange={(e) => setAutoScroll(e.target.checked)}
+            onChange={(event) => setAutoScroll(event.target.checked)}
           />
-          自動スクロール
+          {t('transcriptPanel.autoScroll')}
         </label>
         {selectedLanguage !== 'ja' && translationFallbackActive && (
-          <span className="badge badge-warning">翻訳フォールバック中</span>
+          <span className="badge badge-warning">{t('transcriptPanel.translationFallbackActive')}</span>
         )}
       </div>
 
       <div ref={panelRef} className="flex-1 overflow-y-auto p-4 space-y-3" onScroll={handleScroll}>
         {sortedLines.length === 0 ? (
-          <div className="card p-4 text-sm text-fg-secondary">字幕待機中です</div>
+          <div className="card p-4 text-sm text-fg-secondary">{t('transcriptPanel.waiting')}</div>
         ) : (
           sortedLines.map((line) => {
             const originalText = (line.originalLangText ?? '').trim()
@@ -103,24 +106,30 @@ export function TranscriptPanel() {
                 <div className="text-xs text-fg-secondary flex items-center gap-2 mb-1">
                   {typeof line.subtitleSerial === 'number' && (
                     <span className="badge badge-default">
-                      字幕ID {formatSubtitleId(line.subtitleSerial)}
+                      {t('transcriptPanel.subtitleId', { id: formatSubtitleId(line.subtitleSerial) })}
                     </span>
                   )}
                   <span>{formatTime(line.tsStartMs)}</span>
                   {line.speakerLabel ? <span>• {line.speakerLabel}</span> : null}
-                  {line.isPartial ? <span className="badge badge-warning">partial</span> : <span className="badge badge-success">final</span>}
+                  {line.isPartial ? (
+                    <span className="badge badge-warning">{t('transcriptPanel.partial')}</span>
+                  ) : (
+                    <span className="badge badge-success">{t('transcriptPanel.final')}</span>
+                  )}
                 </div>
                 {selectedLanguage === 'ja' ? (
                   <>
                     <p className="text-fg-primary leading-relaxed">{line.sourceLangText}</p>
                     {hasCorrectionDiff && (
-                      <p className="text-xs text-fg-secondary mt-2">補正前: {originalText}</p>
+                      <p className="text-xs text-fg-secondary mt-2">
+                        {t('transcriptPanel.beforeCorrection', { text: originalText })}
+                      </p>
                     )}
                     {line.correctionStatus === 'pending' && (
-                      <p className="text-xs text-fg-secondary mt-1">日本語補正中（原文表示）</p>
+                      <p className="text-xs text-fg-secondary mt-1">{t('transcriptPanel.correctionPending')}</p>
                     )}
                     {line.correctionStatus === 'review_failed' && (
-                      <p className="text-xs text-warning mt-1">日本語補正失敗（原文表示）</p>
+                      <p className="text-xs text-warning mt-1">{t('transcriptPanel.correctionFailed')}</p>
                     )}
                   </>
                 ) : (
@@ -132,12 +141,12 @@ export function TranscriptPanel() {
                     </p>
                     {line.translatedLangMode === selectedLanguage &&
                       line.translationStatus === 'fallback' && (
-                      <p className="text-xs text-warning mt-1">
-                        翻訳フォールバック表示中
-                      </p>
+                        <p className="text-xs text-warning mt-1">
+                          {t('transcriptPanel.translationFallbackLine')}
+                        </p>
                     )}
                     {line.translatedLangMode !== selectedLanguage && (
-                      <p className="text-xs text-fg-secondary mt-1">翻訳生成待機中（原文表示）</p>
+                      <p className="text-xs text-fg-secondary mt-1">{t('transcriptPanel.translationWaiting')}</p>
                     )}
                   </>
                 )}
@@ -150,7 +159,7 @@ export function TranscriptPanel() {
       {!autoScroll && (
         <div className="absolute bottom-4 right-4">
           <button type="button" className="btn btn-primary shadow-lg" onClick={backToCurrent}>
-            現在位置に戻る
+            {t('transcriptPanel.backToCurrent')}
           </button>
         </div>
       )}

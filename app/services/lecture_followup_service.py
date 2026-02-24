@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -246,6 +247,25 @@ class SqlAlchemyLectureFollowupService:
 
     def _build_rewrite_prompt(self, question: str, history: str) -> str:
         """Build LLM prompt for query rewrite."""
+        if self._is_english_text(question):
+            return f"""You rewrite context-dependent follow-up questions into standalone questions.
+
+Given the conversation history and the latest question, rewrite the latest question so it can be understood without prior context.
+
+[Conversation history]
+{history}
+
+[Latest question]
+{question}
+
+Requirements:
+- Replace pronouns (for example, "it", "that", "this") with explicit nouns when possible
+- Fill omitted subject/object based on the conversation context
+- Keep the rewritten question in English
+- Return only the rewritten question (no explanation)
+
+Rewritten question:"""
+
         return f"""あなたは会話の文脈を理解して、質問を書き換えるアシスタントです。
 
 以下の会話履歴と最新の質問を考慮して、最新の質問を独立した質問に書き換えてください。
@@ -260,9 +280,19 @@ class SqlAlchemyLectureFollowupService:
 - 代名詞（それ、その等）を具体的な名詞に置き換えてください
 - 省略された主語や目的語を補完してください
 - 会話の文脈を考慮して、独立した質問にしてください
+- 最新の質問と同じ言語で出力してください
 - 書き換えた質問だけを出力してください（説明不要）
 
 書き換えた質問:"""
+
+    @staticmethod
+    def _is_english_text(text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        has_latin = bool(re.search(r"[A-Za-z]", stripped))
+        has_japanese = bool(re.search(r"[ぁ-んァ-ン一-龥]", stripped))
+        return has_latin and not has_japanese
 
     async def _call_openai_rewrite(self, prompt: str) -> str:
         """Call Azure OpenAI API for follow-up rewrite."""

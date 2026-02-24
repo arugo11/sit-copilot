@@ -5,12 +5,14 @@
 
 import { cn } from '@/lib/utils'
 import { prefersReducedMotion } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: 'card' | 'table-row' | 'text' | 'circle'
 }
 
 export function Skeleton({ className, variant = 'text', ...props }: SkeletonProps) {
+  const { t } = useTranslation()
   const variantClasses = {
     card: 'h-32 rounded-lg',
     'table-row': 'h-12 w-full',
@@ -28,7 +30,7 @@ export function Skeleton({ className, variant = 'text', ...props }: SkeletonProp
       )}
       role="status"
       aria-live="polite"
-      aria-label="読み込み中"
+      aria-label={t('common.loading')}
       {...props}
     />
   )

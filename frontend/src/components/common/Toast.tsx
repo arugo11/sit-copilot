@@ -6,6 +6,7 @@
 
 import { createContext, useContext, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 type ToastVariant = 'success' | 'warning' | 'danger' | 'info'
 
@@ -88,6 +89,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastContainer() {
+  const { t } = useTranslation()
   const { toasts, removeToast } = useToast()
 
   return (
@@ -95,7 +97,7 @@ function ToastContainer() {
       className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
       role="region"
       aria-live="off" // We handle announcements manually
-      aria-label="Notifications"
+      aria-label={t('toast.regionLabel')}
     >
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={removeToast} />
@@ -131,6 +133,7 @@ const variantClasses: Record<ToastVariant, { container: string; icon: string }> 
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const { t } = useTranslation()
   const classes = variantClasses[toast.variant]
 
   return (
@@ -176,7 +179,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           'text-fg-secondary hover:text-fg-primary hover:bg-bg-muted',
           'focus:outline-2 focus:outline-offset-2 focus:outline-focus'
         )}
-        aria-label="通知を閉じる"
+        aria-label={t('toast.close')}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

@@ -23,16 +23,54 @@
       "international": "留学生",
       "disability": "障がいのある学生",
       "native": "日本語学生"
+    },
+    "steps": {
+      "title": "3ステップで利用開始",
+      "selectLanguage": {
+        "title": "1. UI言語を選ぶ",
+        "description": "先に言語を選ぶと、ボタンや説明が読みやすくなります。"
+      },
+      "startLecture": {
+        "title": "2. 講義一覧を開く",
+        "description": "進行中の講義を選んで、字幕表示を始めます。"
+      },
+      "askQuestion": {
+        "title": "3. 分からない点を質問",
+        "description": "講義中の内容を根拠付きで確認できます。"
+      }
+    },
+    "languageSelector": {
+      "label": "言語 / Language",
+      "help": "選択した言語は次回アクセス時にも保持されます。",
+      "saving": "言語設定を保存中...",
+      "options": {
+        "ja": "日本語",
+        "en": "English"
+      }
+    },
+    "quickStart": {
+      "title": "すぐに始める",
+      "note": "アカウント登録なしで利用できます。"
+    },
+    "support": {
+      "title": "留学生向けサポート",
+      "description": "講義中に理解しづらい箇所は、字幕・要点・ミニ質問でその場で確認できます。",
+      "languages": "対応言語: 日本語 / English"
     }
   },
   "lectures": {
     "title": "講義一覧",
     "description": "受講中の講義、予定、過去の講義を確認できます",
+    "pageDescription": {
+      "withSessions": "実APIで開始したセッションを一覧表示します",
+      "withoutSessions": "ログイン不要でセッションを開始し、講義画面へ遷移できます"
+    },
     "filters": {
       "all": "すべて",
       "live": "ライブ中",
       "upcoming": "予定",
-      "ended": "終了"
+      "ended": "終了",
+      "ariaLabel": "講義フィルター"
     },
     "status": {
       "live": "ライブ中",
@@ -41,12 +79,82 @@
     },
     "actions": {
       "enter": "講義に入る",
-      "review": "レビューを見る"
+      "review": "レビューを見る",
+      "startSession": "セッション開始",
+      "starting": "開始中...",
+      "copyId": "ID をコピー",
+      "copied": "コピー済み",
+      "copySessionIdAria": "セッション ID {{sessionId}} をコピー",
+      "deleteSessionTitle": "セッションを削除",
+      "deleteSessionAria": "{{courseName}} を削除",
+      "endedNoTransition": "終了済み（遷移なし）",
+      "finalize": "セッション終了",
+      "finalizing": "終了中...",
+      "deleting": "削除中...",
+      "finalizeAria": "{{courseName}} のセッションを終了"
+    },
+    "details": {
+      "startedAt": "開始時刻"
     },
     "empty": {
-      "title": "講義が見つかりません",
-      "description": "選択したフィルター条件に一致する講義がありません",
+      "title": "セッションがありません",
+      "description": "「セッション開始」を押すと実APIでセッションを作成します。",
+      "clear": "フィルタを解除",
+      "noResultsTitle": "該当するセッションがありません",
+      "noResultsDescription": "フィルタ条件を変更するか、フィルタ解除を押してください。",
+      "clearFilter": "フィルタ解除"
+    },
+    "messages": {
+      "autoTitleUpdated": "タイトルを自動更新しました",
+      "sessionStarted": "セッションを開始しました",
+      "sessionId": "Session ID: {{sessionId}}",
+      "sessionStartFailed": "セッション開始に失敗しました。",
+      "fetchFailedTitle": "講義データの取得に失敗しました",
+      "sessionFinalized": "セッションを終了しました",
+      "sessionAlreadyFinalized": "セッションは既に終了済みです",
+      "sessionNotFound": "セッションが見つかりません",
+      "sessionRemovedAfterNotFound": "サーバー上に存在しないため一覧から削除しました。",
+      "sessionFinalizeFailed": "セッション終了に失敗しました",
+      "sessionFinalizeApiFailed": "セッション終了APIに失敗しました。",
+      "confirmDelete": "「{{courseName}}」を削除します。\nライブ中の場合は自動で終了してから削除されます。\nこの操作は取り消せません。",
+      "sessionDeleted": "セッションを削除しました",
+      "sessionAutoFinalizedAndDeleted": "ライブ中セッションを自動終了して削除しました。",
+      "sessionAlreadyDeleted": "セッションは既に削除済みです",
+      "sessionDeletedAfterSync": "状態を同期後に削除しました。",
+      "sessionDeleteFailed": "セッション削除に失敗しました",
+      "sessionDeleteFailedAfterSync": "セッション状態の同期後も削除できませんでした。",
+      "sessionDeleteApiFailed": "セッション削除APIに失敗しました。"
+    }
+  },
+  "lectureSources": {
+    "title": "ソース一覧",
+    "description": "OCRと文字起こしの元データ",
+    "types": {
+      "audio": "音声",
+      "slide": "投影資料",
+      "board": "板書",
+      "ocr": "OCR"
+    },
+    "filters": {
+      "all": "すべての種別",
+      "audio": "音声",
+      "slide": "投影資料",
+      "board": "板書",
+      "keywordPlaceholder": "キーワードで検索..."
+    },
+    "empty": {
+      "title": "該当するソースがありません",
+      "description": "フィルタまたはキーワードを変更してください。",
       "clear": "フィルタを解除"
+    },
+    "table": {
+      "caption": "講義ソース一覧",
+      "time": "時刻",
+      "type": "種別",
+      "excerpt": "抜粋",
+      "confidence": "信頼度",
+      "actions": "操作",
+      "open": "開く"
     }
   },
   "live": {
@@ -82,6 +190,41 @@
       "cameraOn": "ON",
       "cameraOff": "OFF",
       "micAutoStartFailed": "マイクの自動開始に失敗しました"
+    },
+    "messages": {
+      "translationFallbackTitle": "翻訳フォールバック",
+      "translationFallbackEn": "英語翻訳が不安定なため、フォールバック表示に切り替えました。",
+      "translationFallbackEasyJa": "やさしい日本語変換が不安定なため、フォールバック表示に切り替えました。",
+      "qaIndexRefreshFailedTitle": "QA索引更新に失敗しました",
+      "qaIndexRefreshFailedMessage": "前回までの索引で回答を継続します。",
+      "insufficientEvidenceTitle": "根拠が不足している回答です",
+      "authErrorTitle": "認証エラー",
+      "authErrorMessage": "トークン設定を確認してください (X-Lecture-Token / X-User-Id)。",
+      "sessionNotFoundTitle": "セッションが見つかりません",
+      "sessionNotFoundMessage": "講義一覧へ戻ります。",
+      "qaUnavailableTitle": "QAバックエンド利用不可",
+      "qaUnavailableMessage": "現在は回答生成サービスを利用できません。しばらくして再試行してください。",
+      "answerFetchFailedTitle": "回答の取得に失敗しました",
+      "answerFetchFailedMessage": "回答生成中にエラーが発生しました。",
+      "citationInfoTitle": "引用情報",
+      "citationInfoMessage": "引用ID: {{citationId}}",
+      "audioSyncErrorTitle": "音声同期エラー",
+      "audioSyncErrorMessage": "音声チャンクの送信に失敗しました。",
+      "reconnectedTitle": "接続復帰",
+      "reconnectedMessage": "ライブストリームに再接続しました。",
+      "reconnectingTitle": "再接続中",
+      "reconnectingMessage": "ライブストリームの再接続を試行しています。",
+      "liveEventErrorTitle": "ライブイベントエラー",
+      "sseConnectFailedTitle": "SSE接続失敗",
+      "sseConnectFailedMessage": "ライブストリームを開始できませんでした。",
+      "autoReconnectMessage": "自動再接続を継続します。",
+      "micErrorTitle": "マイクエラー"
+    },
+    "aria": {
+      "copySessionId": "セッション ID をコピー",
+      "sessionIdTitle": "Session: {{sessionId}}",
+      "transcriptLag": "字幕遅延",
+      "inputLevel": "入力レベル {{value}}%"
     }
   },
   "review": {
@@ -115,6 +258,7 @@
     },
     "theme": {
       "title": "テーマ",
+      "ariaLabel": "テーマ選択",
       "light": "ライト",
       "dark": "ダーク",
       "highContrast": "ハイコントラスト"
@@ -125,8 +269,15 @@
       "normal": "中",
       "large": "大"
     },
+    "transcriptDensity": {
+      "title": "字幕密度",
+      "comfortable": "標準",
+      "compact": "コンパクト",
+      "autoScrollDefault": "自動スクロールを初期ONにする"
+    },
     "language": {
-      "title": "UI言語"
+      "title": "UI言語",
+      "description": "変更すると、次回アクセス時にもこの言語で表示されます。"
     },
     "accessibility": {
       "reducedMotion": "アニメーションを減らす",
@@ -134,8 +285,139 @@
     },
     "actions": {
       "save": "保存",
+      "saving": "保存中...",
       "reset": "リセット"
+    },
+    "messages": {
+      "saved": "設定を保存しました",
+      "loadFailedTitle": "設定の読み込みに失敗しました",
+      "loadFailedDescription": "ネットワーク接続を確認してください",
+      "updateFailedTitle": "設定の更新に失敗しました",
+      "updateFailedMessage": "設定の更新に失敗しました。"
     }
+  },
+  "assistPanel": {
+    "sections": {
+      "languageMode": "言語モード",
+      "status": "状態",
+      "summary": "いまの要点",
+      "keyterms": "用語サポート",
+      "qa": "質問"
+    },
+    "languageModes": {
+      "ja": "日本語",
+      "easyJa": "やさしい日本語",
+      "en": "English"
+    },
+    "languageModeAria": "言語モード選択",
+    "updating": "更新中...",
+    "status": {
+      "recording": "録音",
+      "transcription": "文字起こし",
+      "translation": "翻訳",
+      "connection": "接続",
+      "running": "稼働中",
+      "micLevel": "マイク入力レベル"
+    },
+    "summaryToggleAria": "要約機能の切り替え",
+    "keytermsToggleAria": "用語抽出機能の切り替え",
+    "refreshNow": "今すぐ更新",
+    "summary": {
+      "off": "現在この機能はOFFになっています",
+      "waiting": "要点生成待機中"
+    },
+    "keyterms": {
+      "off": "現在この機能はOFFになっています",
+      "waiting": "用語抽出待機中"
+    },
+    "qaStatus": {
+      "idle": "待機中",
+      "streaming": "回答生成中...",
+      "done": "完了",
+      "error": "エラー"
+    },
+    "miniQuestionLabel": "ミニ質問",
+    "miniQuestionPlaceholder": "短い質問を入力",
+    "submit": "送信",
+    "submitting": "送信中...",
+    "retry": "再試行",
+    "regenerate": "再生成",
+    "messages": {
+      "langModeChangedTitle": "言語モードを切り替えました",
+      "langModeChangeFailedTitle": "言語モードの切り替えに失敗しました",
+      "langModeChangeFailedMessage": "接続状態を確認して再試行してください。"
+    }
+  },
+  "transcriptPanel": {
+    "languageAria": "表示言語",
+    "densityAria": "字幕密度",
+    "language": {
+      "ja": "日本語表示",
+      "easyJa": "やさしい日本語",
+      "en": "English view"
+    },
+    "density": {
+      "comfortable": "標準",
+      "compact": "コンパクト"
+    },
+    "autoScroll": "自動スクロール",
+    "translationFallbackActive": "翻訳フォールバック中",
+    "waiting": "字幕待機中です",
+    "subtitleId": "字幕ID {{id}}",
+    "partial": "partial",
+    "final": "final",
+    "beforeCorrection": "補正前: {{text}}",
+    "correctionPending": "日本語補正中（原文表示）",
+    "correctionFailed": "日本語補正失敗（原文表示）",
+    "translationFallbackLine": "翻訳フォールバック表示中",
+    "translationWaiting": "翻訳生成待機中（原文表示）",
+    "backToCurrent": "現在位置に戻る"
+  },
+  "sourcePanel": {
+    "title": "資料",
+    "tabs": {
+      "slide": "投影資料",
+      "board": "板書"
+    },
+    "latest": "{{title}} 最新",
+    "waitingFrames": "{{title}}のフレーム待機中",
+    "ocrHistory": "OCR 更新履歴",
+    "noOcrHistory": "まだOCR更新はありません",
+    "recentHistory": "直近履歴"
+  },
+  "qaStream": {
+    "empty": "質問を入力すると回答ブロックがここに追加されます。",
+    "pending": "生成開始待ち...",
+    "citationsAria": "引用元",
+    "status": {
+      "idle": "idle",
+      "streaming": "streaming",
+      "done": "done",
+      "error": "error"
+    }
+  },
+  "appShell": {
+    "sidebarLabel": "サイドバー",
+    "rightRailLabel": "補足情報",
+    "connectionStatusRegion": "接続状態",
+    "theme": {
+      "switchToLight": "ライトモードに切り替え",
+      "switchToDark": "ダークモードに切り替え",
+      "light": "ライトモード",
+      "dark": "ダークモード"
+    }
+  },
+  "notFound": {
+    "title": "ページが見つかりません",
+    "description": "お探しのページは存在しないか、移動された可能性があります。",
+    "backHome": "ホームに戻る"
+  },
+  "a11y": {
+    "skipToMain": "コンテンツへスキップ"
+  },
+  "toast": {
+    "regionLabel": "通知",
+    "close": "通知を閉じる"
   },
   "common": {
     "loading": "読み込み中",

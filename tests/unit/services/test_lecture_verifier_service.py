@@ -827,6 +827,24 @@ async def test_local_repair_answer_with_newline_in_source() -> None:
     assert "\n" not in result  # Newlines should be replaced with spaces
 
 
+async def test_local_repair_answer_with_english_question_returns_english() -> None:
+    """Local repair should preserve English output for English questions."""
+    service = AzureOpenAILectureVerifierService(
+        api_key=DISABLED_AZURE_OPENAI,
+        endpoint=DISABLED_AZURE_OPENAI,
+    )
+
+    result = await service.repair_answer(
+        question="Who developed transformer?",
+        answer="Original answer",
+        sources=[_make_source("Transformer was introduced in 2017.")],
+        unsupported_claims=["Unsupported claim"],
+    )
+
+    assert result is not None
+    assert result.startswith('The lecture materials explain that "')
+
+
 # =============================================================================
 # Repair network error
 # =============================================================================

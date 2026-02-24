@@ -517,7 +517,7 @@ async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persist
     # Should return local grounded answer with sources
     assert response.confidence == "low"
     assert response.fallback == ""
-    assert response.answer.startswith("講義資料では「")
+    assert response.answer.startswith('The lecture materials explain that "')
     assert "Test content from lecture" in response.answer
     assert response.sources == sources
 
@@ -659,6 +659,90 @@ async def test_followup_with_sources_resolves_query_and_returns_answer(
 
 
 @pytest.mark.asyncio
+async def test_ask_with_english_question_overrides_lang_mode_to_en(
+    db_session: AsyncSession,
+) -> None:
+    """English question should force lang_mode=en for answer generation."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Transformer was published in 2017.",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="Who developed transformer?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert answerer.answer_calls[0]["lang_mode"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_followup_with_english_question_overrides_lang_mode_to_en(
+    db_session: AsyncSession,
+) -> None:
+    """English follow-up should force lang_mode=en even if rewritten query differs."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="Transformer was published in 2017.",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup(
+        standalone_query="Transformerは誰が開発しましたか？",
+        history_context="Previous context.",
+    )
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    await service.followup(
+        session_id="session_123",
+        user_id="user_1",
+        question="Who developed transformer?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+        history_turns=3,
+    )
+
+    assert answerer.answer_calls[0]["lang_mode"] == "en"
+
+
+@pytest.mark.asyncio
 async def test_followup_without_sources_returns_fallback(
     db_session: AsyncSession,
 ) -> None:
@@ -739,7 +823,7 @@ async def test_followup_with_answerer_error_returns_local_grounded_answer(
     # Should return local grounded answer with sources
     assert response.confidence == "low"
     assert response.fallback == ""
-    assert response.answer.startswith("講義資料では「")
+    assert response.answer.startswith('The lecture materials explain that "')
     assert "Followup content from lecture" in response.answer
     assert response.sources == sources
     assert response.resolved_query == "What is machine learning?"
@@ -949,8 +1033,14 @@ async def test_ask_with_answerer_error_and_empty_sources_returns_backend_fallbac
 
     # Should return backend failure fallback
     assert response.confidence == "low"
-    assert response.answer == "バックエンドエラーが発生しました。"
-    assert response.fallback == "バックエンドエラーが発生しました。"
+    assert (
+        response.answer
+        == "An error occurred while generating the answer. Please check the lecture materials directly."
+    )
+    assert (
+        response.fallback
+        == "An error occurred while generating the answer. Please check the lecture materials directly."
+    )
 
 
 @pytest.mark.asyncio
@@ -992,10 +1082,7 @@ async def test_ask_with_answerer_error_and_single_source_returns_single_snippet(
 
     # Should use single snippet format
     assert response.confidence == "low"
-    assert (
-        response.answer
-        == "講義資料では「Single source content here」と説明されています。"
-    )
+    assert response.answer == 'The lecture materials explain that "Single source content here".'
     assert response.fallback == ""
 
 

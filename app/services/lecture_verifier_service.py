@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -305,7 +306,7 @@ class AzureOpenAILectureVerifierService:
             return None
 
         if not self._is_azure_openai_ready():
-            return self._local_repair_answer(sources=sources)
+            return self._local_repair_answer(question=question, sources=sources)
 
         prompt = self._build_repair_prompt(
             question, answer, sources, unsupported_claims
@@ -324,6 +325,33 @@ class AzureOpenAILectureVerifierService:
         """Build repair prompt."""
         sources_text = self._format_sources(sources)
         claims_text = "\n".join(f"- {c}" for c in unsupported_claims)
+        target_language = self._resolve_repair_language(question=question, answer=answer)
+
+        if target_language == "en":
+            return f"""You are an editor that repairs answers for grounded lecture QA.
+
+The original answer contains unsupported claims. Repair it using only supported information from lecture sources.
+
+[Lecture sources]
+{sources_text}
+
+[Question]
+{question}
+
+[Original answer]
+{answer}
+
+[Unsupported claims]
+{claims_text}
+
+Tasks:
+- Remove unsupported claims
+- Use only information supported by lecture sources
+- Keep the answer coherent and concise
+- Keep the final answer in English
+
+If repair is impossible, output only: UNREPAIRABLE
+"""
 
         return f"""あなたは回答を修正する編集者です。
 
@@ -387,7 +415,12 @@ class AzureOpenAILectureVerifierService:
             response_json = json.loads(raw)
             self._last_usage = extract_usage(response_json)
             repaired = self._extract_content(response_json).strip()
-            if not repaired or repaired == "修正不可能":
+            normalized = repaired.strip().lower()
+            if not repaired or normalized in {
+                "修正不可能",
+                "unrepairable",
+                "cannot be repaired",
+            }:
                 return None
             return repaired
         except HTTPError as exc:
@@ -437,13 +470,36 @@ class AzureOpenAILectureVerifierService:
             unsupported_claims=[answer],
         )
 
-    def _local_repair_answer(self, *, sources: list[LectureSource]) -> str | None:
+    def _local_repair_answer(
+        self,
+        *,
+        question: str,
+        sources: list[LectureSource],
+    ) -> str | None:
+        is_english = self._is_english_text(question)
         for source in sources:
             snippet = source.text.strip().replace("\n", " ")
             if snippet:
                 clipped = snippet[:120]
+                if is_english:
+                    return f'The lecture materials explain that "{clipped}".'
                 return f"講義資料では「{clipped}」と説明されています。"
         return None
+
+    def _resolve_repair_language(self, *, question: str, answer: str) -> str:
+        if self._is_english_text(question):
+            return "en"
+        if self._is_english_text(answer):
+            return "en"
+        return "ja"
+
+    def _is_english_text(self, text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        has_latin = bool(re.search(r"[A-Za-z]", stripped))
+        has_japanese = bool(re.search(r"[ぁ-んァ-ン一-龥]", stripped))
+        return has_latin and not has_japanese
 
     def _contains_source_fragment(self, *, answer_text: str, source_text: str) -> bool:
         if not source_text:

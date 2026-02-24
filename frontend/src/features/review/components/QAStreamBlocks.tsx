@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export interface QaStreamCitation {
   citationId: string
@@ -38,8 +39,10 @@ export function QAStreamBlocks({
     regenerate: string
   }
 }) {
+  const { t } = useTranslation()
+
   if (turns.length === 0) {
-    return <div className="card p-4 text-sm text-fg-secondary">質問を入力すると回答ブロックがここに追加されます。</div>
+    return <div className="card p-4 text-sm text-fg-secondary">{t('qaStream.empty')}</div>
   }
 
   return (
@@ -52,10 +55,10 @@ export function QAStreamBlocks({
           </header>
 
           <div className="text-sm whitespace-pre-wrap leading-relaxed">
-            {turn.markdown || '生成開始待ち...'}
+            {turn.markdown || t('qaStream.pending')}
           </div>
 
-          <div className="flex flex-wrap gap-2" role="group" aria-label="引用元">
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t('qaStream.citationsAria')}>
             {turn.citations.map((citation) => (
               <button
                 key={citation.citationId}
@@ -82,16 +85,18 @@ export function QAStreamBlocks({
 }
 
 function StatusBadge({ status }: { status: QaStreamTurn['status'] }): ReactNode {
+  const { t } = useTranslation()
+
   if (status === 'streaming') {
-    return <span className="badge badge-warning">streaming</span>
+    return <span className="badge badge-warning">{t('qaStream.status.streaming')}</span>
   }
   if (status === 'done') {
-    return <span className="badge badge-success">done</span>
+    return <span className="badge badge-success">{t('qaStream.status.done')}</span>
   }
   if (status === 'error') {
-    return <span className="badge badge-danger">error</span>
+    return <span className="badge badge-danger">{t('qaStream.status.error')}</span>
   }
-  return <span className="badge badge-default">idle</span>
+  return <span className="badge badge-default">{t('qaStream.status.idle')}</span>
 }
 
 function Footer({
