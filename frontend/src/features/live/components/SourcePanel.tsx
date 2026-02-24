@@ -1,9 +1,11 @@
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Tabs } from '@/components/ui'
 import { formatTime } from '@/lib/utils'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
 
 export function SourcePanel() {
+  const { t } = useTranslation()
   const sourceFrames = useLiveSessionStore((state) => state.sourceFrames)
   const ocrChunks = useLiveSessionStore((state) => state.ocrChunks)
 
@@ -18,7 +20,7 @@ export function SourcePanel() {
 
   const slideTabContent = (
     <SourceFrameList
-      title="投影資料"
+      title={t('sourcePanel.tabs.slide')}
       frames={slideFrames}
       ocrChunks={ocrChunks.filter((chunk) => chunk.source === 'slide')}
     />
@@ -26,7 +28,7 @@ export function SourcePanel() {
 
   const boardTabContent = (
     <SourceFrameList
-      title="板書"
+      title={t('sourcePanel.tabs.board')}
       frames={boardFrames}
       ocrChunks={ocrChunks.filter((chunk) => chunk.source === 'board')}
     />
@@ -34,12 +36,12 @@ export function SourcePanel() {
 
   return (
     <div className="space-y-3">
-      <h2 className="text-base font-semibold text-fg-primary">資料</h2>
+      <h2 className="text-base font-semibold text-fg-primary">{t('sourcePanel.title')}</h2>
       <Tabs
         defaultTab="slide"
         tabs={[
-          { value: 'slide', label: '投影資料', content: slideTabContent },
-          { value: 'board', label: '板書', content: boardTabContent },
+          { value: 'slide', label: t('sourcePanel.tabs.slide'), content: slideTabContent },
+          { value: 'board', label: t('sourcePanel.tabs.board'), content: boardTabContent },
         ]}
       />
     </div>
@@ -55,6 +57,7 @@ function SourceFrameList({
   frames: Array<{ id: string; thumbnailUrl: string; ocrExcerpt: string; timestampMs: number }>
   ocrChunks: Array<{ frameId: string; timestampMs: number; text: string }>
 }) {
+  const { t } = useTranslation()
   const latest = frames[0]
 
   return (
@@ -62,7 +65,7 @@ function SourceFrameList({
       {latest ? (
         <div className="card p-3 space-y-2">
           <div className="flex items-center justify-between text-xs text-fg-secondary">
-            <span>{title} 最新</span>
+            <span>{t('sourcePanel.latest', { title })}</span>
             <span>{formatTime(latest.timestampMs)}</span>
           </div>
           <img
@@ -74,13 +77,13 @@ function SourceFrameList({
           <p className="text-sm text-fg-secondary">{latest.ocrExcerpt}</p>
         </div>
       ) : (
-        <div className="card p-4 text-sm text-fg-secondary">{title}のフレーム待機中</div>
+        <div className="card p-4 text-sm text-fg-secondary">{t('sourcePanel.waitingFrames', { title })}</div>
       )}
 
       <div className="card p-3 space-y-2">
-        <h3 className="text-sm font-medium text-fg-primary">OCR 更新履歴</h3>
+        <h3 className="text-sm font-medium text-fg-primary">{t('sourcePanel.ocrHistory')}</h3>
         {ocrChunks.length === 0 ? (
-          <p className="text-sm text-fg-secondary">まだOCR更新はありません</p>
+          <p className="text-sm text-fg-secondary">{t('sourcePanel.noOcrHistory')}</p>
         ) : (
           <ul className="space-y-2">
             {ocrChunks.slice(0, 5).map((chunk) => (
@@ -94,7 +97,7 @@ function SourceFrameList({
       </div>
 
       <div className="card p-3 space-y-2">
-        <h3 className="text-sm font-medium text-fg-primary">直近履歴</h3>
+        <h3 className="text-sm font-medium text-fg-primary">{t('sourcePanel.recentHistory')}</h3>
         <div className="grid grid-cols-2 gap-2">
           {frames.slice(0, 10).map((frame) => (
             <button

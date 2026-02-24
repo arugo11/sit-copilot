@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
 import { useAudioInputStore } from '@/stores/audioInputStore'
 import { demoApi } from '@/lib/api/client'
@@ -10,20 +11,7 @@ import {
   type QaStreamTurn,
 } from '@/features/review/components/QAStreamBlocks'
 
-const LANG_MODE_OPTIONS = [
-  { value: 'ja', label: '日本語' },
-  { value: 'easy-ja', label: 'やさしい日本語' },
-  { value: 'en', label: 'English' },
-] as const
-
 const SUMMARY_REFRESH_INTERVAL_MS = 30000 // 30 seconds
-
-const QA_STATUS_LABELS: Record<QaStreamStatus, string> = {
-  idle: '待機中',
-  streaming: '回答生成中…',
-  done: '完了',
-  error: 'エラー',
-}
 
 interface AssistPanelProps {
   onAskMiniQuestion: (q: string) => void
@@ -44,6 +32,7 @@ export function AssistPanel({
   onQaRetry,
   onQaRegenerate,
 }: AssistPanelProps) {
+  const { t } = useTranslation()
   const { showToast } = useToast()
   const connection = useLiveSessionStore((state) => state.connection)
   const summaryPoints = useLiveSessionStore((state) => state.summaryPoints)
@@ -61,7 +50,19 @@ export function AssistPanel({
   const [isUpdatingLangMode, setIsUpdatingLangMode] = useState(false)
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false)
 
-  // Manual refresh function
+  const langModeOptions = [
+    { value: 'ja', label: t('assistPanel.languageModes.ja') },
+    { value: 'easy-ja', label: t('assistPanel.languageModes.easyJa') },
+    { value: 'en', label: t('assistPanel.languageModes.en') },
+  ] as const
+
+  const qaStatusLabel = {
+    idle: t('assistPanel.qaStatus.idle'),
+    streaming: t('assistPanel.qaStatus.streaming'),
+    done: t('assistPanel.qaStatus.done'),
+    error: t('assistPanel.qaStatus.error'),
+  } as const
+
   const handleRefreshSummary = useCallback(async () => {
     if (!sessionId || isRefreshingSummary) {
       return
@@ -72,13 +73,19 @@ export function AssistPanel({
       if (summary.status === 'ok') {
         setAssistSummary({
           timestampMs: Date.now(),
-          points: summary.summary.split('。').filter(Boolean).slice(0, 3)
+          points: summary.summary.split('。').filter(Boolean).slice(0, 3),
         })
-        setAssistTerms(summary.key_terms.map((term) => ({
-          term: typeof term === 'string' ? term : term.term,
-          explanation: typeof term === 'string' ? 'Generated from lecture summary evidence.' : (term.explanation || ''),
-          translation: typeof term === 'string' ? term : (term.translation || term.term),
-        })))
+        setAssistTerms(
+          summary.key_terms.map((term) => ({
+            term: typeof term === 'string' ? term : term.term,
+            explanation:
+              typeof term === 'string'
+                ? 'Generated from lecture summary evidence.'
+                : (term.explanation || ''),
+            translation:
+              typeof term === 'string' ? term : (term.translation || term.term),
+          }))
+        )
       }
     } catch (error) {
       console.warn('[summary] refresh failed:', error)
@@ -87,13 +94,10 @@ export function AssistPanel({
     }
   }, [sessionId, isRefreshingSummary, setAssistSummary, setAssistTerms])
 
-  // Auto-refresh every 30 seconds (only when summary is enabled)
-  // Also trigger an immediate fetch when summary is first enabled.
   useEffect(() => {
     if (!sessionId || !summaryEnabled) {
       return
     }
-    // Immediate fetch on toggle-on so users don't wait 30 seconds
     handleRefreshSummary()
     const interval = setInterval(() => {
       handleRefreshSummary()
@@ -111,19 +115,19 @@ export function AssistPanel({
       await handleRefreshSummary()
       showToast({
         variant: 'success',
-        title: '言語モードを切り替えました',
+        title: t('assistPanel.messages.langModeChangedTitle'),
         message:
           value === 'ja'
-            ? '日本語'
+            ? t('assistPanel.languageModes.ja')
             : value === 'easy-ja'
-              ? 'やさしい日本語'
-              : 'English',
+              ? t('assistPanel.languageModes.easyJa')
+              : t('assistPanel.languageModes.en'),
       })
     } catch {
       showToast({
         variant: 'danger',
-        title: '言語モードの切り替えに失敗しました',
-        message: '接続状態を確認して再試行してください。',
+        title: t('assistPanel.messages.langModeChangeFailedTitle'),
+        message: t('assistPanel.messages.langModeChangeFailedMessage'),
       })
     } finally {
       setIsUpdatingLangMode(false)
@@ -133,35 +137,37 @@ export function AssistPanel({
   return (
     <div className="space-y-4">
       <section className="card p-3 space-y-2">
-        <h2 className="text-sm font-semibold">言語モード</h2>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="言語モード選択">
-          {LANG_MODE_OPTIONS.map((option) => (
+        <h2 className="text-sm font-semibold">{t('assistPanel.sections.languageMode')}</h2>
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t('assistPanel.languageModeAria')}>
+          {langModeOptions.map((option) => (
             <button
               key={option.value}
               type="button"
               className={`badge cursor-pointer ${
                 langMode === option.value
-                  ? 'badge-primary'
+                  ? 'bg-accent text-fg-inverse'
                   : 'badge-default'
               }`}
               onClick={() => handleLangModeChange(option.value)}
               disabled={isUpdatingLangMode}
               aria-pressed={langMode === option.value}
             >
-              {isUpdatingLangMode && langMode === option.value ? '更新中...' : option.label}
+              {isUpdatingLangMode && langMode === option.value
+                ? t('assistPanel.updating')
+                : option.label}
             </button>
           ))}
         </div>
       </section>
 
       <section className="card p-3 space-y-2">
-        <h2 className="text-sm font-semibold">状態</h2>
-        <StatusRow label="録音" value={isRecording ? 'ON' : 'OFF'} ok={isRecording} />
-        <StatusRow label="文字起こし" value="稼働中" ok />
-        <StatusRow label="翻訳" value="稼働中" ok />
-        <StatusRow label="接続" value={connection} ok={connection === 'live'} />
+        <h2 className="text-sm font-semibold">{t('assistPanel.sections.status')}</h2>
+        <StatusRow label={t('assistPanel.status.recording')} value={isRecording ? 'ON' : 'OFF'} ok={isRecording} />
+        <StatusRow label={t('assistPanel.status.transcription')} value={t('assistPanel.status.running')} ok />
+        <StatusRow label={t('assistPanel.status.translation')} value={t('assistPanel.status.running')} ok />
+        <StatusRow label={t('assistPanel.status.connection')} value={t(`live.connection.${connection}`)} ok={connection === 'live'} />
         <div className="mt-2">
-          <div className="text-xs text-fg-secondary mb-1">マイク入力レベル</div>
+          <div className="text-xs text-fg-secondary mb-1">{t('assistPanel.status.micLevel')}</div>
           <div className="h-2 rounded bg-bg-muted overflow-hidden">
             <div className="h-full bg-accent transition-all" style={{ width: `${Math.round(audioLevel * 100)}%` }} />
           </div>
@@ -171,8 +177,8 @@ export function AssistPanel({
       <section className="card p-3 space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">いまの要点</h2>
-            <ToggleSwitch checked={summaryEnabled} onChange={toggleSummary} label="要約機能の切り替え" />
+            <h2 className="text-sm font-semibold">{t('assistPanel.sections.summary')}</h2>
+            <ToggleSwitch checked={summaryEnabled} onChange={toggleSummary} label={t('assistPanel.summaryToggleAria')} />
           </div>
           <button
             type="button"
@@ -180,13 +186,13 @@ export function AssistPanel({
             onClick={handleRefreshSummary}
             disabled={!summaryEnabled || isRefreshingSummary || !sessionId}
           >
-            {isRefreshingSummary ? '更新中...' : '今すぐ更新'}
+            {isRefreshingSummary ? t('assistPanel.updating') : t('assistPanel.refreshNow')}
           </button>
         </div>
         {!summaryEnabled ? (
-          <p className="text-sm text-fg-secondary">現在この機能はOFFになっています</p>
+          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.off')}</p>
         ) : summaryPoints.length === 0 ? (
-          <p className="text-sm text-fg-secondary">要点生成待機中</p>
+          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.waiting')}</p>
         ) : (
           <ul className="space-y-2 text-sm">
             {summaryPoints.map((point) => (
@@ -198,13 +204,13 @@ export function AssistPanel({
 
       <section className="card p-3 space-y-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">用語サポート</h2>
-          <ToggleSwitch checked={keytermsEnabled} onChange={toggleKeyterms} label="用語抽出機能の切り替え" />
+          <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
+          <ToggleSwitch checked={keytermsEnabled} onChange={toggleKeyterms} label={t('assistPanel.keytermsToggleAria')} />
         </div>
         {!keytermsEnabled ? (
-          <p className="text-sm text-fg-secondary">現在この機能はOFFになっています</p>
+          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>
         ) : assistTerms.length === 0 ? (
-          <p className="text-sm text-fg-secondary">用語抽出待機中</p>
+          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.waiting')}</p>
         ) : (
           <ul className="space-y-2">
             {assistTerms.map((term) => (
@@ -219,7 +225,7 @@ export function AssistPanel({
 
       <section className="card p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">質問</h2>
+          <h2 className="text-sm font-semibold">{t('assistPanel.sections.qa')}</h2>
           <span
             className={`badge ${
               qaStatus === 'streaming'
@@ -229,18 +235,18 @@ export function AssistPanel({
                   : 'badge-success'
             }`}
           >
-            {QA_STATUS_LABELS[qaStatus]}
+            {qaStatusLabel[qaStatus]}
           </span>
         </div>
         <div className="pt-2 border-t border-border">
-          <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">ミニ質問</label>
+          <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
           <div className="flex gap-2">
             <input
               id="mini-qa-input"
               className="input"
               value={miniQuestion}
-              onChange={(e) => setMiniQuestion(e.target.value)}
-              placeholder="短い質問を入力"
+              onChange={(event) => setMiniQuestion(event.target.value)}
+              placeholder={t('assistPanel.miniQuestionPlaceholder')}
               disabled={isQaSubmitting}
             />
             <button
@@ -254,14 +260,14 @@ export function AssistPanel({
                 setMiniQuestion('')
               }}
             >
-              {isQaSubmitting ? '送信中...' : '送信'}
+              {isQaSubmitting ? t('assistPanel.submitting') : t('assistPanel.submit')}
             </button>
           </div>
         </div>
         <QAStreamBlocks
           turns={qaTurns}
           isBusy={isQaSubmitting}
-          labels={{ resume: '再試行', regenerate: '再生成' }}
+          labels={{ resume: t('assistPanel.retry'), regenerate: t('assistPanel.regenerate') }}
           onCitationSelect={onQaCitationSelect}
           onRetry={onQaRetry}
           onRegenerate={onQaRegenerate}

@@ -15,24 +15,62 @@
     "demo": "Open Lectures",
     "features": {
       "title": "Key Features",
-      "captions": "Real-time Captions & Translation",
-      "materials": "Material View",
-      "qa": "Lecture Assistance"
+      "captions": "Real-time captions and translation",
+      "materials": "Lecture materials",
+      "qa": "Quick grounded QA"
     },
     "audience": {
       "international": "International Students",
       "disability": "Students with Disabilities",
       "native": "Native Japanese Students"
+    },
+    "steps": {
+      "title": "Start in 3 steps",
+      "selectLanguage": {
+        "title": "1. Choose your UI language",
+        "description": "Pick your preferred language first so labels and guidance are easier to follow."
+      },
+      "startLecture": {
+        "title": "2. Open your lecture list",
+        "description": "Select an active lecture and start live captions."
+      },
+      "askQuestion": {
+        "title": "3. Ask when unclear",
+        "description": "Use mini QA to confirm key points with sources."
+      }
+    },
+    "languageSelector": {
+      "label": "Language",
+      "help": "Your selected language is saved for the next visit.",
+      "saving": "Saving language preference...",
+      "options": {
+        "ja": "日本語",
+        "en": "English"
+      }
+    },
+    "quickStart": {
+      "title": "Quick Start",
+      "note": "No account setup required."
+    },
+    "support": {
+      "title": "Support for International Students",
+      "description": "When lecture content is hard to follow, use captions, key points, and mini QA right away.",
+      "languages": "Supported languages: 日本語 / English"
     }
   },
   "lectures": {
     "title": "Lectures",
     "description": "View your current, upcoming, and past lectures",
+    "pageDescription": {
+      "withSessions": "Sessions started via real API are listed here.",
+      "withoutSessions": "Start a session without login and jump to the live lecture page."
+    },
     "filters": {
       "all": "All",
       "live": "Live",
       "upcoming": "Upcoming",
-      "ended": "Ended"
+      "ended": "Ended",
+      "ariaLabel": "Lecture filters"
     },
     "status": {
       "live": "Live",
@@ -41,12 +79,82 @@
     },
     "actions": {
       "enter": "Enter Lecture",
-      "review": "View Review"
+      "review": "View Review",
+      "startSession": "Start Session",
+      "starting": "Starting...",
+      "copyId": "Copy ID",
+      "copied": "Copied",
+      "copySessionIdAria": "Copy session ID {{sessionId}}",
+      "deleteSessionTitle": "Delete session",
+      "deleteSessionAria": "Delete {{courseName}}",
+      "endedNoTransition": "Ended (no transition)",
+      "finalize": "End Session",
+      "finalizing": "Ending...",
+      "deleting": "Deleting...",
+      "finalizeAria": "End session for {{courseName}}"
+    },
+    "details": {
+      "startedAt": "Started at"
     },
     "empty": {
-      "title": "No Lectures Found",
-      "description": "No lectures match the selected filter criteria",
-      "clear": "Clear Filters"
+      "title": "No sessions",
+      "description": "Press \"Start Session\" to create a session via real API.",
+      "clear": "Clear filters",
+      "noResultsTitle": "No matching sessions",
+      "noResultsDescription": "Change your filter or clear it.",
+      "clearFilter": "Clear Filter"
+    },
+    "messages": {
+      "autoTitleUpdated": "Session title was updated automatically",
+      "sessionStarted": "Session started",
+      "sessionId": "Session ID: {{sessionId}}",
+      "sessionStartFailed": "Failed to start session.",
+      "fetchFailedTitle": "Failed to load lecture data",
+      "sessionFinalized": "Session ended",
+      "sessionAlreadyFinalized": "Session is already ended",
+      "sessionNotFound": "Session not found",
+      "sessionRemovedAfterNotFound": "Removed from the list because it no longer exists on the server.",
+      "sessionFinalizeFailed": "Failed to end session",
+      "sessionFinalizeApiFailed": "Session finalize API failed.",
+      "confirmDelete": "Delete \"{{courseName}}\"?\nIf it is live, it will be auto-finalized before deletion.\nThis action cannot be undone.",
+      "sessionDeleted": "Session deleted",
+      "sessionAutoFinalizedAndDeleted": "Live session was auto-finalized and deleted.",
+      "sessionAlreadyDeleted": "Session is already deleted",
+      "sessionDeletedAfterSync": "Deleted after state sync.",
+      "sessionDeleteFailed": "Failed to delete session",
+      "sessionDeleteFailedAfterSync": "Failed to delete session even after state sync.",
+      "sessionDeleteApiFailed": "Session delete API failed."
+    }
+  },
+  "lectureSources": {
+    "title": "Sources",
+    "description": "Raw OCR and transcription data",
+    "types": {
+      "audio": "Audio",
+      "slide": "Slides",
+      "board": "Board",
+      "ocr": "OCR"
+    },
+    "filters": {
+      "all": "All types",
+      "audio": "Audio",
+      "slide": "Slides",
+      "board": "Board",
+      "keywordPlaceholder": "Search by keyword..."
+    },
+    "empty": {
+      "title": "No matching sources",
+      "description": "Try changing the filter or keyword.",
+      "clear": "Clear Filter"
+    },
+    "table": {
+      "caption": "Lecture source list",
+      "time": "Time",
+      "type": "Type",
+      "excerpt": "Excerpt",
+      "confidence": "Confidence",
+      "actions": "Actions",
+      "open": "Open"
     }
   },
   "live": {
@@ -54,7 +162,7 @@
       "connecting": "Connecting",
       "live": "Live",
       "reconnecting": "Reconnecting",
-      "degraded": "Unstable Connection",
+      "degraded": "Unstable",
       "error": "Error"
     },
     "lag": "Lag",
@@ -82,6 +190,41 @@
       "cameraOn": "ON",
       "cameraOff": "OFF",
       "micAutoStartFailed": "Failed to auto-start microphone"
+    },
+    "messages": {
+      "translationFallbackTitle": "Translation Fallback",
+      "translationFallbackEn": "English translation became unstable, so fallback display was applied.",
+      "translationFallbackEasyJa": "Easy Japanese conversion became unstable, so fallback display was applied.",
+      "qaIndexRefreshFailedTitle": "Failed to refresh QA index",
+      "qaIndexRefreshFailedMessage": "Continuing with the previously available index.",
+      "insufficientEvidenceTitle": "Answer may not have sufficient evidence",
+      "authErrorTitle": "Authentication Error",
+      "authErrorMessage": "Check token settings (X-Lecture-Token / X-User-Id).",
+      "sessionNotFoundTitle": "Session not found",
+      "sessionNotFoundMessage": "Returning to lecture list.",
+      "qaUnavailableTitle": "QA backend unavailable",
+      "qaUnavailableMessage": "Answer generation service is currently unavailable. Please try again later.",
+      "answerFetchFailedTitle": "Failed to fetch answer",
+      "answerFetchFailedMessage": "An error occurred while generating the answer.",
+      "citationInfoTitle": "Citation Info",
+      "citationInfoMessage": "Citation ID: {{citationId}}",
+      "audioSyncErrorTitle": "Audio Sync Error",
+      "audioSyncErrorMessage": "Failed to send audio chunk.",
+      "reconnectedTitle": "Connection Restored",
+      "reconnectedMessage": "Reconnected to live stream.",
+      "reconnectingTitle": "Reconnecting",
+      "reconnectingMessage": "Trying to reconnect to live stream.",
+      "liveEventErrorTitle": "Live Event Error",
+      "sseConnectFailedTitle": "SSE Connection Failed",
+      "sseConnectFailedMessage": "Could not start live stream.",
+      "autoReconnectMessage": "Automatic reconnection will continue.",
+      "micErrorTitle": "Microphone Error"
+    },
+    "aria": {
+      "copySessionId": "Copy session ID",
+      "sessionIdTitle": "Session: {{sessionId}}",
+      "transcriptLag": "Transcript lag",
+      "inputLevel": "Input level {{value}}%"
     }
   },
   "review": {
@@ -115,6 +258,7 @@
     },
     "theme": {
       "title": "Theme",
+      "ariaLabel": "Theme selection",
       "light": "Light",
       "dark": "Dark",
       "highContrast": "High Contrast"
@@ -125,17 +269,155 @@
       "normal": "Normal",
       "large": "Large"
     },
+    "transcriptDensity": {
+      "title": "Transcript Density",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "autoScrollDefault": "Enable auto-scroll by default"
+    },
     "language": {
-      "title": "UI Language"
+      "title": "UI Language",
+      "description": "This language will be used again on your next visit."
     },
     "accessibility": {
       "reducedMotion": "Reduce Motion",
-      "reducedMotionDesc": "Minimize motion for better visibility"
+      "reducedMotionDesc": "Minimize motion for better readability"
     },
     "actions": {
       "save": "Save",
+      "saving": "Saving...",
       "reset": "Reset"
+    },
+    "messages": {
+      "saved": "Settings saved",
+      "loadFailedTitle": "Failed to load settings",
+      "loadFailedDescription": "Check your network connection",
+      "updateFailedTitle": "Failed to update settings",
+      "updateFailedMessage": "Updating settings failed."
     }
+  },
+  "assistPanel": {
+    "sections": {
+      "languageMode": "Language Mode",
+      "status": "Status",
+      "summary": "Current Key Points",
+      "keyterms": "Key Term Support",
+      "qa": "Questions"
+    },
+    "languageModes": {
+      "ja": "Japanese",
+      "easyJa": "Easy Japanese",
+      "en": "English"
+    },
+    "languageModeAria": "Language mode selection",
+    "updating": "Updating...",
+    "status": {
+      "recording": "Recording",
+      "transcription": "Transcription",
+      "translation": "Translation",
+      "connection": "Connection",
+      "running": "Running",
+      "micLevel": "Microphone Input Level"
+    },
+    "summaryToggleAria": "Toggle summary feature",
+    "keytermsToggleAria": "Toggle key term extraction feature",
+    "refreshNow": "Refresh Now",
+    "summary": {
+      "off": "This feature is currently OFF",
+      "waiting": "Waiting for summary generation"
+    },
+    "keyterms": {
+      "off": "This feature is currently OFF",
+      "waiting": "Waiting for key term extraction"
+    },
+    "qaStatus": {
+      "idle": "Idle",
+      "streaming": "Generating...",
+      "done": "Done",
+      "error": "Error"
+    },
+    "miniQuestionLabel": "Mini Question",
+    "miniQuestionPlaceholder": "Type a short question",
+    "submit": "Submit",
+    "submitting": "Submitting...",
+    "retry": "Retry",
+    "regenerate": "Regenerate",
+    "messages": {
+      "langModeChangedTitle": "Language mode updated",
+      "langModeChangeFailedTitle": "Failed to update language mode",
+      "langModeChangeFailedMessage": "Check connection status and try again."
+    }
+  },
+  "transcriptPanel": {
+    "languageAria": "Display language",
+    "densityAria": "Transcript density",
+    "language": {
+      "ja": "Japanese View",
+      "easyJa": "Easy Japanese",
+      "en": "English View"
+    },
+    "density": {
+      "comfortable": "Comfortable",
+      "compact": "Compact"
+    },
+    "autoScroll": "Auto Scroll",
+    "translationFallbackActive": "Translation fallback active",
+    "waiting": "Waiting for transcript",
+    "subtitleId": "Subtitle ID {{id}}",
+    "partial": "partial",
+    "final": "final",
+    "beforeCorrection": "Before correction: {{text}}",
+    "correctionPending": "Japanese correction in progress (showing original)",
+    "correctionFailed": "Japanese correction failed (showing original)",
+    "translationFallbackLine": "Showing translation fallback",
+    "translationWaiting": "Waiting for translation (showing original)",
+    "backToCurrent": "Back to Current"
+  },
+  "sourcePanel": {
+    "title": "Sources",
+    "tabs": {
+      "slide": "Slides",
+      "board": "Board"
+    },
+    "latest": "Latest {{title}}",
+    "waitingFrames": "Waiting for {{title}} frames",
+    "ocrHistory": "OCR Update History",
+    "noOcrHistory": "No OCR updates yet",
+    "recentHistory": "Recent History"
+  },
+  "qaStream": {
+    "empty": "Answer blocks will appear here after you submit a question.",
+    "pending": "Waiting to start generation...",
+    "citationsAria": "Citations",
+    "status": {
+      "idle": "idle",
+      "streaming": "streaming",
+      "done": "done",
+      "error": "error"
+    }
+  },
+  "appShell": {
+    "sidebarLabel": "Sidebar",
+    "rightRailLabel": "Supplementary Info",
+    "connectionStatusRegion": "Connection status",
+    "theme": {
+      "switchToLight": "Switch to light mode",
+      "switchToDark": "Switch to dark mode",
+      "light": "Light mode",
+      "dark": "Dark mode"
+    }
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page may not exist or may have been moved.",
+    "backHome": "Back to Home"
+  },
+  "a11y": {
+    "skipToMain": "Skip to main content"
+  },
+  "toast": {
+    "regionLabel": "Notifications",
+    "close": "Close notification"
   },
   "common": {
     "loading": "Loading",

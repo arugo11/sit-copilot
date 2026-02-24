@@ -5,6 +5,7 @@
 
 import { lazy, Suspense } from 'react'
 import { Navigate, createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 
 // Lazy load pages for code splitting
 const LandingPage = lazy(() => import('@/pages/landing/LandingPage').then(m => ({ default: m.LandingPage })))
@@ -75,13 +76,15 @@ const router = createBrowserRouter([
 ])
 
 function NotFoundPage() {
+  const { t } = useTranslation()
+
   return (
     <AppShell>
       <EmptyState
         variant="error"
-        title="ページが見つかりません"
-        description="お探しのページは存在しないか、移動された可能性があります。"
-        action={<a href="/" className="btn btn-primary">ホームに戻る</a>}
+        title={t('notFound.title')}
+        description={t('notFound.description')}
+        action={<a href="/" className="btn btn-primary">{t('notFound.backHome')}</a>}
       />
     </AppShell>
   )

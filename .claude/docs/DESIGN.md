@@ -1634,6 +1634,7 @@ npm run build
 | SSE stream client uses fetch-based parser with custom headers | Native `EventSource` cannot send required auth headers; fetch-stream keeps existing token contract | 2026-02-21 |
 | Live page sends pseudo transcript chunks to `/api/v4/lecture/speech/chunk` until STT integration lands | Enables real backend-driven stream updates today while preserving transport/API contracts | 2026-02-21 |
 | Lecture list becomes session-driven (`session/start` + localStorage) instead of non-existent `/lectures` API | Removes contract mismatch and keeps demo sessions reproducible in browser without backend list endpoint | 2026-02-21 |
+| UI language switching uses immediate `i18n.changeLanguage` + merged settings auto-persist with non-blocking local fallback on save failure | Prevents perceived language-switch breakage, preserves existing settings fields, and keeps UI responsive for international students even under API failures | 2026-02-24 |
 
 ---
 
@@ -1901,6 +1902,7 @@ FastAPI Route (Depends)
 
 ### Changelog
 
+- 2026-02-24: Added frontend UI-language implementation decision (immediate switch + merged auto-persist + local fallback) and expanded public-page English localization for international-student-first UX.
 - 2026-02-23: Added live subtitle transform fallback signaling design (structured transform status, GPT-5 reasoning-effort control, and frontend fallback visibility).
 - 2026-02-23: Added subtitle transform response compatibility guard in frontend to absorb missing/invalid `status` and prevent silent non-Japanese-view failures.
 - 2026-02-23: Runtime operation switched subtitle transform Azure deployment to `gpt-4.1-nano` (`api-version=2025-01-01-preview`) to mitigate persistent fallback behavior.
@@ -2322,3 +2324,72 @@ interface PosterContent {
 ### Changelog
 
 - 2026-02-23: Added finalize-time automatic session title generation from lecture summary/key terms for placeholder-titled sessions.
+
+---
+
+## Lecture QA Answer Language Routing (2026-02-24)
+
+### Decision Summary
+
+- Improved `AzureOpenAILectureAnswererService._build_prompt()` to include explicit output language instruction.
+- Added language routing logic for lecture QA answers:
+  - `lang_mode="en"` always outputs English.
+  - English questions (Latin letters present, Japanese characters absent) also output English.
+  - `lang_mode="easy-ja"` outputs やさしい日本語 when question is not English.
+  - Otherwise outputs Japanese.
+- Added stricter English-path controls in answer generation:
+  - English question path now uses English-first prompt template and English-only system instruction.
+  - No-source/action-next/local fallback text is localized to English for English questions.
+- Added fallback-safe language routing in `SqlAlchemyLectureQAService`:
+  - Effective answer lang_mode is upgraded to `en` when the user question is English.
+  - Local grounded fallback responses from QA service are also emitted in English for English questions.
+- Added follow-up rewrite language preservation:
+  - `LectureFollowupService` uses an English rewrite prompt for English questions and explicitly preserves question language.
+- Updated frontend mini QA request language source:
+  - `requestReviewQaAnswer` now accepts `easy-ja`.
+  - Live page sends current session `selectedLanguage` instead of stale/optional settings language.
+- Added unit tests to lock language-instruction behavior in prompt generation.
+
+### Rationale
+
+- Previous prompt text was Japanese-only, which caused Japanese answers even when users asked in English.
+- Explicit language routing in prompt keeps current QA architecture unchanged while fixing user-facing response language behavior.
+
+### Compatibility Rules
+
+- Retrieval/verification/persistence flow remains unchanged; only prompt construction logic is updated.
+- Existing API contracts and schema are unchanged.
+- English detection is intentionally conservative (mixed Japanese+English questions default to `lang_mode` behavior).
+
+### Changelog
+
+- 2026-02-24: Added prompt-level response language routing for lecture QA so English questions are answered in English.
+- 2026-02-24: Strengthened English-path QA controls across answer/fallback/followup rewrite/frontend lang-mode wiring to prevent Japanese responses to English questions.
+
+---
+
+## Local Dev Server Script (2026-02-24)
+
+### Decision Summary
+
+- Added unified local runtime script: `scripts/dev-server.sh`.
+- Script supports `start|stop|restart|status|logs` for `backend|frontend|all`.
+- Runtime artifacts are centralized under `.runtime/`:
+  - PID files: `backend.pid`, `frontend.pid`
+  - Logs: `backend.log`, `frontend.log`
+- Backend startup via script defaults to `WEAVE_ENABLED=false` for stable local startup, while allowing override through environment variable.
+
+### Rationale
+
+- Repeated manual startup/restart commands increased operational friction during verification loops.
+- Single command entrypoint reduces human error and speeds up local QA iteration.
+- Disabling Weave by default in script avoids startup hangs in environments without reliable Weave connectivity.
+
+### Compatibility Rules
+
+- Existing manual startup commands remain valid and documented in README as fallback.
+- Script is intended for local development; production/deployment flows are unchanged.
+
+### Changelog
+
+- 2026-02-24: Added `scripts/dev-server.sh` and documented quick startup/restart workflow in README.

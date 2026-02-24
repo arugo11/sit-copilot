@@ -4,6 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import {
   settingsApi,
   type UserSettings,
@@ -47,6 +48,7 @@ export interface UpdateSettingsVariables {
  * Invalidates settings queries on success
  */
 export function useUpdateSettings() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
@@ -59,8 +61,8 @@ export function useUpdateSettings() {
     onError: (error) => {
       showToast({
         variant: 'danger',
-        title: 'Failed to update settings',
-        message: getApiErrorMessage(error, 'Updating settings failed.'),
+        title: t('settings.messages.updateFailedTitle'),
+        message: getApiErrorMessage(error, t('settings.messages.updateFailedMessage')),
       })
     }
   })

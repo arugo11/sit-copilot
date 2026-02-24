@@ -1,9 +1,18 @@
-import { API_BASE_URL, DEMO_USER_ID, LECTURE_API_TOKEN } from '@/lib/api/client'
+import i18n from '@/lib/i18n'
+import {
+  API_BASE_URL,
+  DEMO_USER_ID,
+  LECTURE_API_TOKEN,
+  getUnauthorizedMessage,
+} from '@/lib/api/client'
 import type { StreamTransport, WsEvent } from '../types'
 
 const STREAM_ENDPOINT = '/api/v4/lecture/events/stream'
-const UNAUTHORIZED_MESSAGE =
-  'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+
+function localize(messageJa: string, messageEn: string): string {
+  const language = i18n.resolvedLanguage ?? i18n.language
+  return language.startsWith('en') ? messageEn : messageJa
+}
 
 function buildStreamUrl(sessionId: string): string {
   const resolvedBase = API_BASE_URL
@@ -50,7 +59,7 @@ export class SseTransport implements StreamTransport {
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error(UNAUTHORIZED_MESSAGE)
+        throw new Error(getUnauthorizedMessage('lecture'))
       }
       throw new Error(`SSE connection failed (${response.status})`)
     }
@@ -103,7 +112,10 @@ export class SseTransport implements StreamTransport {
         this.emit({
           type: 'error',
           payload: {
-            message: 'ライブストリーム接続が切断されました。',
+            message: localize(
+              'ライブストリーム接続が切断されました。',
+              'Live stream connection was interrupted.'
+            ),
             recoverable: true,
           },
         })
@@ -145,7 +157,10 @@ export class SseTransport implements StreamTransport {
       this.emit({
         type: 'error',
         payload: {
-          message: '受信イベントの解析に失敗しました。',
+          message: localize(
+            '受信イベントの解析に失敗しました。',
+            'Failed to parse a received stream event.'
+          ),
           recoverable: true,
         },
       })

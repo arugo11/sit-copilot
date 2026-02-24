@@ -134,7 +134,7 @@ function addSubtitleIdsToSpeechCitations(
 }
 
 export function LectureLivePage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { id } = useParams()
   const sessionId = id ?? 'session'
@@ -142,6 +142,8 @@ export function LectureLivePage() {
   const { announceConnection } = useConnectionAnnouncer()
   const { announceQaStatus } = useQaAnnouncer()
   const { data: userSettings } = useUserSettings()
+  const uiLocale: 'ja' | 'en' =
+    (i18n.resolvedLanguage ?? i18n.language).startsWith('en') ? 'en' : 'ja'
   const [isQaSubmitting, setIsQaSubmitting] = useState(false)
 
   const connection = useLiveSessionStore((state) => state.connection)
@@ -198,11 +200,11 @@ export function LectureLivePage() {
       lastTranslationFallbackToastAtRef.current = nowMs
       showToast({
         variant: 'warning',
-        title: '翻訳フォールバック',
+        title: t('live.messages.translationFallbackTitle'),
         message:
           mode === 'en'
-            ? 'English view の翻訳が不安定なため、フォールバック表示に切り替えました。'
-            : 'やさしい日本語の変換が不安定なため、フォールバック表示に切り替えました。',
+            ? t('live.messages.translationFallbackEn')
+            : t('live.messages.translationFallbackEasyJa'),
       })
       console.warn('[subtitle-translation] fallback in use', {
         sessionId,
@@ -210,7 +212,7 @@ export function LectureLivePage() {
         reason,
       })
     },
-    [sessionId, showToast]
+    [sessionId, showToast, t]
   )
 
   const transformSubtitleForMode = useCallback(
@@ -294,17 +296,17 @@ export function LectureLivePage() {
       if (qaIndexBuiltOnceRef.current) {
         showToast({
           variant: 'warning',
-          title: 'QA索引更新に失敗しました',
+          title: t('live.messages.qaIndexRefreshFailedTitle'),
           message: getApiErrorMessage(
             error,
-            '前回までの索引で回答を継続します。'
+            t('live.messages.qaIndexRefreshFailedMessage')
           ),
         })
         return
       }
       throw error
     }
-  }, [sessionId, showToast])
+  }, [sessionId, showToast, t])
 
   const executeMiniQuestion = useCallback(
     async (
@@ -325,7 +327,7 @@ export function LectureLivePage() {
         submitQuestion(normalizedQuestion, answerId)
       }
 
-      const locale = userSettings?.language === 'en' ? 'en' : 'ja'
+      const locale = uiLocale
       announceQaStatus('generating', locale)
 
       try {
@@ -333,7 +335,7 @@ export function LectureLivePage() {
         const response = await requestReviewQaAnswer({
           sessionId,
           question: normalizedQuestion,
-          language: userSettings?.language,
+          language: selectedLanguage,
           hasSuccessfulTurn: successfulTurnCountRef.current > 0,
         })
 
@@ -355,7 +357,7 @@ export function LectureLivePage() {
         if (response.fallback) {
           showToast({
             variant: 'warning',
-            title: '根拠が不足している回答です',
+            title: t('live.messages.insufficientEvidenceTitle'),
             message: response.action_next,
           })
         }
@@ -366,17 +368,16 @@ export function LectureLivePage() {
         if (error instanceof ApiError && error.status === 401) {
           showToast({
             variant: 'danger',
-            title: '認証エラー',
-            message:
-              'トークン設定を確認してください (X-Lecture-Token / X-User-Id)。',
+            title: t('live.messages.authErrorTitle'),
+            message: t('live.messages.authErrorMessage'),
           })
           return
         }
         if (error instanceof ApiError && error.status === 404) {
           showToast({
             variant: 'danger',
-            title: 'セッションが見つかりません',
-            message: '講義一覧へ戻ります。',
+            title: t('live.messages.sessionNotFoundTitle'),
+            message: t('live.messages.sessionNotFoundMessage'),
           })
           navigate('/lectures')
           return
@@ -384,18 +385,17 @@ export function LectureLivePage() {
         if (error instanceof ApiError && error.status === 503) {
           showToast({
             variant: 'danger',
-            title: 'QAバックエンド利用不可',
-            message:
-              '現在は回答生成サービスを利用できません。しばらくして再試行してください。',
+            title: t('live.messages.qaUnavailableTitle'),
+            message: t('live.messages.qaUnavailableMessage'),
           })
           return
         }
         showToast({
           variant: 'danger',
-          title: '回答の取得に失敗しました',
+          title: t('live.messages.answerFetchFailedTitle'),
           message: getApiErrorMessage(
             error,
-            '回答生成中にエラーが発生しました。'
+            t('live.messages.answerFetchFailedMessage')
           ),
         })
       } finally {
@@ -414,8 +414,10 @@ export function LectureLivePage() {
       sessionId,
       showToast,
       submitQuestion,
+      t,
       transcriptLines,
-      userSettings?.language,
+      uiLocale,
+      selectedLanguage,
     ]
   )
 
@@ -454,11 +456,11 @@ export function LectureLivePage() {
     (citationId: string) => {
       showToast({
         variant: 'info',
-        title: '引用情報',
-        message: `引用ID: ${citationId}`,
+        title: t('live.messages.citationInfoTitle'),
+        message: t('live.messages.citationInfoMessage', { citationId }),
       })
     },
-    [showToast]
+    [showToast, t]
   )
 
   const handleSpeechResult = useCallback(
@@ -633,8 +635,8 @@ export function LectureLivePage() {
         lastErrorToastAtRef.current = nowMs
         showToast({
           variant: 'danger',
-          title: '音声同期エラー',
-          message: getApiErrorMessage(error, '音声チャンクの送信に失敗しました。'),
+          title: t('live.messages.audioSyncErrorTitle'),
+          message: getApiErrorMessage(error, t('live.messages.audioSyncErrorMessage')),
         })
       }
     },
@@ -649,6 +651,7 @@ export function LectureLivePage() {
       setAssistTerms,
       setTranslationFallbackActive,
       notifyTranslationFallback,
+      t,
       transformSubtitleForMode,
     ]
   )
@@ -728,7 +731,7 @@ export function LectureLivePage() {
         setConnection(event.payload.connection)
         announceConnection(
           event.payload.connection === 'degraded' ? 'reconnecting' : event.payload.connection === 'error' ? 'error' : event.payload.connection,
-          'ja'
+          uiLocale
         )
 
         const previous = previousConnectionRef.current
@@ -736,8 +739,8 @@ export function LectureLivePage() {
         if ((previous === 'reconnecting' || previous === 'error') && current === 'live') {
           showToast({
             variant: 'success',
-            title: '接続復帰',
-            message: 'ライブストリームに再接続しました。',
+            title: t('live.messages.reconnectedTitle'),
+            message: t('live.messages.reconnectedMessage'),
           })
         } else if (current === 'reconnecting') {
           const now = Date.now()
@@ -745,8 +748,8 @@ export function LectureLivePage() {
             lastReconnectToastAtRef.current = now
             showToast({
               variant: 'warning',
-              title: '再接続中',
-              message: 'ライブストリームの再接続を試行しています。',
+              title: t('live.messages.reconnectingTitle'),
+              message: t('live.messages.reconnectingMessage'),
             })
           }
         }
@@ -797,7 +800,7 @@ export function LectureLivePage() {
       streamClient.subscribe('error', (event) => {
         showToast({
           variant: event.payload.recoverable ? 'warning' : 'danger',
-          title: 'ライブイベントエラー',
+          title: t('live.messages.liveEventErrorTitle'),
           message: event.payload.message,
         })
       }),
@@ -809,8 +812,8 @@ export function LectureLivePage() {
     streamClient.connect(sessionId).catch((error) => {
       showToast({
         variant: 'warning',
-        title: 'SSE接続失敗',
-        message: `${getApiErrorMessage(error, 'ライブストリームを開始できませんでした。')} 自動再接続を継続します。`,
+        title: t('live.messages.sseConnectFailedTitle'),
+        message: `${getApiErrorMessage(error, t('live.messages.sseConnectFailedMessage'))} ${t('live.messages.autoReconnectMessage')}`,
       })
     })
 
@@ -837,6 +840,8 @@ export function LectureLivePage() {
     setTranslationFallbackActive,
     showToast,
     stopRecording,
+    t,
+    uiLocale,
     notifyTranslationFallback,
     transformSubtitleForMode,
   ])
@@ -845,8 +850,8 @@ export function LectureLivePage() {
     if (!lastError) {
       return
     }
-    showToast({ variant: 'danger', title: 'マイクエラー', message: lastError })
-  }, [lastError, showToast])
+    showToast({ variant: 'danger', title: t('live.messages.micErrorTitle'), message: lastError })
+  }, [lastError, showToast, t])
 
   useEffect(() => {
     if (selectedLanguage !== 'ja') {
@@ -900,11 +905,11 @@ export function LectureLivePage() {
   ])
 
   const CONNECTION_LABELS: Record<string, string> = {
-    connecting: '接続中',
-    live: '接続中',
-    reconnecting: '再接続中',
-    degraded: '低品質',
-    error: 'エラー',
+    connecting: t('live.connection.connecting'),
+    live: t('live.connection.live'),
+    reconnecting: t('live.connection.reconnecting'),
+    degraded: t('live.connection.degraded'),
+    error: t('live.connection.error'),
   }
 
   const CONNECTION_BADGE: Record<string, string> = {
@@ -927,7 +932,7 @@ export function LectureLivePage() {
             <h1 className="text-lg font-semibold">{t('live.stream.title')}</h1>
             <span
               className={`badge ${CONNECTION_BADGE[connection] ?? 'badge-muted'}`}
-              title={`Session: ${sessionId}`}
+              title={t('live.aria.sessionIdTitle', { sessionId })}
             >
               {CONNECTION_LABELS[connection] ?? connection}
             </span>
@@ -936,7 +941,7 @@ export function LectureLivePage() {
               className="inline-flex items-center gap-1 text-xs text-fg-secondary hover:text-fg-primary transition-colors"
               title={sessionId}
               onClick={() => navigator.clipboard.writeText(sessionId)}
-              aria-label="セッション ID をコピー"
+              aria-label={t('live.aria.copySessionId')}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -944,7 +949,7 @@ export function LectureLivePage() {
               {shortSessionId}
             </button>
             {transcriptLagMs > 300 && (
-              <span className="text-xs text-warning" title="字幕遅延">⚠️ {transcriptLagMs}ms</span>
+              <span className="text-xs text-warning" title={t('live.aria.transcriptLag')}>⚠️ {transcriptLagMs}ms</span>
             )}
           </div>
           <div className="flex gap-2 items-center">
@@ -956,7 +961,11 @@ export function LectureLivePage() {
               {isRecording ? t('live.stream.stopRecording') : t('live.stream.startRecording')}
             </button>
             {/* Audio level bars */}
-            <div className="flex items-end gap-0.5 h-5" aria-label={`入力レベル ${Math.round(audioLevel * 100)}%`} title={`入力 ${Math.round(audioLevel * 100)}%`}>
+            <div
+              className="flex items-end gap-0.5 h-5"
+              aria-label={t('live.aria.inputLevel', { value: Math.round(audioLevel * 100) })}
+              title={t('live.aria.inputLevel', { value: Math.round(audioLevel * 100) })}
+            >
               {Array.from({ length: audioBarCount }, (_, i) => (
                 <div
                   key={i}

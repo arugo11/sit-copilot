@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
@@ -61,9 +62,13 @@ class AzureOpenAILectureAnswererService:
     DEFAULT_TIMEOUT_SECONDS = 30
     DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_ACTION_NEXT = "他にご質問があればどうぞ。"
+    DEFAULT_ACTION_NEXT_EN = "Feel free to ask another question."
     NO_SOURCE_ANSWER = "該当する情報が見つかりませんでした。"
+    NO_SOURCE_ANSWER_EN = "No relevant information was found in the lecture materials."
     NO_SOURCE_ACTION = "別の質問をしてください。"
+    NO_SOURCE_ACTION_EN = "Please ask another question."
     LOCAL_FALLBACK_PREFIX = "講義資料では"
+    LOCAL_FALLBACK_PREFIX_EN = "The lecture materials explain that"
     LOCAL_SNIPPET_MAX_CHARS = 120
 
     def __init__(
@@ -120,31 +125,36 @@ class AzureOpenAILectureAnswererService:
         Returns:
             Draft answer with confidence and action next
         """
+        target_language = self._resolve_response_language(
+            question=question,
+            lang_mode=lang_mode,
+        )
+
         if not sources:
             return LectureAnswerDraft(
-                answer=self.NO_SOURCE_ANSWER,
+                answer=self._no_source_answer(target_language),
                 confidence="low",
-                action_next=self.NO_SOURCE_ACTION,
+                action_next=self._no_source_action(target_language),
             )
 
-        prompt = self._build_prompt(question, lang_mode, sources, history)
+        prompt = self._build_prompt(question, target_language, sources, history)
         confidence = self._calculate_confidence(sources)
 
         if not self._is_azure_openai_ready():
             return LectureAnswerDraft(
-                answer=self._build_local_fallback_answer(sources),
+                answer=self._build_local_fallback_answer(sources, target_language),
                 confidence=confidence,
-                action_next=self.DEFAULT_ACTION_NEXT,
+                action_next=self._default_action_next(target_language),
             )
 
-        answer = await self._call_openai(prompt)
+        answer = await self._call_openai(prompt, target_language)
         if not answer.strip():
             raise LectureAnswererError("empty answer from Azure OpenAI")
 
         return LectureAnswerDraft(
             answer=answer,
             confidence=confidence,
-            action_next=self.DEFAULT_ACTION_NEXT,
+            action_next=self._default_action_next(target_language),
         )
 
     def _build_prompt(
@@ -155,11 +165,37 @@ class AzureOpenAILectureAnswererService:
         history: str,
     ) -> str:
         """Build grounded answer prompt."""
-        sources_text = self._format_sources(sources)
+        target_language = self._resolve_response_language(
+            question=question,
+            lang_mode=lang_mode,
+        )
+        if target_language == "en":
+            sources_text = self._format_sources(sources, heading="Lecture sources:")
+            history_section = (
+                f"\n\nConversation history:\n{history}" if history else ""
+            )
+            return f"""You are a grounded lecture QA assistant.
 
+Use only the lecture transcript sources below to answer the question.
+
+{sources_text}
+{history_section}
+
+Question: {question}
+
+Answer requirements:
+- Use only the lecture sources above
+- Cite concrete timestamps when available (e.g., 05:23)
+- If a detail is missing from sources, explicitly say it is not in the materials
+- Keep the answer concise (about 3-5 sentences)
+- Response language: English only
+"""
+
+        sources_text = self._format_sources(sources)
+        language_instruction = self._language_instruction(target_language)
         history_section = f"\n\n会話履歴:\n{history}" if history else ""
 
-        prompt = f"""あなたは講義内容に基づいて質問に答えるアシスタントです。
+        return f"""あなたは講義内容に基づいて質問に答えるアシスタントです。
 
 以下の講義資料（音声転写）のみを使用して、質問に答えてください。
 
@@ -173,18 +209,56 @@ class AzureOpenAILectureAnswererService:
 - 具体的な時間（例: 05:23）を引用して説明してください
 - 資料にない情報は「資料に記載がありません」と明示してください
 - 簡潔に回答してください（3-5文程度）
+- 回答言語: {language_instruction}
 """
-        return prompt
 
-    def _format_sources(self, sources: list[LectureSource]) -> str:
+    def _language_instruction(self, target_language: Literal["ja", "easy-ja", "en"]) -> str:
+        if target_language == "en":
+            return "English only"
+        if target_language == "easy-ja":
+            return "やさしい日本語"
+        return "日本語"
+
+    def _resolve_response_language(
+        self,
+        question: str,
+        lang_mode: str,
+    ) -> Literal["ja", "easy-ja", "en"]:
+        if lang_mode == "en":
+            return "en"
+        if self._is_english_question(question):
+            return "en"
+        if lang_mode == "easy-ja":
+            return "easy-ja"
+        return "ja"
+
+    @staticmethod
+    def _is_english_question(question: str) -> bool:
+        stripped = question.strip()
+        if not stripped:
+            return False
+        has_latin = bool(re.search(r"[A-Za-z]", stripped))
+        has_japanese = bool(re.search(r"[ぁ-んァ-ン一-龥]", stripped))
+        return has_latin and not has_japanese
+
+    def _format_sources(
+        self,
+        sources: list[LectureSource],
+        *,
+        heading: str = "講義資料:",
+    ) -> str:
         """Format sources for prompt."""
-        lines = ["講義資料:"]
+        lines = [heading]
         for i, source in enumerate(sources, 1):
             ts = source.timestamp or "??:??"
             lines.append(f"{i}. [{ts}] {source.text}")
         return "\n".join(lines)
 
-    async def _call_openai(self, prompt: str) -> str:
+    async def _call_openai(
+        self,
+        prompt: str,
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
         """Call Azure OpenAI chat completion endpoint.
 
         Raises:
@@ -195,10 +269,7 @@ class AzureOpenAILectureAnswererService:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a grounded lecture QA assistant. "
-                        "Answer only with provided lecture evidence."
-                    ),
+                    "content": self._system_instruction(target_language),
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -236,6 +307,21 @@ class AzureOpenAILectureAnswererService:
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             logger.warning("azure_openai_answer_parse_error")
             raise LectureAnswererError("azure openai answer parse failure") from exc
+
+    def _system_instruction(
+        self,
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
+        if target_language == "en":
+            return (
+                "You are a grounded lecture QA assistant. "
+                "Use only provided lecture evidence. "
+                "Respond in English only and never switch to Japanese."
+            )
+        return (
+            "You are a grounded lecture QA assistant. "
+            "Answer only with provided lecture evidence."
+        )
 
     def _is_azure_openai_ready(self) -> bool:
         """Return whether Azure OpenAI runtime call should be attempted."""
@@ -285,7 +371,11 @@ class AzureOpenAILectureAnswererService:
                 return "\n".join(text_parts)
         raise ValueError("missing content")
 
-    def _build_local_fallback_answer(self, sources: list[LectureSource]) -> str:
+    def _build_local_fallback_answer(
+        self,
+        sources: list[LectureSource],
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
         evidence = [source for source in sources if source.is_direct_hit] or sources
         snippets = [
             self._sanitize_snippet(source.text)
@@ -293,13 +383,44 @@ class AzureOpenAILectureAnswererService:
             if source.text.strip()
         ]
         if not snippets:
-            return self.NO_SOURCE_ANSWER
+            return self._no_source_answer(target_language)
         if len(snippets) == 1:
+            if target_language == "en":
+                return f"{self.LOCAL_FALLBACK_PREFIX_EN} \"{snippets[0]}\"."
             return f"{self.LOCAL_FALLBACK_PREFIX}「{snippets[0]}」と説明されています。"
+        if target_language == "en":
+            return (
+                f"{self.LOCAL_FALLBACK_PREFIX_EN} \"{snippets[0]}\" and "
+                f"\"{snippets[1]}\"."
+            )
         return (
             f"{self.LOCAL_FALLBACK_PREFIX}「{snippets[0]}」および「{snippets[1]}」"
             "の内容が関連しています。"
         )
+
+    def _default_action_next(
+        self,
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
+        if target_language == "en":
+            return self.DEFAULT_ACTION_NEXT_EN
+        return self.DEFAULT_ACTION_NEXT
+
+    def _no_source_answer(
+        self,
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
+        if target_language == "en":
+            return self.NO_SOURCE_ANSWER_EN
+        return self.NO_SOURCE_ANSWER
+
+    def _no_source_action(
+        self,
+        target_language: Literal["ja", "easy-ja", "en"],
+    ) -> str:
+        if target_language == "en":
+            return self.NO_SOURCE_ACTION_EN
+        return self.NO_SOURCE_ACTION
 
     def _sanitize_snippet(self, text: str) -> str:
         snippet = text.strip().replace("\n", " ")
