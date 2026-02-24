@@ -1,7 +1,7 @@
 """Lecture QA request/response schemas."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,6 +12,7 @@ LectureSourceType = Literal["speech", "visual"]
 
 MAX_SESSION_ID_LENGTH = 64
 MAX_QUESTION_LENGTH = 500
+MAX_AUTO_TITLE_DEBUG_EVENT_LENGTH = 64
 
 
 class LectureSource(BaseModel):
@@ -160,3 +161,37 @@ class LectureIndexBuildResponse(BaseModel):
     chunk_count: int
     built_at: datetime
     status: Literal["success", "skipped"]  # skipped if already exists and rebuild=False
+
+
+AutoTitleDebugLogLevel = Literal["info", "warning", "error"]
+AutoTitleDebugLocale = Literal["ja", "en"]
+
+
+class LectureAutoTitleDebugLogRequest(BaseModel):
+    """Request schema for auto-title debug logging."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_LENGTH)
+    event: str = Field(min_length=1, max_length=MAX_AUTO_TITLE_DEBUG_EVENT_LENGTH)
+    level: AutoTitleDebugLogLevel = "info"
+    locale: AutoTitleDebugLocale
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("session_id", "event")
+    @classmethod
+    def validate_log_fields_not_blank(cls, value: str) -> str:
+        """Normalize logging fields and reject blank values."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("field must not be blank.")
+        return normalized
+
+
+class LectureAutoTitleDebugLogResponse(BaseModel):
+    """Response schema for auto-title debug logging."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["logged"]
+    log_file: str

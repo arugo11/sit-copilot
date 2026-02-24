@@ -1,5 +1,7 @@
 """Integration tests for lecture QA API endpoints."""
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -73,6 +75,51 @@ class FakeAzureSearchService:
     async def has_session_documents(self, *, session_id: str) -> bool:
         _ = session_id
         return bool(self.documents)
+
+
+@pytest.mark.asyncio
+async def test_post_autotitle_log_writes_jsonl(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Auto-title debug endpoint should append one JSON line."""
+    log_dir = tmp_path / ".log"
+    log_path = log_dir / "auto-title-debug.log"
+    monkeypatch.setattr(lecture_qa_api, "AUTO_TITLE_DEBUG_LOG_DIR", log_dir)
+    monkeypatch.setattr(lecture_qa_api, "AUTO_TITLE_DEBUG_LOG_PATH", log_path)
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/autotitle/log",
+        json={
+            "session_id": "test_session_qa_debug",
+            "event": "generate.response",
+            "level": "warning",
+            "locale": "ja",
+            "payload": {
+                "attempt": 1,
+                "reason": "too_long",
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "logged"
+    assert body["log_file"] == ".log/auto-title-debug.log"
+    assert log_path.exists()
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["user_id"] == "test_user"
+    assert record["session_id"] == "test_session_qa_debug"
+    assert record["event"] == "generate.response"
+    assert record["level"] == "warning"
+    assert record["locale"] == "ja"
+    assert record["payload"]["reason"] == "too_long"
+    assert "timestamp" in record
 
 
 @pytest.mark.asyncio

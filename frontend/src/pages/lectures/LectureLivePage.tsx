@@ -977,7 +977,11 @@ export function LectureLivePage() {
                 />
               ))}
             </div>
-            <Link to="/lectures" className="btn btn-secondary">
+            <Link
+              to="/lectures"
+              state={{ autoTitleSessionId: sessionId }}
+              className="btn btn-secondary"
+            >
               {t('nav.lectures')}
             </Link>
           </div>
