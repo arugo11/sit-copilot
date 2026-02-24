@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated
@@ -26,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_lecture_token, require_user_id
 from app.core.config import settings
+from app.core.session_lock import session_write_lock
+from app.core.user_id import get_user_id_candidates
 from app.db.session import get_db
 from app.models.lecture_session import LectureSession
 from app.models.speech_event import SpeechEvent
@@ -67,6 +70,7 @@ from app.services.asr_japanese_correction_service import (
     NoopJapaneseASRCorrectionService,
 )
 from app.services.asr_subtitle_review_service import SubtitleReviewService
+from app.services.assist_settings_service import resolve_assist_generation_settings
 from app.services.azure_search_service import (
     AzureSearchService,
     get_shared_azure_search_service,
@@ -85,6 +89,7 @@ from app.services.lecture_keyterms_service import (
     AzureOpenAILectureKeyTermsService,
     LectureKeyTermsError,
     LectureKeyTermsService,
+    ResilientLectureKeyTermsService,
     UnavailableLectureKeyTermsService,
 )
 from app.services.lecture_live_service import (
@@ -101,6 +106,7 @@ from app.services.lecture_retrieval_service import (
 from app.services.lecture_summary_generator_service import (
     AzureOpenAILectureSummaryGeneratorService,
     LectureSummaryGeneratorService,
+    ResilientLectureSummaryGeneratorService,
     UnavailableLectureSummaryGeneratorService,
 )
 from app.services.lecture_summary_service import (
@@ -139,6 +145,7 @@ MAX_ASSIST_SUMMARY_POINTS = 3
 MAX_ASSIST_TERMS = 4
 MAX_OCR_EXCERPT_CHARS = 80
 SSE_KEEPALIVE = ": keep-alive\n\n"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -253,6 +260,22 @@ async def _ensure_stream_session_access(
         raise LectureSessionInactiveError(
             f"lecture session state does not allow stream: {session_status}"
         )
+
+
+async def _get_owned_session(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+) -> LectureSession | None:
+    user_id_candidates = get_user_id_candidates(user_id)
+    result = await db.execute(
+        select(LectureSession).where(
+            LectureSession.id == session_id,
+            LectureSession.user_id.in_(user_id_candidates),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def _fetch_stream_batch(
@@ -582,6 +605,9 @@ def get_lecture_summary_service(
 
     # Create observed summary generator
     summary_generator: LectureSummaryGeneratorService
+    fallback_generator = UnavailableLectureSummaryGeneratorService(
+        reason="azure openai summary backend is unavailable"
+    )
     if _azure_openai_summary_available():
         inner_generator = AzureOpenAILectureSummaryGeneratorService(
             api_key=settings.azure_openai_api_key,
@@ -590,13 +616,15 @@ def get_lecture_summary_service(
             model=settings.azure_openai_model,
             keyterms_model=settings.azure_openai_keyterms_model,
         )
+        resilient_generator = ResilientLectureSummaryGeneratorService(
+            primary=inner_generator,
+            fallback=fallback_generator,
+        )
         summary_generator = ObservedLectureSummaryGeneratorService(
-            inner=inner_generator, observer=observer
+            inner=resilient_generator, observer=observer
         )
     else:
-        summary_generator = UnavailableLectureSummaryGeneratorService(
-            reason="azure openai summary backend is unavailable"
-        )
+        summary_generator = fallback_generator
 
     inner_service = SqlAlchemyLectureSummaryService(
         db=db,
@@ -646,17 +674,22 @@ def get_lecture_finalize_service(
 
 def get_lecture_keyterms_service() -> LectureKeyTermsService:
     """Dependency provider for lecture key terms service."""
+    fallback_service = UnavailableLectureKeyTermsService(
+        reason="azure openai key terms backend is unavailable"
+    )
     if _azure_openai_summary_available():
-        return AzureOpenAILectureKeyTermsService(
+        primary_service = AzureOpenAILectureKeyTermsService(
             api_key=settings.azure_openai_api_key,
             endpoint=settings.azure_openai_endpoint,
             account_name=settings.azure_openai_account_name,
             model=settings.azure_openai_model,
         )
-    else:
-        return UnavailableLectureKeyTermsService(
-            reason="azure openai key terms backend is unavailable"
+        return ResilientLectureKeyTermsService(
+            primary=primary_service,
+            fallback=fallback_service,
         )
+    else:
+        return fallback_service
 
 
 def get_caption_transform_service() -> CaptionTransformService:
@@ -960,6 +993,7 @@ async def get_latest_summary(
         Query(..., min_length=1, max_length=64),
     ],
     user_id: Annotated[str, Depends(require_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     service: Annotated[LectureSummaryService, Depends(get_lecture_summary_service)],
 ) -> LectureSummaryLatestResponse:
     """Return latest 30-second summary for the lecture session."""
@@ -970,11 +1004,41 @@ async def get_latest_summary(
             detail="session_id must not be blank.",
         )
 
-    try:
-        return await service.get_latest_summary(
-            session_id=normalized_session_id,
-            user_id=user_id,
+    session = await _get_owned_session(
+        db,
+        session_id=normalized_session_id,
+        user_id=user_id,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture session not found.",
         )
+
+    assist_settings = await resolve_assist_generation_settings(db, user_id=user_id)
+    if not assist_settings.summary_enabled:
+        logger.info(
+            "assist_summary_disabled session_id=%s user_id=%s",
+            normalized_session_id,
+            user_id,
+        )
+        return LectureSummaryLatestResponse(
+            session_id=normalized_session_id,
+            window_start_ms=0,
+            window_end_ms=0,
+            summary="",
+            key_terms=[],
+            evidence=[],
+            status="off",
+            reason="assist_summary_disabled",
+        )
+
+    try:
+        async with session_write_lock(normalized_session_id):
+            return await service.get_latest_summary(
+                session_id=normalized_session_id,
+                user_id=user_id,
+            )
     except LectureSessionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1072,24 +1136,37 @@ async def analyze_transcript_keyterms(
 ) -> TranscriptKeyTermsResponse:
     """Analyze transcript for key terms and generate explanations."""
     # Verify session exists and belongs to user
-    result = await db.execute(
-        select(LectureSession).where(
-            LectureSession.id == request.session_id,
-            LectureSession.user_id == user_id,
-        )
+    session = await _get_owned_session(
+        db,
+        session_id=request.session_id,
+        user_id=user_id,
     )
-    session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lecture session not found.",
         )
 
-    try:
-        keyterms_result = await service.extract_key_terms(
-            transcript_text=request.transcript_text,
-            lang_mode=request.lang_mode,
+    assist_settings = await resolve_assist_generation_settings(db, user_id=user_id)
+    if not assist_settings.keyterms_enabled:
+        logger.info(
+            "assist_keyterms_disabled session_id=%s user_id=%s",
+            request.session_id,
+            user_id,
         )
+        return TranscriptKeyTermsResponse(
+            key_terms=[],
+            detected_terms=[],
+            status="off",
+            reason="assist_keyterms_disabled",
+        )
+
+    try:
+        async with session_write_lock(request.session_id):
+            keyterms_result = await service.extract_key_terms(
+                transcript_text=request.transcript_text,
+                lang_mode=request.lang_mode,
+            )
 
         # Convert dict result to LectureSummaryKeyTerm objects
         key_terms = [
@@ -1101,10 +1178,14 @@ async def analyze_transcript_keyterms(
             )
             for term in keyterms_result.key_terms
         ]
+        response_status = "ok" if key_terms else "no_data"
+        reason = None if key_terms else "no_key_terms_detected"
 
         return TranscriptKeyTermsResponse(
             key_terms=key_terms,
             detected_terms=keyterms_result.detected_terms,
+            status=response_status,
+            reason=reason,
         )
     except LectureKeyTermsError as exc:
         raise HTTPException(

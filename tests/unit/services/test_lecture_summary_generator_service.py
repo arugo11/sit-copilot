@@ -215,23 +215,23 @@ async def test_generate_summary_with_empty_api_key_raises_error(
 
 
 @pytest.mark.asyncio
-async def test_unavailable_generator_always_raises_configured_reason(
+async def test_unavailable_generator_returns_fallback_summary_and_empty_keyterms(
     sample_speech_events: list[SpeechEvent],
     sample_visual_events: list[VisualEvent],
 ) -> None:
-    """Fail-closed unavailable generator should always raise."""
+    """Unavailable generator should return fallback summary and no key terms."""
     service = UnavailableLectureSummaryGeneratorService(
         reason="azure openai summary backend is unavailable"
     )
 
-    with pytest.raises(LectureSummaryGeneratorError) as exc_info:
-        await service.generate_summary(
-            speech_events=sample_speech_events,
-            visual_events=sample_visual_events,
-            lang_mode="ja",
-        )
+    result = await service.generate_summary(
+        speech_events=sample_speech_events,
+        visual_events=sample_visual_events,
+        lang_mode="ja",
+    )
 
-    assert str(exc_info.value) == "azure openai summary backend is unavailable"
+    assert result.summary != ""
+    assert result.key_terms == []
 
 
 @pytest.mark.asyncio

@@ -3,8 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
 import { useAudioInputStore } from '@/stores/audioInputStore'
 import { demoApi } from '@/lib/api/client'
+import { useUserSettings, useUpdateSettings } from '@/lib/api/hooks'
 import { useToast } from '@/components/common/Toast'
 import { ToggleSwitch } from '@/components/common/ToggleSwitch'
+import {
+  mapSummaryKeyTermsToAssistTerms,
+  mapSummaryResponseToAssist,
+  mergeAssistSettingsForUpdate,
+} from '@/features/live/utils/assistSupport'
 import {
   QAStreamBlocks,
   type QaStreamStatus,
@@ -42,10 +48,14 @@ export function AssistPanel({
   const sessionId = useLiveSessionStore((state) => state.sessionId)
   const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
   const setAssistTerms = useLiveSessionStore((state) => state.setAssistTerms)
+  const appendAssistTerms = useLiveSessionStore((state) => state.appendAssistTerms)
   const summaryEnabled = useLiveSessionStore((state) => state.summaryEnabled)
   const keytermsEnabled = useLiveSessionStore((state) => state.keytermsEnabled)
-  const toggleSummary = useLiveSessionStore((state) => state.toggleSummary)
-  const toggleKeyterms = useLiveSessionStore((state) => state.toggleKeyterms)
+  const setSummaryEnabled = useLiveSessionStore((state) => state.setSummaryEnabled)
+  const setKeytermsEnabled = useLiveSessionStore((state) => state.setKeytermsEnabled)
+  const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
+  const { data: userSettings } = useUserSettings()
+  const updateSettingsMutation = useUpdateSettings()
   const [miniQuestion, setMiniQuestion] = useState('')
   const [isUpdatingLangMode, setIsUpdatingLangMode] = useState(false)
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false)
@@ -71,28 +81,25 @@ export function AssistPanel({
     try {
       const summary = await demoApi.getLatestSummary(sessionId)
       if (summary.status === 'ok') {
+        const mapped = mapSummaryResponseToAssist(summary)
         setAssistSummary({
           timestampMs: Date.now(),
-          points: summary.summary.split('。').filter(Boolean).slice(0, 3),
+          points: mapped.points,
         })
-        setAssistTerms(
-          summary.key_terms.map((term) => ({
-            term: typeof term === 'string' ? term : term.term,
-            explanation:
-              typeof term === 'string'
-                ? 'Generated from lecture summary evidence.'
-                : (term.explanation || ''),
-            translation:
-              typeof term === 'string' ? term : (term.translation || term.term),
-          }))
-        )
+      } else if (summary.status === 'off' || summary.status === 'no_data') {
+        console.info('[summary] refresh non-ok status', {
+          sessionId,
+          status: summary.status,
+          reason: summary.reason,
+        })
+        setAssistSummary({ timestampMs: Date.now(), points: [] })
       }
     } catch (error) {
       console.warn('[summary] refresh failed:', error)
     } finally {
       setIsRefreshingSummary(false)
     }
-  }, [sessionId, isRefreshingSummary, setAssistSummary, setAssistTerms])
+  }, [sessionId, isRefreshingSummary, setAssistSummary])
 
   useEffect(() => {
     if (!sessionId || !summaryEnabled) {
@@ -133,6 +140,94 @@ export function AssistPanel({
       setIsUpdatingLangMode(false)
     }
   }
+
+  const persistAssistToggle = useCallback(
+    async (updates: { assistSummaryEnabled?: boolean; assistKeytermsEnabled?: boolean }) => {
+      const nextSettings = mergeAssistSettingsForUpdate(userSettings, {
+        assistSummaryEnabled:
+          updates.assistSummaryEnabled ?? summaryEnabled,
+        assistKeytermsEnabled:
+          updates.assistKeytermsEnabled ?? keytermsEnabled,
+      })
+      await updateSettingsMutation.mutateAsync({ settings: nextSettings })
+    },
+    [keytermsEnabled, summaryEnabled, updateSettingsMutation, userSettings]
+  )
+
+  const handleSummaryToggleChange = useCallback(
+    async (enabled: boolean) => {
+      setSummaryEnabled(enabled)
+      if (!enabled) {
+        setAssistSummary({ timestampMs: Date.now(), points: [] })
+      }
+
+      try {
+        await persistAssistToggle({ assistSummaryEnabled: enabled })
+      } catch (error) {
+        console.warn('[assist] failed to persist summary toggle', error)
+      }
+
+      if (enabled) {
+        await handleRefreshSummary()
+      }
+    },
+    [handleRefreshSummary, persistAssistToggle, setAssistSummary, setSummaryEnabled]
+  )
+
+  const handleKeytermsToggleChange = useCallback(
+    async (enabled: boolean) => {
+      setKeytermsEnabled(enabled)
+      if (!enabled) {
+        setAssistTerms([])
+      }
+
+      try {
+        await persistAssistToggle({ assistKeytermsEnabled: enabled })
+      } catch (error) {
+        console.warn('[assist] failed to persist keyterms toggle', error)
+      }
+
+      if (!enabled || !sessionId) {
+        return
+      }
+
+      const latestFinalLine = [...transcriptLines]
+        .reverse()
+        .find((line) => !line.isPartial && line.sourceLangText.trim().length > 0)
+
+      if (!latestFinalLine) {
+        return
+      }
+
+      try {
+        const keytermsResult = await demoApi.analyzeKeyterms({
+          session_id: sessionId,
+          transcript_text: latestFinalLine.sourceLangText.trim(),
+          lang_mode: langMode,
+        })
+        if (keytermsResult.status === 'ok') {
+          appendAssistTerms(mapSummaryKeyTermsToAssistTerms(keytermsResult.key_terms))
+        } else {
+          console.info('[assist] immediate keyterms non-ok status', {
+            sessionId,
+            status: keytermsResult.status,
+            reason: keytermsResult.reason,
+          })
+        }
+      } catch (error) {
+        console.warn('[assist] immediate keyterms extraction failed', error)
+      }
+    },
+    [
+      langMode,
+      persistAssistToggle,
+      sessionId,
+      appendAssistTerms,
+      setAssistTerms,
+      setKeytermsEnabled,
+      transcriptLines,
+    ]
+  )
 
   return (
     <div className="space-y-4">
@@ -178,7 +273,13 @@ export function AssistPanel({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">{t('assistPanel.sections.summary')}</h2>
-            <ToggleSwitch checked={summaryEnabled} onChange={toggleSummary} label={t('assistPanel.summaryToggleAria')} />
+            <ToggleSwitch
+              checked={summaryEnabled}
+              onChange={() => {
+                void handleSummaryToggleChange(!summaryEnabled)
+              }}
+              label={t('assistPanel.summaryToggleAria')}
+            />
           </div>
           <button
             type="button"
@@ -205,7 +306,13 @@ export function AssistPanel({
       <section className="card p-3 space-y-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
-          <ToggleSwitch checked={keytermsEnabled} onChange={toggleKeyterms} label={t('assistPanel.keytermsToggleAria')} />
+          <ToggleSwitch
+            checked={keytermsEnabled}
+            onChange={() => {
+              void handleKeytermsToggleChange(!keytermsEnabled)
+            }}
+            label={t('assistPanel.keytermsToggleAria')}
+          />
         </div>
         {!keytermsEnabled ? (
           <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>

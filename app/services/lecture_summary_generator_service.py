@@ -18,6 +18,7 @@ __all__ = [
     "LectureSummaryGeneratorService",
     "AzureOpenAILectureSummaryGeneratorService",
     "UnavailableLectureSummaryGeneratorService",
+    "ResilientLectureSummaryGeneratorService",
     "LectureSummaryResult",
     "LectureSummaryGeneratorError",
 ]
@@ -83,8 +84,74 @@ class UnavailableLectureSummaryGeneratorService:
         visual_events: list[VisualEvent],
         lang_mode: str,
     ) -> LectureSummaryResult:
-        del speech_events, visual_events, lang_mode
-        raise LectureSummaryGeneratorError(self._reason)
+        logger.info(
+            "summary_generator_fallback_used reason=%s speech_events=%s visual_events=%s",
+            self._reason,
+            len(speech_events),
+            len(visual_events),
+        )
+        summary = self._build_fallback_summary(speech_events=speech_events, lang_mode=lang_mode)
+        key_terms: list[dict[str, str]] = []
+        evidence_tags = self._build_fallback_evidence_tags(
+            speech_events=speech_events,
+            visual_events=visual_events,
+        )
+        return LectureSummaryResult(
+            summary=summary,
+            key_terms=key_terms,
+            evidence_tags=evidence_tags,
+        )
+
+    @staticmethod
+    def _build_fallback_summary(*, speech_events: list[SpeechEvent], lang_mode: str) -> str:
+        if not speech_events:
+            if lang_mode == "en":
+                return "No lecture speech has been captured yet."
+            if lang_mode == "easy-ja":
+                return "まだ こうぎ の ことば が ありません。"
+            return "まだ講義音声データがありません。"
+
+        points = [event.text.strip() for event in speech_events if event.text.strip()]
+        points = points[-3:]
+        if not points:
+            if lang_mode == "en":
+                return "No lecture speech has been captured yet."
+            if lang_mode == "easy-ja":
+                return "まだ こうぎ の ことば が ありません。"
+            return "まだ講義音声データがありません。"
+
+        if lang_mode == "en":
+            joined = " ".join(points)
+            return f"Recent lecture points: {joined}"[:600]
+        if lang_mode == "easy-ja":
+            joined = "。".join(points)
+            return f"いまの たいせつな ないよう: {joined}"[:600]
+        return "。".join(points)[:600]
+
+    @staticmethod
+    def _build_fallback_evidence_tags(
+        *,
+        speech_events: list[SpeechEvent],
+        visual_events: list[VisualEvent],
+    ) -> list[dict[str, str]]:
+        evidence_tags: list[dict[str, str]] = []
+        for event in speech_events[-4:]:
+            evidence_tags.append(
+                {
+                    "type": "speech",
+                    "timestamp": str(event.end_ms),
+                    "text": event.text[:120],
+                }
+            )
+        for event in visual_events[-2:]:
+            evidence_tags.append(
+                {
+                    "type": event.source,
+                    "timestamp": str(event.timestamp_ms),
+                    "text": event.ocr_text[:120],
+                }
+            )
+        return evidence_tags
 
 
 class AzureOpenAILectureSummaryGeneratorService:
@@ -474,3 +541,38 @@ JSONのみを出力してください。"""
             raise LectureSummaryGeneratorError(
                 "azure openai summary response parse failure"
             ) from exc
+
+
+class ResilientLectureSummaryGeneratorService:
+    """Primary + fallback summary generator with graceful degradation."""
+
+    def __init__(
+        self,
+        primary: LectureSummaryGeneratorService,
+        fallback: LectureSummaryGeneratorService,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def generate_summary(
+        self,
+        speech_events: list[SpeechEvent],
+        visual_events: list[VisualEvent],
+        lang_mode: str,
+    ) -> LectureSummaryResult:
+        try:
+            return await self._primary.generate_summary(
+                speech_events=speech_events,
+                visual_events=visual_events,
+                lang_mode=lang_mode,
+            )
+        except Exception as exc:  # pragma: no cover - runtime safety
+            logger.warning(
+                "summary_generator_primary_failed_fallback_used error=%s",
+                exc.__class__.__name__,
+            )
+            return await self._fallback.generate_summary(
+                speech_events=speech_events,
+                visual_events=visual_events,
+                lang_mode=lang_mode,
+            )

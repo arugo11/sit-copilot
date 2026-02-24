@@ -43,6 +43,8 @@ export interface UserSettings {
   reducedMotion?: boolean
   transcriptDensity?: 'comfortable' | 'compact'
   autoScrollDefault?: boolean
+  assistSummaryEnabled?: boolean
+  assistKeytermsEnabled?: boolean
 }
 
 interface SettingsResponsePayload {
@@ -167,7 +169,7 @@ export interface HealthResponse {
   version: string
 }
 
-interface SummaryKeyTerm {
+export interface SummaryKeyTerm {
   term: string
   explanation?: string
   translation?: string
@@ -179,7 +181,15 @@ export interface LectureSummaryLatestResponse {
   window_end_ms: number
   summary: string
   key_terms: SummaryKeyTerm[]
-  status: 'ok' | 'no_data'
+  status: 'ok' | 'no_data' | 'off'
+  reason?: string | null
+}
+
+export interface TranscriptKeyTermsResponse {
+  key_terms: SummaryKeyTerm[]
+  detected_terms: string[]
+  status: 'ok' | 'no_data' | 'off'
+  reason?: string | null
 }
 
 export type LectureQaLangMode = 'ja' | 'easy-ja' | 'en'
@@ -321,6 +331,12 @@ function normalizeUserSettings(value: unknown): UserSettings {
   }
   if (typeof settings.autoScrollDefault === 'boolean') {
     normalized.autoScrollDefault = settings.autoScrollDefault
+  }
+  if (typeof settings.assistSummaryEnabled === 'boolean') {
+    normalized.assistSummaryEnabled = settings.assistSummaryEnabled
+  }
+  if (typeof settings.assistKeytermsEnabled === 'boolean') {
+    normalized.assistKeytermsEnabled = settings.assistKeytermsEnabled
   }
 
   return normalized
@@ -537,8 +553,8 @@ export const demoApi = {
     session_id: string
     transcript_text: string
     lang_mode: 'ja' | 'easy-ja' | 'en'
-  }): Promise<{ key_terms: SummaryKeyTerm[]; detected_terms: string[] }> {
-    return apiClient.post<{ key_terms: SummaryKeyTerm[]; detected_terms: string[] }>(
+  }): Promise<TranscriptKeyTermsResponse> {
+    return apiClient.post<TranscriptKeyTermsResponse>(
       '/api/v4/lecture/transcript/analyze-keyterms',
       request
     )
