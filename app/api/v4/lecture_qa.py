@@ -1,5 +1,8 @@
 """Lecture QA API endpoints."""
 
+import json
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -11,6 +14,8 @@ from app.db.session import get_db
 from app.schemas.lecture_qa import (
     LectureAskRequest,
     LectureAskResponse,
+    LectureAutoTitleDebugLogRequest,
+    LectureAutoTitleDebugLogResponse,
     LectureFollowupRequest,
     LectureFollowupResponse,
     LectureIndexBuildRequest,
@@ -61,6 +66,31 @@ router = APIRouter(
     tags=["lecture-qa"],
     dependencies=[Depends(require_lecture_token)],
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+AUTO_TITLE_DEBUG_LOG_DIR = PROJECT_ROOT / ".log"
+AUTO_TITLE_DEBUG_LOG_PATH = AUTO_TITLE_DEBUG_LOG_DIR / "auto-title-debug.log"
+AUTO_TITLE_DEBUG_LOG_RELATIVE_PATH = ".log/auto-title-debug.log"
+
+
+def _append_auto_title_debug_log(
+    *,
+    user_id: str,
+    request: LectureAutoTitleDebugLogRequest,
+) -> None:
+    AUTO_TITLE_DEBUG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "user_id": user_id,
+        "session_id": request.session_id,
+        "event": request.event,
+        "level": request.level,
+        "locale": request.locale,
+        "payload": request.payload,
+    }
+    with AUTO_TITLE_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+        fp.write("\n")
 
 
 def _azure_search_available() -> bool:
@@ -258,6 +288,30 @@ async def ask_question(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Lecture QA backend is unavailable.",
         ) from exc
+
+
+@router.post(
+    "/autotitle/log",
+    status_code=status.HTTP_200_OK,
+    response_model=LectureAutoTitleDebugLogResponse,
+)
+async def log_autotitle_debug(
+    request: LectureAutoTitleDebugLogRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> LectureAutoTitleDebugLogResponse:
+    """Append auto-title debug event to local JSONL log file."""
+    try:
+        _append_auto_title_debug_log(user_id=user_id, request=request)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to write auto-title debug log.",
+        ) from exc
+
+    return LectureAutoTitleDebugLogResponse(
+        status="logged",
+        log_file=AUTO_TITLE_DEBUG_LOG_RELATIVE_PATH,
+    )
 
 
 @router.post(

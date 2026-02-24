@@ -186,6 +186,8 @@ export type LectureQaLangMode = 'ja' | 'easy-ja' | 'en'
 export type LectureQaConfidence = 'high' | 'medium' | 'low'
 export type LectureQaRetrievalMode = 'source-only' | 'source-plus-context'
 export type LectureQaSourceType = 'speech' | 'visual'
+export type AutoTitleDebugLogLevel = 'info' | 'warning' | 'error'
+export type AutoTitleDebugLocale = 'ja' | 'en'
 
 export interface LectureSource {
   chunk_id: string
@@ -235,6 +237,19 @@ export interface LectureIndexBuildResponse {
   chunk_count: number
   built_at: string
   status: 'success' | 'skipped'
+}
+
+export interface LectureAutoTitleDebugLogRequest {
+  session_id: string
+  event: string
+  level?: AutoTitleDebugLogLevel
+  locale: AutoTitleDebugLocale
+  payload?: Record<string, unknown>
+}
+
+export interface LectureAutoTitleDebugLogResponse {
+  status: 'logged'
+  log_file: string
 }
 
 export type ProcedureQaLangMode = 'ja' | 'easy-ja' | 'en'
@@ -576,6 +591,21 @@ export const lectureQaApi = {
 
   async ask(request: LectureAskRequest): Promise<LectureAskResponse> {
     return apiClient.post<LectureAskResponse>('/api/v4/lecture/qa/ask', request)
+  },
+
+  async logAutoTitleDebug(
+    request: LectureAutoTitleDebugLogRequest
+  ): Promise<LectureAutoTitleDebugLogResponse> {
+    return apiClient.post<LectureAutoTitleDebugLogResponse>(
+      '/api/v4/lecture/qa/autotitle/log',
+      {
+        session_id: request.session_id,
+        event: request.event,
+        level: request.level ?? 'info',
+        locale: request.locale,
+        payload: request.payload ?? {},
+      }
+    )
   },
 
   async followup(

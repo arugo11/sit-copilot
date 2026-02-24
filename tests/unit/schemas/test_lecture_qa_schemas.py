@@ -7,6 +7,8 @@ from app.schemas.lecture_qa import (
     LangMode,
     LectureAskRequest,
     LectureAskResponse,
+    LectureAutoTitleDebugLogRequest,
+    LectureAutoTitleDebugLogResponse,
     LectureCitation,
     LectureFollowupRequest,
     LectureFollowupResponse,
@@ -388,6 +390,48 @@ class TestLectureIndexBuildResponse:
         }
         with pytest.raises(ValidationError):
             LectureIndexBuildResponse(**data)
+
+
+class TestLectureAutoTitleDebugLogRequest:
+    """Tests for auto-title debug log request schema."""
+
+    def test_valid_request(self) -> None:
+        """Valid debug log payload should be accepted."""
+        req = LectureAutoTitleDebugLogRequest(
+            session_id="session_123",
+            event="generate.response",
+            level="warning",
+            locale="ja",
+            payload={"attempt": 2, "reason": "too_long"},
+        )
+        assert req.session_id == "session_123"
+        assert req.event == "generate.response"
+        assert req.level == "warning"
+        assert req.locale == "ja"
+
+    def test_event_blank_raises_error(self) -> None:
+        """Blank event should raise ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            LectureAutoTitleDebugLogRequest(
+                session_id="session_123",
+                event="   ",
+                locale="ja",
+                payload={},
+            )
+        assert "field must not be blank" in str(exc_info.value)
+
+
+class TestLectureAutoTitleDebugLogResponse:
+    """Tests for auto-title debug log response schema."""
+
+    def test_valid_response(self) -> None:
+        """Valid response should be accepted."""
+        resp = LectureAutoTitleDebugLogResponse(
+            status="logged",
+            log_file=".log/auto-title-debug.log",
+        )
+        assert resp.status == "logged"
+        assert resp.log_file == ".log/auto-title-debug.log"
 
 
 class TestTypeAliases:
