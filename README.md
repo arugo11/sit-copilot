@@ -102,6 +102,12 @@ npm run dev --prefix frontend
 
 - Frontend: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
 
+## ポスター
+
+- A0 PDF: [SIT_Copilot_Poster.pdf](poster-gen/SIT_Copilot_Poster.pdf)
+
+![SIT Copilot Poster Preview](poster-gen/poster-preview-output.png)
+
 2026-02-23 時点の運用記録に基づいています。更新時は `/.claude/docs/DESIGN.md` を参照してください。
 
 ## 補足リンク
