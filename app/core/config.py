@@ -48,6 +48,22 @@ class Settings(BaseSettings):
     lecture_api_token: str = "dev-lecture-token"
     lecture_visual_max_image_bytes: int = 2_000_000
     lecture_qa_retrieval_limit: int = 5
+    lecture_qa_citation_limit: int = Field(default=2, ge=1, le=5)
+    # Backward compatibility only: classifier path is currently disabled in lecture QA runtime.
+    lecture_qa_classifier_model: str = ""
+    # Backward compatibility only: classifier path is currently disabled in lecture QA runtime.
+    lecture_qa_classifier_confidence_threshold: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+    )
+    lecture_qa_answer_max_retries: int = Field(default=4, ge=0, le=8)
+    lecture_qa_answer_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=10.0)
+    lecture_qa_answer_min_request_interval_seconds: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=5.0,
+    )
     azure_openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(

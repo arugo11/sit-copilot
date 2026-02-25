@@ -71,6 +71,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AUTO_TITLE_DEBUG_LOG_DIR = PROJECT_ROOT / ".log"
 AUTO_TITLE_DEBUG_LOG_PATH = AUTO_TITLE_DEBUG_LOG_DIR / "auto-title-debug.log"
 AUTO_TITLE_DEBUG_LOG_RELATIVE_PATH = ".log/auto-title-debug.log"
+_shared_lecture_answerer_service: AzureOpenAILectureAnswererService | None = None
+_shared_lecture_answerer_service_key: (
+    tuple[str, str, str, str, int, float, float, str] | None
+) = None
 
 
 def _append_auto_title_debug_log(
@@ -110,7 +114,9 @@ def get_weave_observer(request: Request) -> WeaveObserverService:
     Returns:
         WeaveObserverService instance from app state
     """
-    return getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
+    return (
+        getattr(request.app.state, "weave_observer", None) or NoopWeaveObserverService()
+    )
 
 
 def get_azure_search_service() -> AzureSearchService:
@@ -131,6 +137,44 @@ def get_lecture_retrieval_service() -> LectureRetrievalService:
     return get_shared_lecture_retrieval_service()
 
 
+def _lecture_answerer_config_key() -> tuple[str, str, str, str, int, float, float, str]:
+    return (
+        settings.azure_openai_api_key,
+        settings.azure_openai_endpoint,
+        settings.azure_openai_account_name,
+        settings.azure_openai_model,
+        settings.lecture_qa_answer_max_retries,
+        settings.lecture_qa_answer_retry_delay_seconds,
+        settings.lecture_qa_answer_min_request_interval_seconds,
+        settings.azure_openai_api_version,
+    )
+
+
+def get_shared_lecture_answerer_service() -> AzureOpenAILectureAnswererService:
+    """Return process-shared answerer service for retry/rate-limit state reuse."""
+    global _shared_lecture_answerer_service
+    global _shared_lecture_answerer_service_key
+
+    config_key = _lecture_answerer_config_key()
+    if (
+        _shared_lecture_answerer_service is None
+        or _shared_lecture_answerer_service_key != config_key
+    ):
+        _shared_lecture_answerer_service = AzureOpenAILectureAnswererService(
+            api_key=settings.azure_openai_api_key,
+            endpoint=settings.azure_openai_endpoint,
+            account_name=settings.azure_openai_account_name,
+            model=settings.azure_openai_model,
+            max_retries=settings.lecture_qa_answer_max_retries,
+            retry_delay_seconds=settings.lecture_qa_answer_retry_delay_seconds,
+            min_request_interval_seconds=settings.lecture_qa_answer_min_request_interval_seconds,
+            api_version=settings.azure_openai_api_version,
+        )
+        _shared_lecture_answerer_service_key = config_key
+
+    return _shared_lecture_answerer_service
+
+
 def get_lecture_answerer_service(
     observer: Annotated[WeaveObserverService, Depends(get_weave_observer)],
 ) -> LectureAnswererService:
@@ -138,13 +182,7 @@ def get_lecture_answerer_service(
 
     Wraps with observed service when Weave is enabled.
     """
-    inner_service = AzureOpenAILectureAnswererService(
-        api_key=settings.azure_openai_api_key,
-        endpoint=settings.azure_openai_endpoint,
-        account_name=settings.azure_openai_account_name,
-        model=settings.azure_openai_model,
-        api_version=settings.azure_openai_api_version,
-    )
+    inner_service = get_shared_lecture_answerer_service()
 
     # Wrap with observed service if Weave is enabled
     if settings.weave.enabled:
@@ -219,6 +257,7 @@ def get_lecture_qa_service(
         verifier=verifier,
         followup=followup,
         retrieval_limit=settings.lecture_qa_retrieval_limit,
+        citation_limit=settings.lecture_qa_citation_limit,
     )
 
     # Wrap with observed service if Weave is enabled

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+from time import monotonic
 from dataclasses import dataclass
 from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
@@ -60,6 +61,9 @@ class AzureOpenAILectureAnswererService:
     DEFAULT_MAX_TOKENS = 1000
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_TIMEOUT_SECONDS = 30
+    DEFAULT_MAX_RETRIES = 4
+    DEFAULT_RETRY_DELAY_SECONDS = 1.0
+    DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 0.35
     DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_ACTION_NEXT = "他にご質問があればどうぞ。"
     DEFAULT_ACTION_NEXT_EN = "Feel free to ask another question."
@@ -80,6 +84,9 @@ class AzureOpenAILectureAnswererService:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
+        min_request_interval_seconds: float = DEFAULT_MIN_REQUEST_INTERVAL_SECONDS,
         api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize Azure OpenAI answerer.
@@ -98,6 +105,11 @@ class AzureOpenAILectureAnswererService:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
+        self._max_retries = max(0, max_retries)
+        self._retry_delay_seconds = max(0.0, retry_delay_seconds)
+        self._min_request_interval_seconds = max(0.0, min_request_interval_seconds)
+        self._request_lock = asyncio.Lock()
+        self._last_request_started_at = 0.0
         self._api_version = api_version
         self._last_usage: LLMUsage | None = None
         self._validation = self._validate_configuration(account_name=account_name)
@@ -149,6 +161,12 @@ class AzureOpenAILectureAnswererService:
 
         answer = await self._call_openai(prompt, target_language)
         if not answer.strip():
+            logger.warning(
+                "azure_openai_answer_empty_response model=%s lang=%s sources=%s",
+                self._model,
+                target_language,
+                len(sources),
+            )
             raise LectureAnswererError("empty answer from Azure OpenAI")
 
         return LectureAnswerDraft(
@@ -185,9 +203,10 @@ Question: {question}
 
 Answer requirements:
 - Use only the lecture sources above
+- Use only the minimum evidence needed to answer the question
 - Cite concrete timestamps when available (e.g., 05:23)
 - If a detail is missing from sources, explicitly say it is not in the materials
-- Keep the answer concise (about 3-5 sentences)
+- Keep the answer concise (1-3 sentences for fact questions, 3-5 sentences otherwise)
 - Response language: English only
 """
 
@@ -206,9 +225,10 @@ Answer requirements:
 
 回答のガイドライン:
 - 講義資料に基づいて回答してください
+- 回答に必要な根拠のみ使ってください（不要な引用はしない）
 - 具体的な時間（例: 05:23）を引用して説明してください
 - 資料にない情報は「資料に記載がありません」と明示してください
-- 簡潔に回答してください（3-5文程度）
+- 簡潔に回答してください（事実質問は1-3文、それ以外は3-5文程度）
 - 回答言語: {language_instruction}
 """
 
@@ -290,23 +310,90 @@ Answer requirements:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 return response.read().decode("utf-8")
 
+        last_http_error: HTTPError | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                await self._wait_for_request_slot()
+                raw = await asyncio.to_thread(_run_request)
+                response_json = json.loads(raw)
+                self._last_usage = extract_usage(response_json)
+                return self._extract_content(response_json).strip()
+            except HTTPError as exc:
+                last_http_error = exc
+                status_code = int(getattr(exc, "code", 0) or 0)
+                retry_after_seconds = self._retry_after_seconds(exc)
+                should_retry = status_code == 429 and attempt < self._max_retries
+                response_snippet = self._http_error_payload_snippet(exc)
+                logger.warning(
+                    "azure_openai_answer_http_error status=%s reason=%s attempt=%s max_retries=%s will_retry=%s retry_after=%s response_snippet=%r",
+                    getattr(exc, "code", "unknown"),
+                    getattr(exc, "reason", "unknown"),
+                    attempt,
+                    self._max_retries,
+                    should_retry,
+                    retry_after_seconds,
+                    response_snippet,
+                )
+                if should_retry:
+                    await asyncio.sleep(self._compute_retry_delay(exc, attempt))
+                    continue
+                raise LectureAnswererError("azure openai answer request failed") from exc
+            except URLError as exc:
+                logger.warning("azure_openai_answer_network_error")
+                raise LectureAnswererError("azure openai answer network failure") from exc
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                logger.warning("azure_openai_answer_parse_error")
+                raise LectureAnswererError("azure openai answer parse failure") from exc
+
+        raise LectureAnswererError("azure openai answer request failed") from last_http_error
+
+    async def _wait_for_request_slot(self) -> None:
+        if self._min_request_interval_seconds <= 0:
+            return
+        async with self._request_lock:
+            now = monotonic()
+            elapsed = now - self._last_request_started_at
+            remaining = self._min_request_interval_seconds - elapsed
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+            self._last_request_started_at = monotonic()
+
+    def _compute_retry_delay(self, exc: HTTPError, attempt: int) -> float:
+        retry_after = self._retry_after_seconds(exc)
+        if retry_after is not None:
+            return retry_after
+        return self._retry_delay_seconds * (2**attempt)
+
+    @staticmethod
+    def _retry_after_seconds(exc: HTTPError) -> float | None:
+        headers = getattr(exc, "headers", None)
+        if headers is None:
+            return None
+        raw_retry_after = headers.get("Retry-After")
+        if raw_retry_after is None:
+            return None
         try:
-            raw = await asyncio.to_thread(_run_request)
-            response_json = json.loads(raw)
-            self._last_usage = extract_usage(response_json)
-            return self._extract_content(response_json).strip()
-        except HTTPError as exc:
-            logger.warning(
-                "azure_openai_answer_http_error status=%s",
-                getattr(exc, "code", "unknown"),
-            )
-            raise LectureAnswererError("azure openai answer request failed") from exc
-        except URLError as exc:
-            logger.warning("azure_openai_answer_network_error")
-            raise LectureAnswererError("azure openai answer network failure") from exc
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            logger.warning("azure_openai_answer_parse_error")
-            raise LectureAnswererError("azure openai answer parse failure") from exc
+            retry_after = float(str(raw_retry_after).strip())
+            if retry_after < 0:
+                return None
+            return retry_after
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _http_error_payload_snippet(exc: HTTPError, max_chars: int = 240) -> str:
+        try:
+            payload = exc.read()
+            if not payload:
+                return ""
+            if isinstance(payload, bytes):
+                text = payload.decode("utf-8", errors="replace")
+            else:
+                text = str(payload)
+            compact = re.sub(r"\s+", " ", text).strip()
+            return compact[:max_chars]
+        except Exception:
+            return ""
 
     def _system_instruction(
         self,

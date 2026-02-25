@@ -124,6 +124,12 @@ class MockVerifier:
                 "sources": sources,
             }
         )
+        if self._can_repair and self._repaired_answer and answer == self._repaired_answer:
+            return LectureVerificationResult(
+                passed=True,
+                summary="Re-verified.",
+                unsupported_claims=[],
+            )
         return LectureVerificationResult(
             passed=self._passed,
             summary=self._summary,
@@ -310,6 +316,7 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
     assert qa_turn.latency_ms >= 0
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+    assert qa_turn.outcome_reason == "verified"
 
 
 @pytest.mark.asyncio
@@ -362,6 +369,7 @@ async def test_ask_without_sources_returns_fallback_and_persists_turn(
     assert qa_turn.question == "Unknown question"
     assert qa_turn.citations_json == []
     assert qa_turn.retrieved_chunk_ids_json == []
+    assert qa_turn.outcome_reason == "no_source"
 
 
 @pytest.mark.asyncio
@@ -418,6 +426,17 @@ async def test_ask_with_verification_failure_triggers_repair(
     assert response.confidence == "medium"  # Downgraded after repair
     assert len(verifier.verify_calls) == 2  # Original + re-verify
     assert len(verifier.repair_calls) == 1
+
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.question == "What is this?",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "repaired_verified"
 
 
 @pytest.mark.asyncio
@@ -476,12 +495,23 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
     assert len(verifier.verify_calls) == 1
     assert len(verifier.repair_calls) == 1
 
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.question == "What is this?",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "verification_failed"
+
 
 @pytest.mark.asyncio
 async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persists(
     db_session: AsyncSession,
 ) -> None:
-    """Service should return local grounded answer when answerer fails."""
+    """Service should return grounded fallback when answerer fails and sources exist."""
     await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
@@ -514,11 +544,14 @@ async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persist
         context_window=1,
     )
 
-    # Should return local grounded answer with sources
+    # Should return grounded snippet from sources
     assert response.confidence == "low"
-    assert response.fallback == ""
-    assert response.answer.startswith('The lecture materials explain that "')
-    assert "Test content from lecture" in response.answer
+    assert response.answer == "According to ID S-001, Test content from lecture."
+    assert response.fallback == "According to ID S-001, Test content from lecture."
+    assert (
+        response.verification_summary
+        == "Answer generation failed, so a grounded snippet from lecture sources was returned."
+    )
     assert response.sources == sources
 
     # Verify persistence
@@ -533,6 +566,7 @@ async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persist
     assert qa_turn is not None
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+    assert qa_turn.outcome_reason == "answerer_error_grounded"
 
 
 @pytest.mark.asyncio
@@ -597,6 +631,7 @@ async def test_ask_with_verifier_error_skips_verification_and_persists(
     assert qa_turn.answer == "Generated answer."
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+    assert qa_turn.outcome_reason == "verification_failed"
 
 
 @pytest.mark.asyncio
@@ -778,12 +813,23 @@ async def test_followup_without_sources_returns_fallback(
     assert response.fallback is not None
     assert len(answerer.answer_calls) == 0
 
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.question == "What about that?",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "no_source"
+
 
 @pytest.mark.asyncio
 async def test_followup_with_answerer_error_returns_local_grounded_answer(
     db_session: AsyncSession,
 ) -> None:
-    """Service should return local grounded answer when follow-up answerer fails."""
+    """Service should return grounded snippet when follow-up answerer fails."""
     await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
@@ -820,13 +866,23 @@ async def test_followup_with_answerer_error_returns_local_grounded_answer(
         history_turns=3,
     )
 
-    # Should return local grounded answer with sources
+    # Should return grounded snippet from sources
     assert response.confidence == "low"
-    assert response.fallback == ""
-    assert response.answer.startswith('The lecture materials explain that "')
-    assert "Followup content from lecture" in response.answer
+    assert response.answer == "According to ID S-001, Followup content from lecture."
+    assert response.fallback == "According to ID S-001, Followup content from lecture."
     assert response.sources == sources
     assert response.resolved_query == "What is machine learning?"
+
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.question == "What about that?",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "answerer_error_grounded"
 
 
 @pytest.mark.asyncio
@@ -924,6 +980,107 @@ async def test_ask_respects_retrieval_limit(
 
 
 @pytest.mark.asyncio
+async def test_ask_keeps_requested_retrieval_mode_and_context_window(
+    db_session: AsyncSession,
+) -> None:
+    """Service should keep caller retrieval mode/context when classifier path is disabled."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id=f"speech_{i}",
+            type="speech",
+            text=f"Transformer was announced in 2017 source {i}",
+            bm25_score=float(10 - i),
+            is_direct_hit=i < 2,
+        )
+        for i in range(4)
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+        retrieval_limit=10,
+        citation_limit=2,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="Transformer was developed when?",
+        lang_mode="ja",
+        retrieval_mode="source-plus-context",
+        top_k=8,
+        context_window=3,
+    )
+
+    assert retriever.retrieve_calls[0]["mode"] == "source-plus-context"
+    assert retriever.retrieve_calls[0]["context_window"] == 3
+    assert retriever.retrieve_calls[0]["top_k"] == 8
+    assert len(response.sources) == 2
+
+
+@pytest.mark.asyncio
+async def test_ask_limits_citations_to_configured_limit(
+    db_session: AsyncSession,
+) -> None:
+    """Service should cap citations and persisted chunk ids by citation_limit."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id=f"speech_{i}",
+            type="speech",
+            text=f"Source text {i}",
+            bm25_score=float(100 - i),
+        )
+        for i in range(5)
+    ]
+    retriever = MockRetriever(sources)
+    answerer = MockAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+        citation_limit=2,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="機械学習とは何ですか",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert len(response.sources) == 2
+
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.feature == "lecture_qa",
+        )
+    )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert len(qa_turn.citations_json) == 2
+    assert len(qa_turn.retrieved_chunk_ids_json) == 2
+
+
+@pytest.mark.asyncio
 async def test_ask_uses_custom_fallback_messages(
     db_session: AsyncSession,
 ) -> None:
@@ -993,10 +1150,10 @@ async def test_ask_unknown_or_other_user_session_raises_not_found(
 
 
 @pytest.mark.asyncio
-async def test_ask_with_answerer_error_and_empty_sources_returns_backend_fallback(
+async def test_ask_with_answerer_error_and_empty_sources_includes_failure_reason(
     db_session: AsyncSession,
 ) -> None:
-    """Service should return backend fallback when answerer fails and sources are empty."""
+    """Failure fallback should include raw reason when no grounded snippet can be built."""
     await _seed_lecture_session(db_session)
     # Sources with empty text (will be filtered out)
     sources = [
@@ -1018,7 +1175,6 @@ async def test_ask_with_answerer_error_and_empty_sources_returns_backend_fallbac
         answerer=answerer,
         verifier=verifier,
         followup=followup,
-        backend_failure_fallback="バックエンドエラーが発生しました。",
     )
 
     response = await service.ask(
@@ -1031,23 +1187,32 @@ async def test_ask_with_answerer_error_and_empty_sources_returns_backend_fallbac
         context_window=1,
     )
 
-    # Should return backend failure fallback
+    # Empty evidence should return explicit failure text with reason
     assert response.confidence == "low"
     assert (
         response.answer
-        == "An error occurred while generating the answer. Please check the lecture materials directly."
+        == "Failed to generate answer. (Reason: Azure OpenAI generation failed)"
     )
-    assert (
-        response.fallback
-        == "An error occurred while generating the answer. Please check the lecture materials directly."
+    assert response.fallback == response.answer
+    assert response.verification_summary == response.answer
+
+    await db_session.flush()
+    result = await db_session.execute(
+        select(QATurn).where(
+            QATurn.session_id == "session_123",
+            QATurn.question == "What is this?",
+        )
     )
+    qa_turn = result.scalar_one_or_none()
+    assert qa_turn is not None
+    assert qa_turn.outcome_reason == "answerer_error_failure"
 
 
 @pytest.mark.asyncio
 async def test_ask_with_answerer_error_and_single_source_returns_single_snippet(
     db_session: AsyncSession,
 ) -> None:
-    """Service should return single snippet format when answerer fails with one source."""
+    """Service should return grounded snippet when one valid source exists."""
     await _seed_lecture_session(db_session)
     sources = [
         LectureSource(
@@ -1080,10 +1245,106 @@ async def test_ask_with_answerer_error_and_single_source_returns_single_snippet(
         context_window=1,
     )
 
-    # Should use single snippet format
+    # Should return grounded snippet from the single source
     assert response.confidence == "low"
-    assert response.answer == 'The lecture materials explain that "Single source content here".'
-    assert response.fallback == ""
+    assert response.answer == "According to ID S-001, Single source content here."
+    assert response.fallback == "According to ID S-001, Single source content here."
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_error_returns_japanese_failure_message(
+    db_session: AsyncSession,
+) -> None:
+    """Japanese failure message should include raw reason when snippet cannot be built."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="   ",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="トランスフォーマーの特徴は？",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert (
+        response.answer
+        == "回答文生成に失敗しました。（理由: Azure OpenAI generation failed）"
+    )
+    assert response.fallback == response.answer
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_error_uses_top_ranked_source_for_grounded_fallback(
+    db_session: AsyncSession,
+) -> None:
+    """Grounded fallback should use top-ranked citation source when answerer fails."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="S-001",
+            type="speech",
+            text="トランスフォーマーは2017年6月12日に Google の研究者等が発表した モデル",
+            bm25_score=9.0,
+            is_direct_hit=True,
+        ),
+        LectureSource(
+            chunk_id="S-002",
+            type="speech",
+            text="逐次処理が不要という特徴がある",
+            bm25_score=8.0,
+            is_direct_hit=True,
+        ),
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True)
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+        citation_limit=1,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="Transformerはいつ開発された?",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert response.answer.startswith("ID S-001によると、")
+    assert response.fallback == response.answer
+    assert len(response.sources) == 1
+    assert response.sources[0].chunk_id == "S-001"
 
 
 @pytest.mark.asyncio

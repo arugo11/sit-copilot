@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.main import app
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
+from app.models.qa_turn import QATurn
 from app.models.speech_event import SpeechEvent
 from app.models.speech_review_history import SpeechReviewHistory
 from app.models.summary_window import SummaryWindow
@@ -1522,6 +1523,59 @@ async def test_delete_lecture_session_auto_finalizes_live_session(
             select(LectureSession).where(LectureSession.id == session_id)
         )
     assert session_result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_lecture_session_removes_related_qa_turns(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Delete endpoint should remove lecture QA turn rows for the session."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    async with session_factory() as session:
+        session.add(
+            QATurn(
+                id=f"qa_turn_{session_id}",
+                session_id=session_id,
+                feature="lecture_qa",
+                question="削除テストの質問",
+                answer="削除テストの回答",
+                confidence="high",
+                citations_json=[],
+                retrieved_chunk_ids_json=[],
+                latency_ms=1,
+                verifier_supported=True,
+                outcome_reason="verified",
+            )
+        )
+        await session.commit()
+
+    response = await async_client.delete(
+        f"/api/v4/lecture/session/{session_id}",
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 200
+
+    async with session_factory() as session:
+        qa_turn_result = await session.execute(
+            select(QATurn).where(QATurn.session_id == session_id)
+        )
+    assert qa_turn_result.scalars().all() == []
 
 
 @pytest.mark.asyncio

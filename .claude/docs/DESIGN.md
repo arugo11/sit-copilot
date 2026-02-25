@@ -30,6 +30,169 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Lecture QA Failure Handling and Runtime Simplification (2026-02-24)
+
+### Decision Summary
+
+- Disabled lecture question-classifier routing in runtime QA flow.
+- Restored grounded local fallback on `answerer` failure when valid source text exists.
+- Updated explicit failure messaging to include raw internal reason:
+  - Japanese: `回答文生成に失敗しました。（理由: {raw_reason}）`
+  - English: `Failed to generate answer. (Reason: {raw_reason})`
+- Added process-shared `AzureOpenAILectureAnswererService` in API DI.
+  - Recreate only when answerer-related settings key changes.
+  - Keep Weave wrapper request-scoped (`ObservedLectureAnswererService`) around shared inner instance.
+- Persist `qa_turns.outcome_reason` for lecture QA across all major branches:
+  - `no_source`
+  - `answerer_error_grounded`
+  - `answerer_error_failure`
+  - `verified`
+  - `repaired_verified`
+  - `verification_failed`
+
+### Rationale
+
+- Classification introduced an avoidable control-path fork and made recovery behavior inconsistent.
+- Answer generation failures should degrade to evidence-first local snippets whenever possible, instead of generic failure text.
+- Operators and users need failure transparency; exposing the raw reason improves diagnosability.
+- Reusing answerer instances keeps retry and request-interval state stable across requests and reduces churn.
+- Explicit `outcome_reason` persistence removes ambiguity (`unspecified`) and supports postmortem/analytics.
+
+### Compatibility Rules
+
+- External response schemas remain unchanged (`LectureAskResponse`, `LectureFollowupResponse`).
+- Classifier settings remain in config for backward compatibility but are not used by lecture QA runtime path.
+- Failure reason text is normalized and truncated defensively before rendering.
+
+## Live Assist Summary Update Trigger Alignment (2026-02-24)
+
+### Decision Summary
+
+- Removed interval-based summary polling from `AssistPanel` (`30s` timer).
+- Removed 3-chunk summary polling trigger from `LectureLivePage`.
+- Automatic summary refresh is now triggered only when a new finalized subtitle line is observed.
+- Stopped applying SSE `assist.summary` events directly in `LectureLivePage`; summary panel state is driven by subtitle-triggered `summary/latest` fetch.
+- Added summary point deduplication in `liveSessionStore.setAssistSummary` to suppress no-op UI re-renders.
+
+### Rationale
+
+- Frequent automatic summary rewrites made active reading difficult.
+- Subtitle-driven refresh keeps update timing aligned with visible transcript progression.
+- Deduplicating unchanged summary points avoids flicker and unnecessary redraws.
+
+### Compatibility Rules
+
+- Manual `Refresh` action in summary panel remains available.
+- Summary toggle and language switch no longer force immediate summary refresh; next finalized subtitle update will refresh automatically.
+
+## Poster Screenshot Aspect-Ratio Adaptive UI Refresh (2026-02-24)
+
+### Decision Summary
+
+- Updated web-poster screenshot zone to an asymmetric two-panel layout:
+  - Live panel width ratio: `1.65`
+  - QA panel width ratio: `1.0`
+- Bound frame aspect ratios to actual delivered assets:
+  - `live-screen.png`: `1771 x 845` (wide)
+  - `qa-screen.png`: `432 x 448` (near-square)
+- Replaced inline screenshot styles with reusable CSS classes (`slot-header`, `slot-tag`, `screen-frame`, `qa-points`) to keep poster UI consistent and maintainable.
+- Added concise QA-side guidance text so evaluators can quickly identify evidence-related UI elements.
+
+### Rationale
+
+- Prior equal-width `16:9` frames introduced excessive empty margins for the near-square QA capture and reduced legibility.
+- Mixed-aspect framing keeps both images larger without wasting A0 area.
+- Reusable class-based styling reduces future tweak cost and avoids repeated inline-style drift.
+
+### Compatibility Rules
+
+- Keep image asset paths unchanged:
+  - `poster-gen/assets/images/live-screen.png`
+  - `poster-gen/assets/images/qa-screen.png`
+- Preserve `object-fit: contain` for screenshot rendering to avoid cropping source/evidence labels.
+- For future image replacement, update frame aspect-ratio values first; avoid reintroducing fixed `16:9` containers.
+
+## Poster QR Embedding Finalization (2026-02-24)
+
+### Decision Summary
+
+- Finalized poster QR assets under:
+  - `poster-gen/assets/images/qr-demo-video.png`
+  - `poster-gen/assets/images/qr-app-url.png`
+  - `poster-gen/assets/images/qr-github.png`
+- Generated app/GitHub QR codes with existing `poster-gen` utility:
+  - app URL: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+  - repository URL: `https://github.com/arugo11/sit-copilot`
+- Updated QR UI in web poster to production-ready embedding:
+  - removed "待ち" placeholder wording,
+  - added explicit missing-asset fallback text with file path,
+  - made app and GitHub QR cards clickable (`target="_blank"`, `rel="noopener noreferrer"`),
+  - added short URL captions for scan/verification support.
+
+### Rationale
+
+- Placeholder-only rendering obscures whether QR assets are correctly embedded.
+- Clickable web-preview cards improve evaluator flow while preserving print usability.
+- Showing source URLs below QR improves trust and reduces scan ambiguity.
+
+### Compatibility Rules
+
+- Maintain square QR rendering (`1:1`) with `object-fit: contain`.
+- Keep QR image paths stable; future replacements should overwrite the same file names.
+- Keep app/repository links synchronized with QR generation targets when URLs change.
+
+## Poster A0 Fit Convergence Loop (2026-02-25)
+
+### Decision Summary
+
+- Ran iterative `create -> evaluate -> adjust` cycles on `poster-gen/poster-preview.html` until web-poster output converged to A0 aspect.
+- Convergence target:
+  - Width: `3400 px`
+  - Height: `4804 px` (A0 ratio `841:1189`)
+- Final exported image:
+  - `poster-gen/poster-preview-output.png` (`3400 x 4804`)
+- Main adjustments applied during loops:
+  - Removed zoom-control dependency for evaluation and moved to static poster rendering on screen.
+  - Compressed typography and spacing across header/content/section blocks.
+  - Reduced high-height content blocks in Row 3 (results/future-plans) while preserving core narrative.
+  - Kept screenshot and QR image paths stable; only layout/typography were tuned.
+
+### Rationale
+
+- Initial poster exceeded A0 height significantly (`~3400 x 8870`) and could not be exported as a single-page A0-equivalent image.
+- The dominant height contributor was dense Row 3 content and large baseline type/spacing values.
+- Iterative measurement-based compression achieved target ratio without requesting new source images.
+
+### Compatibility Rules
+
+- Preserve A0 export ratio for image outputs:
+  - `output_height = output_width * 1189 / 841`
+- If future content additions push height over target again, apply this order:
+  1. reduce verbose text blocks/tables,
+  2. tighten spacing/typography,
+  3. then review image proportions if still unresolved.
+- Avoid non-uniform scaling (`scaleY`-only) for final poster exports.
+
+## Poster Header Identity Emphasis Tuning (2026-02-25)
+
+### Decision Summary
+
+- Increased top-right identity text sizes to improve visibility at distance:
+  - author name: `18pt -> 22pt`
+  - affiliation: `14pt -> 17pt`
+  - event badge: `10.5pt -> 13pt`
+- Compensated with tighter vertical spacing (`margin-bottom` reductions) so overall A0 fit remains unchanged.
+
+### Rationale
+
+- The right-side identity block appeared visually underweighted relative to the main title.
+- Competition/exhibit context requires faster identification of author/affiliation/event from 1-2m viewing distance.
+
+### Compatibility Rules
+
+- Keep final poster export size at A0 ratio (`3400 x 4804`) after any future header typography changes.
+- If identity text is increased further, prefer reducing spacing before shrinking other core content.
+
 ## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
 
 ### Decision Summary
@@ -2229,6 +2392,30 @@ interface PosterContent {
 ### Changelog
 
 - 2026-02-23: Added backend delete compatibility for legacy `ended` lecture session rows to prevent `409` failures from UI delete actions.
+
+---
+
+## Lecture Session Delete QA-Turn Cleanup (2026-02-24)
+
+### Decision Summary
+
+- Added explicit `qa_turns` cleanup in lecture session delete flow (`SqlAlchemyLectureFinalizeService.delete_session`).
+- Kept response schema and endpoint contract unchanged (`DELETE /api/v4/lecture/session/{id}` with `auto_finalized` flag).
+
+### Rationale
+
+- Some environments can carry lecture-linked QA history rows while deleting sessions.
+- Explicitly removing `qa_turns` by `session_id` makes deletion robust across schema variants and prevents leftover orphan QA history for deleted sessions.
+
+### Compatibility Rules
+
+- Procedure QA rows (`feature=procedure_qa`, `session_id=NULL`) are unaffected.
+- Lecture delete behavior remains backward-compatible for `active`/`live`/`finalized`/`ended` statuses.
+- API response payload remains unchanged.
+
+### Changelog
+
+- 2026-02-24: Added explicit `qa_turns` deletion in lecture session delete flow and extended tests to verify QA-turn cleanup.
 
 ---
 
