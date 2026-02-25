@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
+from app.models.qa_turn import QATurn
 from app.models.speech_event import SpeechEvent
 from app.models.speech_review_history import SpeechReviewHistory
 from app.models.visual_event import VisualEvent
@@ -452,6 +453,21 @@ async def test_delete_session_auto_finalizes_and_removes_related_records(
             judge_confidence=0.9,
         )
     )
+    db_session.add(
+        QATurn(
+            id="qa_turn_delete_001",
+            session_id=session.id,
+            feature="lecture_qa",
+            question="削除確認テストです。",
+            answer="削除確認の回答です。",
+            confidence="high",
+            citations_json=[],
+            retrieved_chunk_ids_json=[],
+            latency_ms=12,
+            verifier_supported=True,
+            outcome_reason="verified",
+        )
+    )
     await db_session.flush()
 
     summary_service = SqlAlchemyLectureSummaryService(
@@ -478,10 +494,14 @@ async def test_delete_session_auto_finalizes_and_removes_related_records(
     history_result = await db_session.execute(
         select(SpeechReviewHistory).where(SpeechReviewHistory.session_id == session.id)
     )
+    qa_turn_result = await db_session.execute(
+        select(QATurn).where(QATurn.session_id == session.id)
+    )
 
     assert session_result.scalar_one_or_none() is None
     assert speech_result.scalars().all() == []
     assert history_result.scalars().all() == []
+    assert qa_turn_result.scalars().all() == []
 
 
 @pytest.mark.asyncio

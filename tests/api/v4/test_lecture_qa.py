@@ -12,10 +12,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.v4 import lecture_qa as lecture_qa_api
 from app.core.auth import LECTURE_TOKEN_HEADER, USER_ID_HEADER
 from app.core.config import settings
+from app.main import app
 from app.models.qa_turn import QATurn
+from app.schemas.lecture_qa import LectureSource
+from app.services.lecture_answerer_service import (
+    LectureAnswerDraft,
+    LectureAnswererError,
+)
 from app.services.lecture_retrieval_service import (
     AzureSearchLectureRetrievalService,
     BM25LectureRetrievalService,
+)
+from app.services.observability.weave_observer_service import NoopWeaveObserverService
+from app.services.observed_lecture_answerer_service import (
+    ObservedLectureAnswererService,
 )
 
 AUTH_HEADERS = {
@@ -75,6 +85,38 @@ class FakeAzureSearchService:
     async def has_session_documents(self, *, session_id: str) -> bool:
         _ = session_id
         return bool(self.documents)
+
+
+class StaticLectureRetriever:
+    """Retriever test double returning preconfigured sources."""
+
+    def __init__(self, sources: list[LectureSource]) -> None:
+        self._sources = sources
+
+    async def retrieve(
+        self,
+        session_id: str,
+        query: str,
+        mode: str,
+        top_k: int,
+        context_window: int,
+    ) -> list[LectureSource]:
+        _ = (session_id, query, mode, top_k, context_window)
+        return self._sources
+
+
+class ErrorLectureAnswerer:
+    """Answerer test double that always raises LectureAnswererError."""
+
+    async def answer(
+        self,
+        question: str,
+        lang_mode: str,
+        sources: list[LectureSource],
+        history: str,
+    ) -> LectureAnswerDraft:
+        _ = (question, lang_mode, sources, history)
+        raise LectureAnswererError("synthetic answerer failure")
 
 
 @pytest.mark.asyncio
@@ -283,6 +325,71 @@ async def test_post_qa_ask_without_index_returns_fallback(
     assert body["confidence"] == "low"
     assert body["sources"] == []
     assert body["fallback"] is not None
+
+
+@pytest.mark.asyncio
+async def test_post_qa_ask_answerer_error_without_grounded_source_includes_reason(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Ask should include raw answerer reason when grounded snippet cannot be built."""
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session_id = "test_session_qa_reason_001"
+        session.add(
+            LectureSession(
+                id=session_id,
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=True,
+            )
+        )
+        await session.commit()
+
+    app.dependency_overrides[lecture_qa_api.get_lecture_retrieval_service] = lambda: (
+        StaticLectureRetriever(
+            [
+                LectureSource(
+                    chunk_id="speech_1",
+                    type="speech",
+                    text="   ",
+                    bm25_score=5.0,
+                )
+            ]
+        )
+    )
+    app.dependency_overrides[lecture_qa_api.get_lecture_answerer_service] = lambda: (
+        ErrorLectureAnswerer()
+    )
+
+    try:
+        response = await async_client.post(
+            "/api/v4/lecture/qa/ask",
+            json={
+                "session_id": session_id,
+                "question": "この内容を教えてください",
+                "lang_mode": "ja",
+                "retrieval_mode": "source-only",
+                "top_k": 5,
+                "context_window": 1,
+            },
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        app.dependency_overrides.pop(lecture_qa_api.get_lecture_retrieval_service, None)
+        app.dependency_overrides.pop(lecture_qa_api.get_lecture_answerer_service, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    expected = "回答文生成に失敗しました。（理由: synthetic answerer failure）"
+    assert body["answer"] == expected
+    assert body["fallback"] == expected
+    assert body["verification_summary"] == expected
 
 
 @pytest.mark.asyncio
@@ -709,6 +816,81 @@ def test_get_lecture_retrieval_service_falls_back_to_bm25_when_disabled(
 
     service = lecture_qa_api.get_lecture_retrieval_service()
     assert isinstance(service, BM25LectureRetrievalService)
+
+
+def test_get_shared_lecture_answerer_service_reuses_instance_for_same_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Answerer provider should reuse process-shared instance for identical settings."""
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service", None)
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service_key", None)
+    monkeypatch.setattr(settings, "azure_openai_api_key", "test-key")
+    monkeypatch.setattr(
+        settings, "azure_openai_endpoint", "https://example.openai.azure.com"
+    )
+    monkeypatch.setattr(settings, "azure_openai_account_name", "example")
+    monkeypatch.setattr(settings, "azure_openai_model", "gpt-5-nano")
+    monkeypatch.setattr(settings, "lecture_qa_answer_max_retries", 2)
+    monkeypatch.setattr(settings, "lecture_qa_answer_retry_delay_seconds", 0.5)
+    monkeypatch.setattr(settings, "lecture_qa_answer_min_request_interval_seconds", 0.1)
+    monkeypatch.setattr(settings, "azure_openai_api_version", "2024-05-01-preview")
+
+    first = lecture_qa_api.get_shared_lecture_answerer_service()
+    second = lecture_qa_api.get_shared_lecture_answerer_service()
+
+    assert first is second
+
+
+def test_get_shared_lecture_answerer_service_recreates_when_config_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Answerer provider should recreate shared instance after setting changes."""
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service", None)
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service_key", None)
+    monkeypatch.setattr(settings, "azure_openai_api_key", "test-key")
+    monkeypatch.setattr(
+        settings, "azure_openai_endpoint", "https://example.openai.azure.com"
+    )
+    monkeypatch.setattr(settings, "azure_openai_account_name", "example")
+    monkeypatch.setattr(settings, "azure_openai_model", "gpt-5-nano")
+    monkeypatch.setattr(settings, "lecture_qa_answer_max_retries", 2)
+    monkeypatch.setattr(settings, "lecture_qa_answer_retry_delay_seconds", 0.5)
+    monkeypatch.setattr(settings, "lecture_qa_answer_min_request_interval_seconds", 0.1)
+    monkeypatch.setattr(settings, "azure_openai_api_version", "2024-05-01-preview")
+
+    first = lecture_qa_api.get_shared_lecture_answerer_service()
+    monkeypatch.setattr(settings, "azure_openai_model", "gpt-5-mini")
+    second = lecture_qa_api.get_shared_lecture_answerer_service()
+
+    assert first is not second
+
+
+def test_get_lecture_answerer_service_wraps_shared_inner_when_weave_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Observed wrappers should be request-scoped while sharing the same inner answerer."""
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service", None)
+    monkeypatch.setattr(lecture_qa_api, "_shared_lecture_answerer_service_key", None)
+    monkeypatch.setattr(settings.weave, "enabled", True)
+    monkeypatch.setattr(settings, "azure_openai_api_key", "test-key")
+    monkeypatch.setattr(
+        settings, "azure_openai_endpoint", "https://example.openai.azure.com"
+    )
+    monkeypatch.setattr(settings, "azure_openai_account_name", "example")
+    monkeypatch.setattr(settings, "azure_openai_model", "gpt-5-nano")
+    monkeypatch.setattr(settings, "lecture_qa_answer_max_retries", 2)
+    monkeypatch.setattr(settings, "lecture_qa_answer_retry_delay_seconds", 0.5)
+    monkeypatch.setattr(settings, "lecture_qa_answer_min_request_interval_seconds", 0.1)
+    monkeypatch.setattr(settings, "azure_openai_api_version", "2024-05-01-preview")
+
+    observer = NoopWeaveObserverService()
+    wrapped_a = lecture_qa_api.get_lecture_answerer_service(observer)
+    wrapped_b = lecture_qa_api.get_lecture_answerer_service(observer)
+
+    assert isinstance(wrapped_a, ObservedLectureAnswererService)
+    assert isinstance(wrapped_b, ObservedLectureAnswererService)
+    assert wrapped_a is not wrapped_b
+    assert wrapped_a._inner is wrapped_b._inner
 
 
 @pytest.mark.asyncio

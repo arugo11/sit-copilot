@@ -17,6 +17,7 @@ from app.core.user_id import get_user_id_candidates
 from app.db.session import commit_with_retry, is_sqlite_locked_error
 from app.models.lecture_chunk import LectureChunk
 from app.models.lecture_session import LectureSession
+from app.models.qa_turn import QATurn
 from app.models.speech_event import SpeechEvent
 from app.models.speech_review_history import SpeechReviewHistory
 from app.models.summary_window import SummaryWindow
@@ -171,6 +172,7 @@ class SqlAlchemyLectureFinalizeService:
         await self._db.execute(
             delete(SpeechEvent).where(SpeechEvent.session_id == session_id)
         )
+        await self._db.execute(delete(QATurn).where(QATurn.session_id == session_id))
         await self._db.execute(delete(LectureSession).where(LectureSession.id == session_id))
         await commit_with_retry(self._db)
 

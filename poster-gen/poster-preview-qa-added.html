@@ -420,6 +420,41 @@
     display: block;
   }
 
+  .screenshot-row {
+    display: grid;
+    grid-template-columns: 1.45fr 1fr;
+    gap: 2.2mm;
+    align-items: start;
+  }
+
+  .screen-pane {
+    display: grid;
+    gap: 1.1mm;
+  }
+
+  .pane-title {
+    font-size: 22pt;
+    line-height: 1.2;
+    font-weight: 800;
+    color: #1e3a8a;
+  }
+
+  .screenshot-wrap.live-shot {
+    aspect-ratio: 1771 / 845;
+  }
+
+  .screenshot-wrap.qa-shot {
+    aspect-ratio: 1 / 1;
+  }
+
+  .screenshot-wrap.live-shot img,
+  .screenshot-wrap.qa-shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
   .callout {
     position: absolute;
     background: rgba(255, 255, 255, 0.95);
@@ -498,7 +533,6 @@
     grid-template-columns: 1fr 1fr;
     gap: 2mm;
     margin-top: 2.5mm;
-    align-items: start;
   }
 
   .prompt-snippet {
@@ -522,106 +556,18 @@
     font-weight: 600;
   }
 
-  .qa-support {
-    margin-top: 2mm;
-    border: 1px solid #93c5fd;
-    border-radius: 3mm;
-    background: #eff6ff;
-    padding: 2.1mm 2.4mm;
-  }
-
-  .qa-support-title {
-    font-size: 24pt;
-    line-height: 1.2;
-    font-weight: 800;
-    color: #1e3a8a;
-    margin-bottom: 1mm;
-  }
-
-  .qa-support-layout {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1.6mm;
-  }
-
-  .qa-support-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .qa-support-list li {
-    font-size: 22pt;
-    line-height: 1.28;
-    color: #1e3a8a;
-    font-weight: 700;
-    position: relative;
-    padding-left: 5.5mm;
-    margin-bottom: 1mm;
-  }
-
-  .qa-support-list li:last-child {
-    margin-bottom: 0;
-  }
-
-  .qa-support-list li::before {
-    content: '•';
-    position: absolute;
-    left: 0;
-    top: 0;
-    color: #2563eb;
-    font-weight: 800;
-  }
-
-  .qa-support-shots {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2.1mm;
-  }
-
-  .qa-shot-card {
-    display: grid;
-    gap: 0.8mm;
-    align-items: start;
-    justify-items: center;
-  }
-
-  .qa-shot-title {
-    font-size: 20pt;
-    line-height: 1.2;
-    font-weight: 800;
-    color: #1e3a8a;
-    text-align: center;
-  }
-
-  .qa-support-shot {
-    border: 1px solid #94a3b8;
-    border-radius: 2mm;
-    background: #0b1730;
-    aspect-ratio: 1 / 1;
-    overflow: hidden;
-    width: 92%;
-  }
-
-  .qa-support-shot img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: block;
-  }
-
   .results-table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 2.4mm;
+    margin-bottom: 2mm;
   }
 
   .results-table th,
   .results-table td {
     border: 1px solid var(--line);
-    padding: 2.2mm 2.1mm;
-    font-size: 27pt;
-    line-height: 1.22;
+    padding: 1.8mm 1.8mm;
+    font-size: 26pt;
+    line-height: 1.2;
     text-align: left;
     vertical-align: middle;
   }
@@ -648,10 +594,10 @@
   }
 
   .measure-line {
-    font-size: 24.5pt;
-    line-height: 1.34;
+    font-size: 24pt;
+    line-height: 1.35;
     color: #374151;
-    margin-bottom: 2.3mm;
+    margin-bottom: 2mm;
   }
 
   .repro-box {
@@ -667,92 +613,6 @@
 
   .repro-box li {
     margin-bottom: 1.3mm;
-  }
-
-  .results-note {
-    margin-top: 2mm;
-    border: 1px solid #93c5fd;
-    background: #eff6ff;
-    border-radius: 3mm;
-    padding: 2.2mm 2.6mm;
-  }
-
-  .results-note-title {
-    font-size: 26pt;
-    line-height: 1.2;
-    font-weight: 800;
-    color: #1e3a8a;
-    margin-bottom: 1mm;
-  }
-
-  .results-note-list {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 1.4mm;
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .results-note-list li {
-    font-size: 24pt;
-    line-height: 1.22;
-    color: #1e3a8a;
-    font-weight: 700;
-    padding: 1.3mm 1.6mm;
-    border: 1px solid #bfdbfe;
-    border-radius: 2mm;
-    background: #fff;
-    margin: 0;
-  }
-
-  .results-note-list li::before {
-    content: none;
-  }
-
-  .qa-eval-panel {
-    margin-top: 1.6mm;
-    border: 1px solid #93c5fd;
-    background: #eff6ff;
-    border-radius: 3mm;
-    padding: 1.9mm 2.3mm;
-  }
-
-  .qa-eval-title {
-    font-size: 24pt;
-    line-height: 1.2;
-    font-weight: 800;
-    color: #1e3a8a;
-    margin-bottom: 0.8mm;
-  }
-
-  .qa-eval-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .qa-eval-list li {
-    font-size: 22pt;
-    line-height: 1.25;
-    color: #1e3a8a;
-    font-weight: 700;
-    position: relative;
-    padding-left: 5.2mm;
-    margin-bottom: 0.8mm;
-  }
-
-  .qa-eval-list li:last-child {
-    margin-bottom: 0;
-  }
-
-  .qa-eval-list li::before {
-    content: '•';
-    position: absolute;
-    left: 0;
-    top: 0;
-    color: #2563eb;
-    font-weight: 800;
   }
 
   .analysis-grid {
@@ -775,7 +635,7 @@
 
   .demo {
     margin: 0 16mm 5mm;
-    padding: 7.6mm 10mm;
+    padding: 5.2mm 8mm;
   }
 
   .demo-title {
@@ -789,23 +649,22 @@
   .demo-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 5.6mm;
+    gap: 4mm;
     align-items: start;
   }
 
   .qr-card {
     border: 1px solid var(--line);
     border-radius: 3mm;
-    padding: 3.8mm 3.4mm;
+    padding: 2.8mm 2.8mm;
     background: #f8fafc;
     text-align: center;
-    min-height: 106mm;
   }
 
   .qr-img {
-    width: 74mm;
-    height: 74mm;
-    margin: 0 auto;
+    width: 56mm;
+    height: 56mm;
+    margin: 0 auto 1.8mm;
     border: 1px solid #94a3b8;
     border-radius: 2mm;
     display: flex;
@@ -823,11 +682,94 @@
   }
 
   .qr-label {
-    font-size: 27pt;
+    font-size: 26pt;
     line-height: 1.2;
     font-weight: 800;
     color: #0f172a;
-    margin-bottom: 2.4mm;
+    margin-bottom: 0.8mm;
+  }
+
+  .qr-sub {
+    font-size: 24pt;
+    line-height: 1.3;
+    color: #374151;
+  }
+
+  .demo-extra {
+    margin-top: 4mm;
+    display: grid;
+    gap: 3mm;
+  }
+
+  .demo-extra-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3mm;
+  }
+
+  .demo-extra-card {
+    border: 1px solid var(--line, #cbd5e1);
+    border-radius: 3mm;
+    padding: 2.6mm 2.8mm;
+    background: #fff;
+  }
+
+  .demo-extra-title {
+    font-size: 28pt;
+    font-weight: 800;
+    color: var(--navy, #0b2a4a);
+    margin-bottom: 1.2mm;
+    line-height: 1.2;
+  }
+
+  .demo-extra-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .demo-extra-list li {
+    font-size: 24pt;
+    line-height: 1.3;
+    padding-left: 7mm;
+    margin-bottom: 1.2mm;
+    position: relative;
+    color: var(--ink, #0f172a);
+    font-weight: 700;
+  }
+
+  .demo-extra-list li:last-child {
+    margin-bottom: 0;
+  }
+
+  .demo-extra-list li::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--blue, #2563eb);
+    font-weight: 800;
+  }
+
+  .demo-mini {
+    border: 1px solid #93c5fd;
+    background: #eff6ff;
+    border-radius: 3mm;
+    padding: 2.4mm 2.8mm;
+  }
+
+  .demo-mini-title {
+    font-size: 26pt;
+    font-weight: 800;
+    color: #1e3a8a;
+    margin-bottom: 1mm;
+    line-height: 1.2;
+  }
+
+  .demo-mini-body {
+    font-size: 24pt;
+    line-height: 1.35;
+    color: #1e3a8a;
+    font-weight: 700;
   }
 
   .qr-url {
@@ -862,18 +804,13 @@
     body {
       background: none;
       padding: 0;
-      margin: 0;
-      display: block;
     }
 
     .poster {
       box-shadow: none;
       border: none;
-      margin: 0;
       width: 841mm;
-      min-height: auto;
-      height: 1189mm;
-      overflow: hidden;
+      min-height: 1189mm;
     }
 
     @page {
@@ -889,6 +826,7 @@
       <div class="title">
         <h1>SIT Copilot</h1>
         <div class="core-claim">講義ライブを0.76秒字幕で追従し、source-only(根拠必須) QAで根拠付き復習までつなぐ</div>
+        <div class="sit-note">SIT = Shibaura Institute of Technology</div>
       </div>
       <div class="meta">
         <div class="author">嶋中 雄大</div>
@@ -1000,17 +938,27 @@
           </div>
 
           <div>
-            <div class="screenshot-wrap">
-              <img src="assets/images/live-screen.png" alt="講義ライブ画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:24pt;padding:12mm;text-align:center;&quot;>画像未配置<br>assets/images/live-screen.png</div>';"></img>
-              <div class="callout c1">① 多言語切替</div>
-              <div class="callout c2">② source_id表示（S-001…）</div>
-              <div class="callout c3">③ アクセシビリティ配慮</div>
+            <div class="screenshot-row">
+              <div class="screen-pane">
+                <div class="pane-title">講義ライブ画面</div>
+                <div class="screenshot-wrap live-shot">
+                  <img src="assets/images/live-screen.png" alt="講義ライブ画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:22pt;padding:10mm;text-align:center;&quot;>画像未配置<br>assets/images/live-screen.png</div>';"></img>
+                  <div class="callout c1">① 多言語切替</div>
+                </div>
+              </div>
+
+              <div class="screen-pane">
+                <div class="pane-title">QA画面（source_id付き）</div>
+                <div class="screenshot-wrap qa-shot">
+                  <img src="assets/images/qa-screen.png" alt="QA回答画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:22pt;padding:10mm;text-align:center;&quot;>画像未配置<br>assets/images/qa-screen.png</div>';"></img>
+                </div>
+              </div>
             </div>
-            <div class="cap">講義資料に基づく例。QA回答でも同形式の source_id を提示。</div>
+            <div class="cap">左: 講義ライブ字幕。右: source-only QAの回答とsource_id表示。</div>
             <div class="callout-legend">
               <div class="callout-chip">① 多言語切替（日本語 / やさしい日本語 / English）</div>
-              <div class="callout-chip">② source-only QAのsource_id表示（例: S-001）</div>
-              <div class="callout-chip">③ 読みやすさを優先したアクセシビリティ表示</div>
+              <div class="callout-chip">② QA回答にsource_id（例: S-001）を表示</div>
+              <div class="callout-chip">③ 根拠がない時は答えない</div>
             </div>
           </div>
         </div>
@@ -1038,29 +986,6 @@
             <div class="prompt-snippet">
               <div class="snippet-title">QA（source-only）</div>
               <div class="snippet-body">講義資料以外は使わない。<br>source_id(S-001)を必ず添える。<br>根拠がない時は答えない。</div>
-            </div>
-          </div>
-          <div class="qa-support">
-            <div class="qa-support-title">質問ツール画面（補足）</div>
-            <div class="qa-support-layout">
-              <ul class="qa-support-list">
-                <li>回答にsource_idを表示する</li>
-                <li>根拠がない時は答えない</li>
-              </ul>
-              <div class="qa-support-shots">
-                <div class="qa-shot-card">
-                  <div class="qa-shot-title">日本語例</div>
-                  <div class="qa-support-shot">
-                    <img src="assets/images/qa-screen.png" alt="質問ツールの回答例（日本語）" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:16pt;padding:5mm;text-align:center;&quot;>画像未配置<br>assets/images/qa-screen.png</div>';"></img>
-                  </div>
-                </div>
-                <div class="qa-shot-card">
-                  <div class="qa-shot-title">English例</div>
-                  <div class="qa-support-shot">
-                    <img src="assets/images/qa-screen-en.png" alt="質問ツールの回答例（英語）" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:16pt;padding:5mm;text-align:center;&quot;>画像未配置<br>assets/images/qa-screen-en.png</div>';"></img>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -1101,29 +1026,14 @@
             </tr>
           </table>
 
-          <div class="measure-line">測定:<br>字幕 n=3文、QA n=5問、ASR補正 n=5文。<br>字幕品質:<br>LLM as a Judgeの5段階で5.</div>
+          <div class="measure-line">測定: 字幕 n=3文、QA n=5問、ASR補正 n=5文。p50/p95は未計測。字幕品質: LLM as a Judgeの5段階で5. 条件はGitHubに掲載.</div>
 
           <div class="repro-box">
             <div class="subheading">再現性</div>
             <ul class="body-list">
               <li>環境: ローカル実行</li>
               <li>利用サービス: Azure OpenAI, Azure AI Speech, Azure AI Search, LLM as a Judge</li>
-            </ul>
-          </div>
-          <div class="results-note">
-            <div class="results-note-title">ポイント</div>
-            <ul class="results-note-list">
-              <li>字幕の遅延と品質</li>
-              <li>QAのsource_id表示と応答時間</li>
-              <li>ASR補正の遅延と採択率</li>
-            </ul>
-          </div>
-          <div class="qa-eval-panel">
-            <div class="qa-eval-title">QA評価で見た点</div>
-            <ul class="qa-eval-list">
-              <li>回答にsource_idが付く</li>
-              <li>根拠がない時は答えない</li>
-              <li>回答が講義資料の範囲に収まる</li>
+              <li>手順: GitHubに掲載</li>
             </ul>
           </div>
         </section>
@@ -1135,7 +1045,7 @@
           <div class="analysis-block">
             <div class="subheading">字幕が速い理由</div>
             <ul class="body-list">
-              <li>字幕変換は単機能APIで計測し、<br>処理経路を短く保てた</li>
+              <li>字幕変換は単機能APIで計測し、処理経路を短く保てた</li>
               <li>3文×2モードで反復計測し、0.76s/0.99sを確認</li>
             </ul>
           </div>
@@ -1163,18 +1073,46 @@
       <div class="demo-title">デモ</div>
       <div class="demo-grid">
         <div class="qr-card">
-          <div class="qr-label">デモ動画</div>
           <div class="qr-img"><img src="assets/images/qr-demo-video.png" alt="デモ動画QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">デモ動画</div>
+          <div class="qr-sub">QRで視聴</div>
         </div>
 
         <div class="qr-card">
-          <div class="qr-label">アプリ 実機デモ</div>
           <div class="qr-img"><img src="assets/images/qr-app-url.png" alt="アプリQR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">アプリ 実機デモ</div>
+          <div class="qr-sub">QRでアクセス</div>
         </div>
 
         <div class="qr-card">
-          <div class="qr-label">GitHub 実装と評価手順</div>
           <div class="qr-img"><img src="assets/images/qr-github.png" alt="GitHub QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">GitHub 実装と評価手順</div>
+          <div class="qr-sub">QRで手順を見る</div>
+        </div>
+      </div>
+
+      <div class="demo-extra">
+        <div class="demo-extra-grid">
+          <div class="demo-extra-card">
+            <div class="demo-extra-title">デモを見る順番</div>
+            <ul class="demo-extra-list">
+              <li>QRでアプリを開く</li>
+              <li>講義を再生して字幕を見る(日本語, やさしい日本語, English)</li>
+              <li>質問を入れて, source_id(S-001)つき回答を見る</li>
+            </ul>
+          </div>
+          <div class="demo-extra-card">
+            <div class="demo-extra-title">見るポイント</div>
+            <ul class="demo-extra-list">
+              <li>字幕は0.76s/0.99sの計測値</li>
+              <li>回答には引用としてsource_idが付く</li>
+              <li>根拠がない時は答えない</li>
+            </ul>
+          </div>
+        </div>
+        <div class="demo-mini">
+          <div class="demo-mini-title">質問例</div>
+          <div class="demo-mini-body">例, 「Transformerはいつ発表されたか」. source_idが付く形で返る.</div>
         </div>
       </div>
     </section>

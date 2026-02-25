@@ -16,7 +16,23 @@ const MAX_HISTORY = 10
 const MAX_ASSIST_TERMS = 20
 
 function normalizeAssistTermKey(term: string): string {
-  return term.replace(/[\s　]+/g, '').trim().toLowerCase()
+  return term.replace(/[\s\u3000]+/g, '').trim().toLowerCase()
+}
+
+function areStringArraysEqual(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) {
+      return false
+    }
+  }
+  return true
 }
 
 function assignSubtitleSerials(lines: TranscriptLine[]): TranscriptLine[] {
@@ -342,7 +358,13 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
     })),
 
   setAssistSummary: (summary) =>
-    set({ summaryPoints: summary.points.slice(0, 3) }),
+    set((state) => {
+      const nextPoints = summary.points.slice(0, 3)
+      if (areStringArraysEqual(state.summaryPoints, nextPoints)) {
+        return state
+      }
+      return { summaryPoints: nextPoints }
+    }),
 
   setAssistTerms: (assistTerms) =>
     set({ assistTerms: assistTerms.slice(0, MAX_ASSIST_TERMS) }),

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLiveSessionStore } from '@/stores/liveSessionStore'
 import { useAudioInputStore } from '@/stores/audioInputStore'
@@ -16,8 +16,6 @@ import {
   type QaStreamStatus,
   type QaStreamTurn,
 } from '@/features/review/components/QAStreamBlocks'
-
-const SUMMARY_REFRESH_INTERVAL_MS = 30000 // 30 seconds
 
 interface AssistPanelProps {
   onAskMiniQuestion: (q: string) => void
@@ -59,6 +57,18 @@ export function AssistPanel({
   const [miniQuestion, setMiniQuestion] = useState('')
   const [isUpdatingLangMode, setIsUpdatingLangMode] = useState(false)
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false)
+  const isRefreshingSummaryRef = useRef(false)
+  const latestFinalSubtitleKey = useMemo(() => {
+    const latestFinalLine = [...transcriptLines]
+      .reverse()
+      .find((line) => !line.isPartial && line.sourceLangText.trim().length > 0)
+
+    if (!latestFinalLine) {
+      return null
+    }
+
+    return `${latestFinalLine.id}:${latestFinalLine.sourceLangText.trim()}`
+  }, [transcriptLines])
 
   const langModeOptions = [
     { value: 'ja', label: t('assistPanel.languageModes.ja') },
@@ -74,9 +84,10 @@ export function AssistPanel({
   } as const
 
   const handleRefreshSummary = useCallback(async () => {
-    if (!sessionId || isRefreshingSummary) {
+    if (!sessionId || isRefreshingSummaryRef.current) {
       return
     }
+    isRefreshingSummaryRef.current = true
     setIsRefreshingSummary(true)
     try {
       const summary = await demoApi.getLatestSummary(sessionId)
@@ -97,20 +108,17 @@ export function AssistPanel({
     } catch (error) {
       console.warn('[summary] refresh failed:', error)
     } finally {
+      isRefreshingSummaryRef.current = false
       setIsRefreshingSummary(false)
     }
-  }, [sessionId, isRefreshingSummary, setAssistSummary])
+  }, [sessionId, setAssistSummary])
 
   useEffect(() => {
-    if (!sessionId || !summaryEnabled) {
+    if (!sessionId || !summaryEnabled || !latestFinalSubtitleKey) {
       return
     }
-    handleRefreshSummary()
-    const interval = setInterval(() => {
-      handleRefreshSummary()
-    }, SUMMARY_REFRESH_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [sessionId, summaryEnabled, handleRefreshSummary])
+    void handleRefreshSummary()
+  }, [sessionId, summaryEnabled, latestFinalSubtitleKey, handleRefreshSummary])
 
   const isRecording = useAudioInputStore((state) => state.isRecording)
   const audioLevel = useAudioInputStore((state) => state.audioLevel)
@@ -119,7 +127,6 @@ export function AssistPanel({
     setIsUpdatingLangMode(true)
     try {
       await switchLanguage(value)
-      await handleRefreshSummary()
       showToast({
         variant: 'success',
         title: t('assistPanel.messages.langModeChangedTitle'),
@@ -167,11 +174,8 @@ export function AssistPanel({
         console.warn('[assist] failed to persist summary toggle', error)
       }
 
-      if (enabled) {
-        await handleRefreshSummary()
-      }
     },
-    [handleRefreshSummary, persistAssistToggle, setAssistSummary, setSummaryEnabled]
+    [persistAssistToggle, setAssistSummary, setSummaryEnabled]
   )
 
   const handleKeytermsToggleChange = useCallback(

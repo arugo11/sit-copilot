@@ -43,6 +43,7 @@ pnpm-debug.log*
 *.sqlite3
 *.backup
 *.log
+.runtime/
 
 # Editor / OS
 .vscode/
@@ -63,3 +64,5 @@ Thumbs.db
 # Poster generation artifacts
 poster-gen/dist/
 poster-gen/*.pptx
+poster-gen/poster_v*.png
+poster-gen/poster-preview-a0-page*.png

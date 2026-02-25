@@ -34,10 +34,8 @@ import {
 import type { QaAnswerChunk } from '@/lib/stream/types'
 import {
   mapSummaryKeyTermsToAssistTerms,
-  mapSummaryResponseToAssist,
 } from '@/features/live/utils/assistSupport'
 
-const SUMMARY_TRIGGER_CHUNK_COUNT = 3
 const ERROR_TOAST_THROTTLE_MS = 5000
 const QA_INDEX_REFRESH_INTERVAL_MS = 30000
 
@@ -167,7 +165,6 @@ export function LectureLivePage() {
   const applyTranslationFinal = useLiveSessionStore((state) => state.applyTranslationFinal)
   const pushSourceFrame = useLiveSessionStore((state) => state.pushSourceFrame)
   const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
-  const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
   const appendAssistTerms = useLiveSessionStore((state) => state.appendAssistTerms)
   const setTranslationFallbackActive = useLiveSessionStore(
     (state) => state.setTranslationFallbackActive
@@ -184,7 +181,6 @@ export function LectureLivePage() {
   const resetReviewQa = useReviewQaStore((state) => state.reset)
   const autoStartedSessionIdRef = useRef<string | null>(null)
   const previousSessionIdRef = useRef<string | null>(null)
-  const chunkIndexRef = useRef(0)
   const successfulTurnCountRef = useRef(0)
   const lastQaIndexBuildAtRef = useRef(0)
   const qaIndexBuiltOnceRef = useRef(false)
@@ -598,31 +594,6 @@ export function LectureLivePage() {
           }
         }
 
-        // 3回ごとに要約を更新（トグルONの場合のみ）
-        chunkIndexRef.current += 1
-        if (
-          useLiveSessionStore.getState().summaryEnabled &&
-          chunkIndexRef.current % SUMMARY_TRIGGER_CHUNK_COUNT === 0
-        ) {
-          try {
-            const summaryResult = await demoApi.getLatestSummary(sessionId)
-            if (summaryResult.status === 'ok') {
-              const mapped = mapSummaryResponseToAssist(summaryResult)
-              setAssistSummary({
-                timestampMs: Date.now(),
-                points: mapped.points,
-              })
-            } else {
-              console.info('[summary] 3-chunk trigger non-ok status', {
-                sessionId,
-                status: summaryResult.status,
-                reason: summaryResult.reason,
-              })
-            }
-          } catch (summaryError) {
-            console.warn('[summary] 3-chunk trigger failed:', summaryError)
-          }
-        }
       } catch (error) {
         const nowMs = Date.now()
         if (nowMs - lastErrorToastAtRef.current < ERROR_TOAST_THROTTLE_MS) {
@@ -643,7 +614,6 @@ export function LectureLivePage() {
       replaceTranscriptLineText,
       setTranscriptCorrectionStatus,
       showToast,
-      setAssistSummary,
       appendAssistTerms,
       setTranslationFallbackActive,
       notifyTranslationFallback,
@@ -801,7 +771,6 @@ export function LectureLivePage() {
       // 旧経路の translation.final が届いても字幕を上書きしない。
       streamClient.subscribe('source.frame', (event) => pushSourceFrame(event.payload)),
       streamClient.subscribe('source.ocr', (event) => pushSourceOcr(event.payload)),
-      streamClient.subscribe('assist.summary', (event) => setAssistSummary(event.payload)),
       streamClient.subscribe('assist.term', (event) => appendAssistTerms(event.payload)),
       streamClient.subscribe('error', (event) => {
         showToast({
@@ -812,7 +781,6 @@ export function LectureLivePage() {
       }),
     ]
 
-    chunkIndexRef.current = 0
     streamClient.setTransport(sseStreamTransport)
 
     streamClient.connect(sessionId).catch((error) => {
@@ -835,7 +803,6 @@ export function LectureLivePage() {
     pushSourceFrame,
     pushSourceOcr,
     sessionId,
-    setAssistSummary,
     appendAssistTerms,
     setConnection,
     setTranslationFallbackActive,

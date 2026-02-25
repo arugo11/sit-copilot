@@ -30,6 +30,321 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Lecture QA Failure Handling and Runtime Simplification (2026-02-24)
+
+### Decision Summary
+
+- Disabled lecture question-classifier routing in runtime QA flow.
+- Restored grounded local fallback on `answerer` failure when valid source text exists.
+- Updated explicit failure messaging to include raw internal reason:
+  - Japanese: `回答文生成に失敗しました。（理由: {raw_reason}）`
+  - English: `Failed to generate answer. (Reason: {raw_reason})`
+- Added process-shared `AzureOpenAILectureAnswererService` in API DI.
+  - Recreate only when answerer-related settings key changes.
+  - Keep Weave wrapper request-scoped (`ObservedLectureAnswererService`) around shared inner instance.
+- Persist `qa_turns.outcome_reason` for lecture QA across all major branches:
+  - `no_source`
+  - `answerer_error_grounded`
+  - `answerer_error_failure`
+  - `verified`
+  - `repaired_verified`
+  - `verification_failed`
+
+### Rationale
+
+- Classification introduced an avoidable control-path fork and made recovery behavior inconsistent.
+- Answer generation failures should degrade to evidence-first local snippets whenever possible, instead of generic failure text.
+- Operators and users need failure transparency; exposing the raw reason improves diagnosability.
+- Reusing answerer instances keeps retry and request-interval state stable across requests and reduces churn.
+- Explicit `outcome_reason` persistence removes ambiguity (`unspecified`) and supports postmortem/analytics.
+
+### Compatibility Rules
+
+- External response schemas remain unchanged (`LectureAskResponse`, `LectureFollowupResponse`).
+- Classifier settings remain in config for backward compatibility but are not used by lecture QA runtime path.
+- Failure reason text is normalized and truncated defensively before rendering.
+
+## Live Assist Summary Update Trigger Alignment (2026-02-24)
+
+### Decision Summary
+
+- Removed interval-based summary polling from `AssistPanel` (`30s` timer).
+- Removed 3-chunk summary polling trigger from `LectureLivePage`.
+- Automatic summary refresh is now triggered only when a new finalized subtitle line is observed.
+- Stopped applying SSE `assist.summary` events directly in `LectureLivePage`; summary panel state is driven by subtitle-triggered `summary/latest` fetch.
+- Added summary point deduplication in `liveSessionStore.setAssistSummary` to suppress no-op UI re-renders.
+
+### Rationale
+
+- Frequent automatic summary rewrites made active reading difficult.
+- Subtitle-driven refresh keeps update timing aligned with visible transcript progression.
+- Deduplicating unchanged summary points avoids flicker and unnecessary redraws.
+
+### Compatibility Rules
+
+- Manual `Refresh` action in summary panel remains available.
+- Summary toggle and language switch no longer force immediate summary refresh; next finalized subtitle update will refresh automatically.
+
+## Poster Screenshot Aspect-Ratio Adaptive UI Refresh (2026-02-24)
+
+### Decision Summary
+
+- Updated web-poster screenshot zone to an asymmetric two-panel layout:
+  - Live panel width ratio: `1.65`
+  - QA panel width ratio: `1.0`
+- Bound frame aspect ratios to actual delivered assets:
+  - `live-screen.png`: `1771 x 845` (wide)
+  - `qa-screen.png`: `432 x 448` (near-square)
+- Replaced inline screenshot styles with reusable CSS classes (`slot-header`, `slot-tag`, `screen-frame`, `qa-points`) to keep poster UI consistent and maintainable.
+- Added concise QA-side guidance text so evaluators can quickly identify evidence-related UI elements.
+
+### Rationale
+
+- Prior equal-width `16:9` frames introduced excessive empty margins for the near-square QA capture and reduced legibility.
+- Mixed-aspect framing keeps both images larger without wasting A0 area.
+- Reusable class-based styling reduces future tweak cost and avoids repeated inline-style drift.
+
+### Compatibility Rules
+
+- Keep image asset paths unchanged:
+  - `poster-gen/assets/images/live-screen.png`
+  - `poster-gen/assets/images/qa-screen.png`
+- Preserve `object-fit: contain` for screenshot rendering to avoid cropping source/evidence labels.
+- For future image replacement, update frame aspect-ratio values first; avoid reintroducing fixed `16:9` containers.
+
+## Poster QR Embedding Finalization (2026-02-24)
+
+### Decision Summary
+
+- Finalized poster QR assets under:
+  - `poster-gen/assets/images/qr-demo-video.png`
+  - `poster-gen/assets/images/qr-app-url.png`
+  - `poster-gen/assets/images/qr-github.png`
+- Generated app/GitHub QR codes with existing `poster-gen` utility:
+  - app URL: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+  - repository URL: `https://github.com/arugo11/sit-copilot`
+- Updated QR UI in web poster to production-ready embedding:
+  - removed "待ち" placeholder wording,
+  - added explicit missing-asset fallback text with file path,
+  - made app and GitHub QR cards clickable (`target="_blank"`, `rel="noopener noreferrer"`),
+  - added short URL captions for scan/verification support.
+
+### Rationale
+
+- Placeholder-only rendering obscures whether QR assets are correctly embedded.
+- Clickable web-preview cards improve evaluator flow while preserving print usability.
+- Showing source URLs below QR improves trust and reduces scan ambiguity.
+
+### Compatibility Rules
+
+- Maintain square QR rendering (`1:1`) with `object-fit: contain`.
+- Keep QR image paths stable; future replacements should overwrite the same file names.
+- Keep app/repository links synchronized with QR generation targets when URLs change.
+
+## Poster A0 Fit Convergence Loop (2026-02-25)
+
+### Decision Summary
+
+- Ran iterative `create -> evaluate -> adjust` cycles on `poster-gen/poster-preview.html` until web-poster output converged to A0 aspect.
+- Convergence target:
+  - Width: `3400 px`
+  - Height: `4804 px` (A0 ratio `841:1189`)
+- Final exported image:
+  - `poster-gen/poster-preview-output.png` (`3400 x 4804`)
+- Main adjustments applied during loops:
+  - Removed zoom-control dependency for evaluation and moved to static poster rendering on screen.
+  - Compressed typography and spacing across header/content/section blocks.
+  - Reduced high-height content blocks in Row 3 (results/future-plans) while preserving core narrative.
+  - Kept screenshot and QR image paths stable; only layout/typography were tuned.
+
+### Rationale
+
+- Initial poster exceeded A0 height significantly (`~3400 x 8870`) and could not be exported as a single-page A0-equivalent image.
+- The dominant height contributor was dense Row 3 content and large baseline type/spacing values.
+- Iterative measurement-based compression achieved target ratio without requesting new source images.
+
+### Compatibility Rules
+
+- Preserve A0 export ratio for image outputs:
+  - `output_height = output_width * 1189 / 841`
+- If future content additions push height over target again, apply this order:
+  1. reduce verbose text blocks/tables,
+  2. tighten spacing/typography,
+  3. then review image proportions if still unresolved.
+- Avoid non-uniform scaling (`scaleY`-only) for final poster exports.
+
+## Poster Header Identity Emphasis Tuning (2026-02-25)
+
+### Decision Summary
+
+- Increased top-right identity text sizes to improve visibility at distance:
+  - author name: `18pt -> 22pt`
+  - affiliation: `14pt -> 17pt`
+  - event badge: `10.5pt -> 13pt`
+- Compensated with tighter vertical spacing (`margin-bottom` reductions) so overall A0 fit remains unchanged.
+
+### Rationale
+
+- The right-side identity block appeared visually underweighted relative to the main title.
+- Competition/exhibit context requires faster identification of author/affiliation/event from 1-2m viewing distance.
+
+### Compatibility Rules
+
+- Keep final poster export size at A0 ratio (`3400 x 4804`) after any future header typography changes.
+- If identity text is increased further, prefer reducing spacing before shrinking other core content.
+
+## Poster Rubric-Driven Evidence Upgrade (2026-02-25)
+
+### Decision Summary
+
+- Reworked `poster-gen/poster-preview.html` to align with competition-required structure and scoring priorities.
+- Added title-adjacent one-line outcome summary that explicitly states:
+  - achieved: subtitle latency/quality
+  - unmet: QA E2E latency (`9.18s` vs target `<5s`)
+- Elevated central hero section from generic feature bullets to evidence-first AI usage representation:
+  - kept system flow (`input -> caption -> summary -> source-only QA -> output`)
+  - introduced process matrix with columns for AI service, input/settings, output, human decision, verification, and fix actions.
+- Explicitly separated development-support AI usage from product-runtime AI usage to avoid evaluation ambiguity.
+- Replaced metric cards with rubric-friendly evaluation table:
+  - metric / measured / target / judgement / comment
+  - includes `ASR correction latency 6.41s` and adoption constraint (`0/5`).
+- Added reproducibility memo block listing:
+  - measurement date/conditions
+  - API-level measurement points
+  - runtime AI stack and model notes (`gpt-5-nano`, record of `gpt-4.1-nano` operation for subtitle transform).
+- Expanded analysis section with:
+  - caption success factors
+  - QA bottleneck hypotheses
+  - constraints and interpretation
+  - prioritized next actions (max 3).
+- Added explicit safety mini-box:
+  - source-only intent
+  - fail-closed behavior for no-source cases
+  - consent-first handling note.
+- Synced `poster-gen/posters/sit-copilot.json` with factual metrics and constraints so data-driven regeneration remains coherent.
+
+### Rationale
+
+- The competition emphasizes practical AI orchestration and verification over model novelty.
+- Previous layout showed features but under-expressed human validation loops and reproducibility.
+- Rubric-weighted restructuring improves score potential in:
+  - prompt/AI utilization (②),
+  - model performance evidence (①),
+  - analysis depth (④),
+  while preserving A0 fit.
+
+### Compatibility Rules
+
+- Keep factual metrics unchanged unless backed by new measurement artifacts:
+  - `0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`.
+- Preserve explicit disclosure of QA latency unmet status; do not hide unmet target.
+- Keep `source-only` terminology consistent across flow/table/analysis/safety copy.
+- Maintain A0 export ratio and current screenshot/QR asset paths.
+- If demo video URL is still pending, retain "準備中/最終確認中" labeling and update only the URL/QR target when finalized.
+
+### Changelog
+
+- 2026-02-25: Rebuilt poster content into rubric-driven evidence structure and synchronized poster JSON facts with runtime metrics.
+
+## Poster A0 Print Readability Hardening (2026-02-25)
+
+### Decision Summary
+
+- Rebuilt web poster layout in `poster-gen/poster-preview.html` for long-distance A0 readability and rubric-first scanning.
+- Enforced large typography policy in print layout:
+  - body copy at high-visibility scale,
+  - tables enlarged and simplified,
+  - caption-size floor retained for annotation text.
+- Replaced dense/low-legibility structures:
+  - competitor comparison table -> 3x4 check grid (3 tools max),
+  - AI dense matrix -> compact `AI利用の要点` block + appendix-to-GitHub callout.
+- Added immediate top-level evidence framing:
+  - one-line core claim under title,
+  - achieved/unmet pill row with explicit QA unmet disclosure.
+- Rationalized section order to sequential numbering (`1..6`) and isolated demo links at bottom.
+- Reduced screenshot area to one lecture screenshot with objective-mapped callouts.
+
+### Rationale
+
+- Prior version required close-range reading due high information density and small text in critical evidence areas.
+- Competition judging requires instant claim recognition plus traceable evidence in 3-minute explanation windows.
+- Shrinking text further was explicitly avoided; content volume was reduced instead.
+
+### Compatibility Rules
+
+- Preserve factual metrics and unmet-status disclosure as-is.
+- Keep A0 output ratio (`3400 x 4804`) for preview exports.
+- Keep demo video label honest (`準備中`) until URL is finalized.
+- If additional details are needed, route to GitHub/docs callouts instead of re-densifying on-poster tables.
+
+### Changelog
+
+- 2026-02-25: Applied A0 readability-first poster restructure with top-level performance pills, simplified AI usage presentation, and sequential sectioning.
+
+## Poster Evidence Label and Demo QR Simplification (2026-02-25)
+
+### Decision Summary
+
+- Removed printed URL strings from poster demo cards and kept QR-first access wording only.
+  - app card: `QRでアクセス`
+  - GitHub card: `QRで手順を見る`
+- Filled unused left-side area in system overview with two high-readability blocks:
+  - before/during/after mini timeline,
+  - per-step AI usage mini table.
+- Unified user-facing citation terminology to:
+  - `source_id (S-001)` across constraints, prompt snippets, and screenshot callouts.
+- Added explicit quality definition line for subtitle quality `5/5` using documented wording from performance evaluation.
+- Added `✓` / `✕` symbols in KPI pills so status does not rely on color only.
+- Localized demo heading from English to Japanese (`デモ`) for language consistency.
+
+### Rationale
+
+- URL text under QR cards reduced readability without adding practical value in print context.
+- Section 3 had visible dead space that could be converted into rubric-relevant explanatory content.
+- Mixed citation terms (`chunk_id` vs `S-001`) caused interpretation friction during judging.
+- Color-independent status encoding improves accessibility and distance comprehension.
+
+### Compatibility Rules
+
+- Keep fact values unchanged (`0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`).
+- Keep demo video state explicit as pending (`準備中`) until URL finalization.
+- Continue using `source_id (S-001)` as the poster-facing citation label.
+
+### Changelog
+
+- 2026-02-25: Removed printed URLs in demo area, unified citation label to `source_id`, and filled Section 3 whitespace with timeline/AI-step blocks.
+
+## Poster Neutral KPI Framing and Language Cleanup (2026-02-25)
+
+### Decision Summary
+
+- Removed failure-emphasis wording from top KPI pill row and replaced third pill with positive capability statement:
+  - `source-only QA` + citation display.
+- Simplified Objective section bullets to role/scope statements and removed policy-like goal/unmet wording.
+- Reworked Results table from `指標/実測/目標/判定` to `指標/実測/補足` to keep factual metrics while reducing judgment framing.
+- Replaced overclaim phrasing for subtitle quality with documented definition:
+  - quality `5/5` under LLM-as-a-Judge five-level scale, with doc reference.
+- Renamed analysis section labels to neutral operational phrasing:
+  - removed explicit `未達`/`目標` terms from headings.
+- Updated demo-video card from pending-language to neutral active-language (`デモ動画`, `QRで視聴`) and removed staff-note text block.
+- Replaced mixed English/Japanese constraint text in key prompt/constraint copy with plain Japanese while keeping factual semantics.
+
+### Rationale
+
+- Poster should keep evidence factual and concrete without sounding defensive or policy-driven.
+- Judge readability improves when metrics are shown as measurements plus operational notes, not pass/fail labels.
+- QR-first print layout does not need long URL strings or operational staff prose.
+
+### Compatibility Rules
+
+- Numeric metrics remain unchanged (`0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`).
+- No new numeric claims were introduced.
+- Keep citation label consistent as `source_id (S-001)` across UI-facing poster text.
+
+### Changelog
+
+- 2026-02-25: Neutralized KPI/result wording, removed printed URL dependence, and aligned prompt/constraint phrasing with QR-first poster style.
+
 ## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
 
 ### Decision Summary
@@ -2232,6 +2547,30 @@ interface PosterContent {
 
 ---
 
+## Lecture Session Delete QA-Turn Cleanup (2026-02-24)
+
+### Decision Summary
+
+- Added explicit `qa_turns` cleanup in lecture session delete flow (`SqlAlchemyLectureFinalizeService.delete_session`).
+- Kept response schema and endpoint contract unchanged (`DELETE /api/v4/lecture/session/{id}` with `auto_finalized` flag).
+
+### Rationale
+
+- Some environments can carry lecture-linked QA history rows while deleting sessions.
+- Explicitly removing `qa_turns` by `session_id` makes deletion robust across schema variants and prevents leftover orphan QA history for deleted sessions.
+
+### Compatibility Rules
+
+- Procedure QA rows (`feature=procedure_qa`, `session_id=NULL`) are unaffected.
+- Lecture delete behavior remains backward-compatible for `active`/`live`/`finalized`/`ended` statuses.
+- API response payload remains unchanged.
+
+### Changelog
+
+- 2026-02-24: Added explicit `qa_turns` deletion in lecture session delete flow and extended tests to verify QA-turn cleanup.
+
+---
+
 ## Production Live-Only UI Scope Reduction (2026-02-23)
 
 ### Decision Summary
@@ -2436,3 +2775,97 @@ interface PosterContent {
 
 - 2026-02-24: Stabilized live session audio lifecycle and prevented stream cleanup from stopping microphone unexpectedly.
 - 2026-02-24: Scoped lecture-list storage key (v2) and removed optimistic finalize-on-409 local state mutation.
+
+---
+
+## Poster QA Screenshot Additive Variant (2026-02-26)
+
+### Decision Summary
+
+- Created an additive poster variant that keeps the existing live screenshot and adds QA screenshot evidence:
+  - New source file: `poster-gen/poster-preview-qa-added.html`
+  - New output image: `poster-gen/poster-preview-output-qa-added.png`
+- Section 3 screenshot area was changed from single-image to dual-pane:
+  - left: live lecture screen (`live-screen.png`)
+  - right: QA screen (`qa-screen.png`)
+- Added short pane titles and updated caption/legend so reviewers can read QA evidence behavior before scanning QR.
+
+### Rationale
+
+- The previous layout had no dedicated QA screenshot, making source-only QA behavior under-explained.
+- Additive two-pane layout preserves existing narrative while making citation behavior (`source_id`) visually explicit.
+- Aspect-ratio constraints were set per pane to keep A0 composition stable without overflowing page height.
+
+### Compatibility Rules
+
+- Do not replace the current poster by default; keep this as a comparison variant.
+- Preserve factual metrics and avoid adding new claims or URLs in printed text.
+- Keep A0 export size at `3400 x 4804` for preview outputs.
+
+### Changelog
+
+- 2026-02-26: Added QA screenshot additive poster variant with dual-pane screenshot layout and A0-safe export.
+- 2026-02-26: Added inset-style QA screenshot variant (`poster-preview-qa-inset.html`) where QA evidence is shown as a small overlay card on the live screenshot.
+- 2026-02-26: Rebalanced section heights by returning QA screenshot pair to section 4 and compressing section 5 notes into compact horizontal chips.
+
+---
+
+## Poster A0 No-Margin PDF Export (2026-02-26)
+
+### Decision Summary
+
+- For no-margin A0 delivery, export flow was switched to:
+  1) render final poster HTML to PNG,
+  2) trim outer screen-background border,
+  3) place trimmed image to full A0 page and export single-page PDF.
+- Output file remains `poster-gen/poster-preview-a0.pdf`.
+
+### Rationale
+
+- Direct HTML `playwright pdf` path can retain screen-frame artifacts or style differences from WebUI.
+- Image-first export preserves on-screen appearance while guaranteeing zero page margin and single-page A0.
+
+### Compatibility Rules
+
+- Always verify with `pdfinfo`:
+  - `Pages: 1`
+  - `Page size: A0`
+- Re-run trim step when body/frame styling changes.
+
+### Changelog
+
+- 2026-02-26: Adopted no-margin A0 PDF export via trimmed PNG embedding.
+
+---
+
+## Poster A0 Export Skillization (2026-02-26)
+
+### Decision Summary
+
+- Packaged the no-margin A0 poster export method as a Codex skill:
+  - Skill path: `.codex/skills/poster-a0-no-margin-export`
+  - Workflow: `HTML screenshot -> border trim -> full-page A0 PDF`
+- Added reusable scripts:
+  - `.codex/skills/poster-a0-no-margin-export/scripts/export_a0_no_margin.sh`
+  - `.codex/skills/poster-a0-no-margin-export/scripts/trim_uniform_border.py`
+- Default output contract targets `poster-gen/SIT_Copilot_Poster.pdf` with PDF title `SIT_Copilot_Poster`.
+
+### Rationale
+
+- Poster delivery repeats the same export operation across many edit loops.
+- Converting the flow to a skill reduces manual command drift and keeps PDF output consistent.
+
+### Compatibility Rules
+
+- Use `pdfinfo` gate after export:
+  - `Pages: 1`
+  - `Page size: A0`
+- Keep source poster content unchanged during export; this skill is render-only.
+- Ignore transient poster iteration artifacts in git:
+  - `poster-gen/poster_v*.png`
+  - `poster-gen/poster-preview-a0-page*.png`
+
+### Changelog
+
+- 2026-02-26: Added `poster-a0-no-margin-export` skill with script-driven no-margin A0 PDF export.
+- 2026-02-26: Added `.gitignore` patterns for poster intermediate iteration images.

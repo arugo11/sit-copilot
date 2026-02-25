@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from time import perf_counter
 from typing import Literal, Protocol
@@ -34,13 +35,17 @@ from app.services.lecture_verifier_service import (
 
 __all__ = ["LectureQAService", "SqlAlchemyLectureQAService"]
 
+logger = logging.getLogger(__name__)
+
 LECTURE_QA_FEATURE = "lecture_qa"
 DEFAULT_RETRIEVAL_LIMIT = 5
+DEFAULT_CITATION_LIMIT = 2
 DEFAULT_NO_SOURCE_FALLBACK = "講義資料に該当する情報が見つかりませんでした。"
 DEFAULT_NO_SOURCE_ACTION_NEXT = "別の質問をしてください。"
 DEFAULT_BACKEND_FAILURE_FALLBACK = (
     "回答生成中にエラーが発生しました。講義資料を直接確認してください。"
 )
+MAX_FAILURE_REASON_CHARS = 160
 
 
 class LectureQAService(Protocol):
@@ -85,6 +90,7 @@ class SqlAlchemyLectureQAService:
         verifier: LectureVerifierService,
         followup: LectureFollowupService,
         retrieval_limit: int = DEFAULT_RETRIEVAL_LIMIT,
+        citation_limit: int = DEFAULT_CITATION_LIMIT,
         no_source_fallback: str = DEFAULT_NO_SOURCE_FALLBACK,
         no_source_action_next: str = DEFAULT_NO_SOURCE_ACTION_NEXT,
         backend_failure_fallback: str = DEFAULT_BACKEND_FAILURE_FALLBACK,
@@ -95,6 +101,7 @@ class SqlAlchemyLectureQAService:
         self._verifier = verifier
         self._followup = followup
         self._retrieval_limit = max(1, retrieval_limit)
+        self._citation_limit = max(1, citation_limit)
         self._no_source_fallback = no_source_fallback
         self._no_source_action_next = no_source_action_next
         self._backend_failure_fallback = backend_failure_fallback
@@ -116,14 +123,20 @@ class SqlAlchemyLectureQAService:
             lang_mode=lang_mode,
             question=question,
         )
+        normalized_top_k = min(max(1, top_k), self._retrieval_limit)
+        normalized_context_window = max(0, context_window)
 
         # Retrieve relevant sources
         sources = await self._retriever.retrieve(
             session_id=session_id,
             query=question,
             mode=retrieval_mode,
-            top_k=min(top_k, self._retrieval_limit),
-            context_window=context_window,
+            top_k=normalized_top_k,
+            context_window=normalized_context_window,
+        )
+        sources = self._select_citations(
+            question=question,
+            sources=sources,
         )
 
         # No sources fallback
@@ -141,6 +154,7 @@ class SqlAlchemyLectureQAService:
                 question=question,
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
+                outcome_reason="no_source",
             )
             return response
 
@@ -152,20 +166,34 @@ class SqlAlchemyLectureQAService:
                 sources=sources,
                 history="",
             )
-        except LectureAnswererError:
-            response = self._build_local_grounded_response(
+        except LectureAnswererError as exc:
+            logger.warning(
+                "lecture_qa_answer_generation_failed session_id=%s user_id=%s lang_mode=%s question=%r sources=%s error=%s",
+                session_id,
+                user_id,
+                effective_lang_mode,
+                question[:120],
+                len(sources),
+                str(exc),
+                exc_info=True,
+            )
+            response, outcome_reason = self._build_answerer_error_response(
+                question=question,
                 sources=sources,
                 lang_mode=effective_lang_mode,
+                error_reason=str(exc),
             )
             await self._persist_turn(
                 session_id=session_id,
                 question=question,
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
+                outcome_reason=outcome_reason,
             )
             return response
 
         # Verify answer with error handling
+        repaired = False
         verification = await self._safe_verify(
             question=question,
             answer=draft.answer,
@@ -174,21 +202,22 @@ class SqlAlchemyLectureQAService:
 
         # Handle verification failure
         if not verification.passed:
-            repaired = await self._safe_repair(
+            repaired_answer = await self._safe_repair(
                 question=question,
                 answer=draft.answer,
                 sources=sources,
                 unsupported_claims=verification.unsupported_claims,
             )
-            if repaired:
+            if repaired_answer:
                 draft = LectureAnswerDraft(
-                    answer=repaired,
+                    answer=repaired_answer,
                     confidence="medium",
                     action_next=draft.action_next,
                 )
+                repaired = True
                 verification = await self._safe_verify(
                     question=question,
-                    answer=repaired,
+                    answer=repaired_answer,
                     sources=sources,
                 )
 
@@ -205,6 +234,10 @@ class SqlAlchemyLectureQAService:
             question=question,
             response=response,
             latency_ms=self._to_latency_ms(started_at),
+            outcome_reason=self._verified_outcome_reason(
+                passed=verification.passed,
+                repaired=repaired,
+            ),
         )
 
         return response
@@ -235,14 +268,20 @@ class SqlAlchemyLectureQAService:
             question=question,
             history_turns=history_turns,
         )
+        normalized_top_k = min(max(1, top_k), self._retrieval_limit)
+        normalized_context_window = max(0, context_window)
 
         # Retrieve using resolved query
         sources = await self._retriever.retrieve(
             session_id=session_id,
             query=resolution.standalone_query,
             mode=retrieval_mode,
-            top_k=min(top_k, self._retrieval_limit),
-            context_window=context_window,
+            top_k=normalized_top_k,
+            context_window=normalized_context_window,
+        )
+        sources = self._select_citations(
+            question=resolution.standalone_query,
+            sources=sources,
         )
 
         # No sources fallback
@@ -261,6 +300,7 @@ class SqlAlchemyLectureQAService:
                 question=question,
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
+                outcome_reason="no_source",
             )
             return response
 
@@ -272,16 +312,29 @@ class SqlAlchemyLectureQAService:
                 sources=sources,
                 history=resolution.history_context,
             )
-        except LectureAnswererError:
-            base_response = self._build_local_grounded_response(
+        except LectureAnswererError as exc:
+            logger.warning(
+                "lecture_qa_followup_answer_generation_failed session_id=%s user_id=%s lang_mode=%s standalone_query=%r sources=%s error=%s",
+                session_id,
+                user_id,
+                effective_lang_mode,
+                resolution.standalone_query[:120],
+                len(sources),
+                str(exc),
+                exc_info=True,
+            )
+            base_response, outcome_reason = self._build_answerer_error_response(
+                question=resolution.standalone_query,
                 sources=sources,
                 lang_mode=effective_lang_mode,
+                error_reason=str(exc),
             )
             await self._persist_turn(
                 session_id=session_id,
                 question=question,
                 response=base_response,
                 latency_ms=self._to_latency_ms(started_at),
+                outcome_reason=outcome_reason,
             )
             return LectureFollowupResponse(
                 answer=base_response.answer,
@@ -294,6 +347,7 @@ class SqlAlchemyLectureQAService:
             )
 
         # Verify answer with error handling
+        repaired = False
         verification = await self._safe_verify(
             question=resolution.standalone_query,
             answer=draft.answer,
@@ -302,21 +356,22 @@ class SqlAlchemyLectureQAService:
 
         # Handle verification failure
         if not verification.passed:
-            repaired = await self._safe_repair(
+            repaired_answer = await self._safe_repair(
                 question=resolution.standalone_query,
                 answer=draft.answer,
                 sources=sources,
                 unsupported_claims=verification.unsupported_claims,
             )
-            if repaired:
+            if repaired_answer:
                 draft = LectureAnswerDraft(
-                    answer=repaired,
+                    answer=repaired_answer,
                     confidence="medium",
                     action_next=draft.action_next,
                 )
+                repaired = True
                 verification = await self._safe_verify(
                     question=resolution.standalone_query,
-                    answer=repaired,
+                    answer=repaired_answer,
                     sources=sources,
                 )
 
@@ -333,6 +388,10 @@ class SqlAlchemyLectureQAService:
             question=question,
             response=response,
             latency_ms=self._to_latency_ms(started_at),
+            outcome_reason=self._verified_outcome_reason(
+                passed=verification.passed,
+                repaired=repaired,
+            ),
         )
 
         # Return followup response with resolved query
@@ -346,80 +405,85 @@ class SqlAlchemyLectureQAService:
             resolved_query=resolution.standalone_query,
         )
 
-    def _build_local_grounded_response(
+    def _build_answerer_error_response(
         self,
         *,
+        question: str,
         sources: list[LectureSource],
         lang_mode: str,
-    ) -> LectureAskResponse:
-        """Build a local grounded response from sources when Azure OpenAI fails."""
+        error_reason: str,
+    ) -> tuple[LectureAskResponse, str]:
+        """Build a grounded/local fallback response for answer generation failures."""
+        _ = question
         is_english = lang_mode == "en"
-        snippets = [
-            source.text.strip().replace("\n", " ")[:120]
-            for source in sources[:2]
-            if source.text.strip()
-        ]
-        if not snippets:
-            fallback_answer = (
-                "An error occurred while generating the answer. "
-                "Please check the lecture materials directly."
-                if is_english
-                else self._backend_failure_fallback
+        for source_index, source in enumerate(sources, start=1):
+            grounded_answer = self._build_compact_fallback_answer(
+                source=source,
+                source_index=source_index,
+                is_english=is_english,
             )
-            fallback_summary = (
-                "Answer generation failed."
+            if grounded_answer is None:
+                continue
+            verification_summary = (
+                "Answer generation failed, so a grounded snippet from lecture sources was returned."
                 if is_english
-                else "回答生成に失敗しました。"
+                else "回答生成に失敗したため、講義資料の根拠を簡易表示しました。"
             )
-            fallback_action = (
+            action_next = (
                 "Please ask another question."
                 if is_english
                 else self._no_source_action_next
             )
-            return LectureAskResponse(
-                answer=fallback_answer,
-                confidence="low",
-                sources=sources,
-                verification_summary=fallback_summary,
-                action_next=fallback_action,
-                fallback=fallback_answer,
+            return (
+                LectureAskResponse(
+                    answer=grounded_answer,
+                    confidence="low",
+                    sources=sources,
+                    verification_summary=verification_summary,
+                    action_next=action_next,
+                    fallback=grounded_answer,
+                ),
+                "answerer_error_grounded",
             )
 
-        if len(snippets) == 1:
-            answer = (
-                f'The lecture materials explain that "{snippets[0]}".'
-                if is_english
-                else f"講義資料では「{snippets[0]}」と説明されています。"
-            )
-        else:
-            if is_english:
-                answer = (
-                    f'The lecture materials explain that "{snippets[0]}" and '
-                    f'"{snippets[1]}" are relevant.'
-                )
-            else:
-                answer = (
-                    f"講義資料では「{snippets[0]}」および「{snippets[1]}」"
-                    "の内容が関連しています。"
-                )
-        verification_summary = (
-            "Answer generation failed, so the response quotes the lecture materials directly."
-            if is_english
-            else "回答生成に失敗したため、資料から直接抜粋しました。"
+        failure_message = self._build_failure_message(
+            is_english=is_english,
+            error_reason=error_reason,
         )
         action_next = (
             "Please ask another question."
             if is_english
             else self._no_source_action_next
         )
-        return LectureAskResponse(
-            answer=answer,
-            confidence="low",
-            sources=sources,
-            verification_summary=verification_summary,
-            action_next=action_next,
-            fallback="",
+        return (
+            LectureAskResponse(
+                answer=failure_message,
+                confidence="low",
+                sources=sources,
+                verification_summary=failure_message,
+                action_next=action_next,
+                fallback=failure_message,
+            ),
+            "answerer_error_failure",
         )
+
+    def _build_failure_message(self, *, is_english: bool, error_reason: str) -> str:
+        normalized_reason = self._normalize_failure_reason(
+            reason=error_reason,
+            is_english=is_english,
+        )
+        if is_english:
+            return f"Failed to generate answer. (Reason: {normalized_reason})"
+        return f"回答文生成に失敗しました。（理由: {normalized_reason}）"
+
+    @staticmethod
+    def _normalize_failure_reason(*, reason: str, is_english: bool) -> str:
+        normalized = re.sub(r"\s+", " ", reason).strip()
+        if not normalized:
+            return "unknown error" if is_english else "不明なエラー"
+        if len(normalized) <= MAX_FAILURE_REASON_CHARS:
+            return normalized
+        return normalized[:MAX_FAILURE_REASON_CHARS].rstrip()
 
     @classmethod
     def _effective_lang_mode(cls, *, lang_mode: str, question: str) -> str:
@@ -492,6 +556,87 @@ class SqlAlchemyLectureQAService:
             fallback="" if verification.passed else draft.answer,
         )
 
+    def _select_citations(
+        self,
+        *,
+        question: str,
+        sources: list[LectureSource],
+    ) -> list[LectureSource]:
+        if not sources:
+            return []
+
+        question_terms = self._tokenize_for_overlap(question)
+        deduped: list[LectureSource] = []
+        seen_keys: set[str] = set()
+        for source in sources:
+            normalized_text = source.text.strip().lower()
+            key = normalized_text if normalized_text else source.chunk_id
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(source)
+
+        ranked_sources = sorted(
+            deduped,
+            key=lambda source: (
+                1 if source.is_direct_hit else 0,
+                self._term_overlap_score(question_terms, source.text),
+                source.bm25_score,
+            ),
+            reverse=True,
+        )
+        return ranked_sources[: self._citation_limit]
+
+    def _build_compact_fallback_answer(
+        self,
+        *,
+        source: LectureSource,
+        source_index: int,
+        is_english: bool,
+    ) -> str | None:
+        chunk_label = self._source_display_label(
+            source=source, source_index=source_index
+        )
+
+        compact_snippet = source.text.strip().replace("\n", " ")[:100]
+        if not compact_snippet:
+            return None
+        if is_english:
+            return f"According to {chunk_label}, {compact_snippet}."
+        return f"{chunk_label}によると、{compact_snippet}。"
+
+    @staticmethod
+    def _source_display_label(*, source: LectureSource, source_index: int) -> str:
+        normalized_chunk_id = source.chunk_id.strip()
+        if re.fullmatch(r"[SV]-\d{3}", normalized_chunk_id):
+            return f"ID {normalized_chunk_id}"
+
+        prefix = "S" if source.type == "speech" else "V"
+        normalized_index = max(1, source_index)
+        return f"ID {prefix}-{normalized_index:03d}"
+
+    @staticmethod
+    def _tokenize_for_overlap(text: str) -> set[str]:
+        normalized = text.lower()
+        tokens = {
+            token
+            for token in re.findall(r"[A-Za-z0-9]+|[ぁ-んァ-ン一-龥]+", normalized)
+            if len(token) > 1
+        }
+        ja_chars = "".join(re.findall(r"[ぁ-んァ-ン一-龥]", normalized))
+        tokens.update(ja_chars[i : i + 2] for i in range(max(0, len(ja_chars) - 1)))
+        return tokens
+
+    @classmethod
+    def _term_overlap_score(cls, question_terms: set[str], source_text: str) -> float:
+        if not question_terms:
+            return 0.0
+        source_terms = cls._tokenize_for_overlap(source_text)
+        if not source_terms:
+            return 0.0
+        overlap = question_terms & source_terms
+        return float(len(overlap))
+
     async def _persist_turn(
         self,
         *,
@@ -499,6 +644,7 @@ class SqlAlchemyLectureQAService:
         question: str,
         response: LectureAskResponse | LectureFollowupResponse,
         latency_ms: int,
+        outcome_reason: str,
     ) -> None:
         """Persist QA turn to database."""
         citations = [source.model_dump() for source in response.sources]
@@ -514,6 +660,7 @@ class SqlAlchemyLectureQAService:
             retrieved_chunk_ids_json=source_ids,
             latency_ms=latency_ms,
             verifier_supported=True,  # Verifier is always used in lecture QA
+            outcome_reason=outcome_reason,
         )
         self._db.add(qa_turn)
         await self._db.flush()
@@ -535,3 +682,11 @@ class SqlAlchemyLectureQAService:
     def _to_latency_ms(started_at: float) -> int:
         elapsed = perf_counter() - started_at
         return max(0, int(elapsed * 1000))
+
+    @staticmethod
+    def _verified_outcome_reason(*, passed: bool, repaired: bool) -> str:
+        if not passed:
+            return "verification_failed"
+        if repaired:
+            return "repaired_verified"
+        return "verified"
