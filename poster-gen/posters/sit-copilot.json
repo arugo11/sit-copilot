@@ -1,104 +1,107 @@
 {
   "meta": {
     "title": "SIT Copilot",
-    "subtitle": "AI-Powered Lecture Support System\n講義支援AIシステム",
-    "authors": ["Author 1", "Author 2"],
+    "subtitle": "Before-During-After Lecture Support with Source-Only QA\n講義の前・中・後を一貫支援",
+    "authors": ["嶋中雄大"],
     "affiliation": "Shibaura Institute of Technology / 芝浦工業大学",
-    "date": "2026-02-24"
+    "date": "2026-02-25"
   },
   "sections": {
     "background": {
       "problems": [
-        "Lectures are information-dense and fast-paced",
-        "Students miss key points while taking notes",
-        "Non-native speakers struggle with real-time comprehension",
-        "Existing tools lack lecture-specific context"
+        "講義前: 難所や必要支援が見えず受講判断が難しい",
+        "講義中: 情報密度と話速が高く聞き漏らしが発生する",
+        "講義後: 回答根拠の追跡が難しく復習効率が落ちる",
+        "既存ツールは講義文脈に閉じた根拠付きQAを主軸にしていない"
       ],
       "audience": [
-        "University students (especially non-native speakers)",
-        "Lecture attendees with accessibility needs",
-        "Instructors wanting to enhance engagement"
+        "非母語話者",
+        "聞き漏らしが多い学生",
+        "アクセシビリティ配慮が必要な受講者"
       ]
     },
     "objectives": {
       "features": [
-        "Real-time Captioning: Instant speech-to-text with source tracking",
-        "Live Q&A: Context-aware answers using slide content",
-        "Source-Only Responses: Citations prevent misinformation",
-        "Multi-Modal Input: Voice, text, and visual (slide OCR)",
-        "Accessibility: Adjustable fonts, high contrast, easy Japanese"
+        "Real-time subtitles with 3-language switching (ja/en/easy-ja)",
+        "Rolling 30-second lecture summaries",
+        "Source-only QA with chunk_id citation",
+        "LLM-as-a-Judge verification for groundedness",
+        "Accessibility support (font size, high contrast)"
       ],
       "technical": [
-        { "target": "Caption Latency", "metric": "< 3s" },
-        { "target": "Q&A Latency", "metric": "< 5s" },
-        { "target": "ASR Accuracy", "metric": "> 85%" },
-        { "target": "QA Relevance", "metric": "> 90%" }
+        { "target": "Caption Transform Latency", "metric": "< 3s" },
+        { "target": "QA E2E Latency", "metric": "< 5s" },
+        { "target": "Caption Quality", "metric": "5/5" }
       ]
     },
     "aiUsage": {
       "features": [
         {
-          "name": "Captioning Flow",
-          "description": "Real-time ASR with Japanese correction. Evidence tags: Speech | Slide | Board. Rolling summaries every 30s.",
-          "kpi": "2.8s avg latency, 87% accuracy"
+          "name": "Captioning Pipeline",
+          "description": "Azure AI Speech + Azure OpenAI (gpt-5-nano, operation record on gpt-4.1-nano) for subtitle transformation and correction.",
+          "kpi": "0.76s (ja→en), 0.99s (ja→easy-ja)"
         },
         {
-          "name": "Q&A Flow",
-          "description": "BM25 + Hybrid search for relevance. Context from slides + transcript. Source verification prevents hallucination.",
-          "kpi": "4.2s avg latency, 92% relevance"
+          "name": "Source-Only QA Pipeline",
+          "description": "Azure AI Search + BM25 retrieval, source-only answer generation, and LLM-as-a-Judge verification with chunk_id citation.",
+          "kpi": "9.18s E2E (target <5s, unmet)"
         },
         {
-          "name": "OCR Flow",
-          "description": "1 FPS capture with change detection. ROI support (slide area only). Quality filtering by confidence.",
-          "kpi": "94% extraction success"
+          "name": "ASR Correction Pipeline",
+          "description": "ASR correction candidate is judged conservatively before adoption to prioritize safety.",
+          "kpi": "6.41s latency, adoption 0/5"
         }
       ],
       "prompts": [
         {
-          "name": "Captioning",
-          "content": "Summarize the last 60 seconds of lecture content. Group related points. Mark sources: [Speech], [Slide], [Blackboard]. Max 150 words."
+          "name": "Summary",
+          "content": "Summarize the latest 60 seconds with source tags (speech/slide/board) and keep output concise for lecture follow-up."
         },
         {
-          "name": "Q&A",
-          "content": "Using ONLY the provided lecture transcript and slide text, answer the question. Cite sources with (chunk_id). If information is insufficient, say 'I cannot answer from the available materials'."
+          "name": "QA",
+          "content": "Use only lecture sources. Cite chunk_id. If evidence is insufficient, answer that it cannot be verified in this lecture."
+        },
+        {
+          "name": "Verifier",
+          "content": "Judge each claim against cited sources and reject unsupported or contradictory claims in JSON format."
         }
       ]
     },
     "results": {
       "metrics": [
-        { "name": "ASR Accuracy", "value": "87%", "color": "#14B8A6" },
-        { "name": "QA Relevance", "value": "92%", "color": "#6366F1" },
-        { "name": "OCR Success", "value": "94%", "color": "#10B981" },
-        { "name": "Caption Latency", "value": "2.8s", "color": "#3B82F6" },
-        { "name": "QA Latency", "value": "4.2s", "color": "#8B5CF6" },
-        { "name": "Citation Accuracy", "value": "96%", "color": "#EC4899" }
+        { "name": "Caption Latency (ja→en)", "value": "0.76s", "color": "#14B8A6" },
+        { "name": "Caption Latency (ja→easy-ja)", "value": "0.99s", "color": "#3B82F6" },
+        { "name": "Caption Quality", "value": "5/5", "color": "#6366F1" },
+        { "name": "QA E2E Latency", "value": "9.18s", "color": "#EF4444" },
+        { "name": "ASR Correction Latency", "value": "6.41s", "color": "#F59E0B" },
+        { "name": "ASR Correction Adoption", "value": "0/5", "color": "#F97316" }
       ],
       "highlights": [
-        "Real-time multi-modal processing (3 streams)",
-        "Source verification prevents misinformation",
-        "Accessibility features: font scaling, high contrast",
-        "Observability: WandB Weave for all operations"
+        "Caption latency target achieved in both language modes",
+        "Source-only QA with chunk-level citations implemented",
+        "QA latency target (<5s) unmet and explicitly disclosed",
+        "ASR correction adoption remains a known constraint"
       ],
       "promptHighlights": [
-        "Dynamic context window (last 60s for summaries)",
-        "Evidence source tracking for trust",
-        "Fallback mechanisms for insufficient data",
-        "Language switching (Japanese <-> English)"
+        "Explicit source-only contract in QA prompt",
+        "Verifier JSON flow for claim-level grounding check",
+        "Fallback behavior is visible and fail-closed",
+        "Human review loop drives prompt and threshold updates"
       ]
     },
     "futurePlans": {
       "shortTerm": [
-        "Enhanced NLP: Key term extraction",
-        "Multi-language support (EN, ZH)",
-        "Usage analytics dashboard"
+        "Reduce QA E2E latency with time-budgeted retrieval/answer/verify path",
+        "Retune ASR correction judge threshold with monitoring",
+        "Build semi-automatic CER measurement workflow"
       ],
       "longTerm": [
-        "Integration with LMS platforms",
-        "Mobile app for students",
-        "Offline mode with local models"
+        "Deploy repeatable benchmark harness for lecture QA",
+        "Strengthen lecture-operational observability",
+        "Scale to practical classroom operation with stable SLAs"
       ]
     }
   },
   "theme": "technical-blue",
-  "demoVideoUrl": "https://example.com/demo-video"
+  "demoVideoUrl": "PENDING_FINAL_URL"
 }
