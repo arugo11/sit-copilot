@@ -2861,7 +2861,11 @@ interface PosterContent {
   - `Pages: 1`
   - `Page size: A0`
 - Keep source poster content unchanged during export; this skill is render-only.
+- Ignore transient poster iteration artifacts in git:
+  - `poster-gen/poster_v*.png`
+  - `poster-gen/poster-preview-a0-page*.png`
 
 ### Changelog
 
 - 2026-02-26: Added `poster-a0-no-margin-export` skill with script-driven no-margin A0 PDF export.
+- 2026-02-26: Added `.gitignore` patterns for poster intermediate iteration images.
