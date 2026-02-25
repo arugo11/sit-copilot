@@ -319,6 +319,11 @@
     align-items: start;
   }
 
+  .system-left {
+    display: grid;
+    gap: 1.8mm;
+  }
+
   .constraint-box {
     background: #f0fdf4;
     border: 1px solid #86efac;
@@ -332,6 +337,73 @@
 
   .constraint-box li {
     margin-bottom: 1.6mm;
+  }
+
+  .timeline-box {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 3mm;
+    padding: 2.2mm 2.6mm;
+  }
+
+  .timeline-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.2mm;
+    margin-top: 1.2mm;
+  }
+
+  .timeline-col {
+    border: 1px solid #fdba74;
+    border-radius: 2.2mm;
+    background: #fff;
+    padding: 1.4mm 1.6mm;
+  }
+
+  .timeline-col .col-title {
+    font-size: 24pt;
+    line-height: 1.2;
+    font-weight: 800;
+    color: #9a3412;
+    margin-bottom: 0.6mm;
+  }
+
+  .timeline-col .col-text {
+    font-size: 22pt;
+    line-height: 1.3;
+    color: #7c2d12;
+    font-weight: 700;
+  }
+
+  .stage-box {
+    background: #eff6ff;
+    border: 1px solid #93c5fd;
+    border-radius: 3mm;
+    padding: 2.2mm 2.6mm;
+  }
+
+  .stage-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.2mm;
+  }
+
+  .stage-table th,
+  .stage-table td {
+    border: 1px solid #bfdbfe;
+    padding: 1.1mm 1.4mm;
+    font-size: 22pt;
+    line-height: 1.25;
+    text-align: left;
+    vertical-align: middle;
+    color: #1e3a8a;
+    font-weight: 700;
+    background: #fff;
+  }
+
+  .stage-table th {
+    background: #dbeafe;
+    font-weight: 800;
   }
 
   .screenshot-wrap {
@@ -641,7 +713,7 @@
     <header class="header">
       <div class="title">
         <h1>SIT Copilot</h1>
-        <div class="core-claim">講義ライブを0.76秒字幕で追従し、source-only QAで根拠付き復習まで一気通貫支援</div>
+        <div class="core-claim">講義ライブを0.76秒字幕で追従し、source-only(根拠必須) QAで根拠付き復習まで一気通貫支援</div>
         <div class="sit-note">SIT = Shibaura Institute of Technology</div>
       </div>
       <div class="meta">
@@ -652,9 +724,9 @@
     </header>
 
     <div class="pill-row">
-      <div class="pill ok">字幕遅延 0.76s / 0.99s 達成</div>
-      <div class="pill ok">字幕品質 5/5 達成</div>
-      <div class="pill ng">QA E2E 9.18s（目標&lt;5s）未達</div>
+      <div class="pill ok">✓ 字幕遅延 0.76s / 0.99s 達成</div>
+      <div class="pill ok">✓ 字幕品質 5/5 達成</div>
+      <div class="pill ng">✕ QA E2E 9.18s（目標&lt;5s）未達</div>
     </div>
 
     <main class="content">
@@ -672,7 +744,7 @@
             <tr>
               <th>ツール</th>
               <th>ライブ字幕</th>
-              <th>source-only QA</th>
+              <th>source-only QA(根拠必須)</th>
               <th>引用表示</th>
               <th>検証ゲート</th>
             </tr>
@@ -735,26 +807,76 @@
         </div>
 
         <div class="system-grid">
-          <div class="constraint-box">
-            <div class="subheading">設計の縛り</div>
-            <ul class="body-list">
-              <li>source-only、citation必須</li>
-              <li>`chunk_id` ベースの検索</li>
-              <li>Judgeで補正・回答をゲート</li>
-            </ul>
+          <div class="system-left">
+            <div class="constraint-box">
+              <div class="subheading">設計の縛り</div>
+              <ul class="body-list">
+                <li>source-only、citation必須</li>
+                <li>source_id (S-001) ベースの検索</li>
+                <li>Judgeで補正・回答をゲート</li>
+              </ul>
+            </div>
+
+            <div class="timeline-box">
+              <div class="subheading">講義の前 / 中 / 後</div>
+              <div class="timeline-grid">
+                <div class="timeline-col">
+                  <div class="col-title">前</div>
+                  <div class="col-text">難所の予告<br>事前に用語を確認</div>
+                </div>
+                <div class="timeline-col">
+                  <div class="col-title">中</div>
+                  <div class="col-text">0.76s/0.99s字幕<br>3言語切替</div>
+                </div>
+                <div class="timeline-col">
+                  <div class="col-title">後</div>
+                  <div class="col-text">source-only QA<br>引用で復習</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="stage-box">
+              <div class="subheading">各工程で使うAI</div>
+              <table class="stage-table">
+                <tr>
+                  <th style="width:42%;">工程</th>
+                  <th>使うAI</th>
+                </tr>
+                <tr>
+                  <td>音声入力</td>
+                  <td>Azure AI Speech</td>
+                </tr>
+                <tr>
+                  <td>字幕変換</td>
+                  <td>Azure OpenAI (gpt-5-nano)<br>運用記録: gpt-4.1-nano</td>
+                </tr>
+                <tr>
+                  <td>検索</td>
+                  <td>Azure AI Search</td>
+                </tr>
+                <tr>
+                  <td>QA生成</td>
+                  <td>Azure OpenAI (gpt-5-nano)</td>
+                </tr>
+                <tr>
+                  <td>検証ゲート</td>
+                  <td>LLM as a Judge</td>
+                </tr>
+              </table>
+            </div>
           </div>
 
           <div>
             <div class="screenshot-wrap">
               <img src="assets/images/live-screen.png" alt="講義ライブ画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:24pt;padding:12mm;text-align:center;&quot;>画像未配置<br>assets/images/live-screen.png</div>';"></img>
               <div class="callout c1">① 多言語切替</div>
-              <div class="callout c2">② 引用ID表示（S-001…）</div>
+              <div class="callout c2">② source_id表示（S-001…）</div>
               <div class="callout c3">③ アクセシビリティ配慮</div>
             </div>
-            <div class="cap">講義資料に基づく例。QA回答でも同形式の引用IDを提示。</div>
+            <div class="cap">講義資料に基づく例。QA回答でも同形式の source_id を提示。</div>
             <div class="callout-legend">
               <div class="callout-chip">① 多言語切替（日本語 / やさしい日本語 / English）</div>
-              <div class="callout-chip">② source-only QAの引用ID表示（例: S-001）</div>
+              <div class="callout-chip">② source-only QAのsource_id表示（例: S-001）</div>
               <div class="callout-chip">③ 読みやすさを優先したアクセシビリティ表示</div>
             </div>
           </div>
@@ -784,7 +906,7 @@
             </div>
             <div class="prompt-snippet">
               <div class="snippet-title">QA（source-only）</div>
-              <div class="snippet-body">Use only lecture sources.<br>`chunk_id` を必ず引用。<br>根拠不足は回答拒否。</div>
+              <div class="snippet-body">Use only lecture sources.<br>source_id (S-001) を必ず引用。<br>根拠不足は回答拒否。</div>
             </div>
           </div>
         </section>
@@ -831,7 +953,7 @@
             </tr>
           </table>
 
-          <div class="measure-line">測定: 字幕 n=3文、QA n=5問、ASR補正 n=5文。p50/p95は未計測。測定条件は performance-evaluation.md 参照。</div>
+          <div class="measure-line">測定: 字幕 n=3文、QA n=5問、ASR補正 n=5文。p50/p95は未計測。字幕品質: 5/5 = 100% 正確（専門用語の誤訳なし）。条件は performance-evaluation.md 参照。</div>
 
           <div class="repro-box">
             <div class="subheading">再現性</div>
@@ -875,7 +997,7 @@
     </main>
 
     <section class="card demo">
-      <div class="demo-title">Demo links</div>
+      <div class="demo-title">デモ</div>
       <div class="demo-grid">
         <div class="qr-card">
           <div class="qr-img"><img src="assets/images/qr-demo-video.png" alt="デモ動画QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
@@ -887,13 +1009,13 @@
         <div class="qr-card">
           <div class="qr-img"><img src="assets/images/qr-app-url.png" alt="アプリQR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
           <div class="qr-label">アプリ 実機デモ</div>
-          <div class="qr-url">https://proud-sand-00bb37700.1.azurestaticapps.net/</div>
+          <div class="qr-sub">QRでアクセス</div>
         </div>
 
         <div class="qr-card">
           <div class="qr-img"><img src="assets/images/qr-github.png" alt="GitHub QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
           <div class="qr-label">GitHub 実装と評価手順</div>
-          <div class="qr-url">https://github.com/arugo11/sit-copilot</div>
+          <div class="qr-sub">QRで手順を見る</div>
         </div>
       </div>
     </section>

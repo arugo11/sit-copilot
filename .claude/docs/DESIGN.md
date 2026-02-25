@@ -281,6 +281,39 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 
 - 2026-02-25: Applied A0 readability-first poster restructure with top-level performance pills, simplified AI usage presentation, and sequential sectioning.
 
+## Poster Evidence Label and Demo QR Simplification (2026-02-25)
+
+### Decision Summary
+
+- Removed printed URL strings from poster demo cards and kept QR-first access wording only.
+  - app card: `QRでアクセス`
+  - GitHub card: `QRで手順を見る`
+- Filled unused left-side area in system overview with two high-readability blocks:
+  - before/during/after mini timeline,
+  - per-step AI usage mini table.
+- Unified user-facing citation terminology to:
+  - `source_id (S-001)` across constraints, prompt snippets, and screenshot callouts.
+- Added explicit quality definition line for subtitle quality `5/5` using documented wording from performance evaluation.
+- Added `✓` / `✕` symbols in KPI pills so status does not rely on color only.
+- Localized demo heading from English to Japanese (`デモ`) for language consistency.
+
+### Rationale
+
+- URL text under QR cards reduced readability without adding practical value in print context.
+- Section 3 had visible dead space that could be converted into rubric-relevant explanatory content.
+- Mixed citation terms (`chunk_id` vs `S-001`) caused interpretation friction during judging.
+- Color-independent status encoding improves accessibility and distance comprehension.
+
+### Compatibility Rules
+
+- Keep fact values unchanged (`0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`).
+- Keep demo video state explicit as pending (`準備中`) until URL finalization.
+- Continue using `source_id (S-001)` as the poster-facing citation label.
+
+### Changelog
+
+- 2026-02-25: Removed printed URLs in demo area, unified citation label to `source_id`, and filled Section 3 whitespace with timeline/AI-step blocks.
+
 ## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
 
 ### Decision Summary
