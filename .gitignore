@@ -43,6 +43,7 @@ pnpm-debug.log*
 *.sqlite3
 *.backup
 *.log
+.runtime/
 
 # Editor / OS
 .vscode/
