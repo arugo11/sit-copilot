@@ -1,0 +1,3 @@
+interface:
+  display_name: "Poster A0 No Margin Export"
+  short_description: "Export A0 poster PDF without margins from web HTML"

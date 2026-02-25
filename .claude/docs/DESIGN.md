@@ -314,6 +314,37 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 
 - 2026-02-25: Removed printed URLs in demo area, unified citation label to `source_id`, and filled Section 3 whitespace with timeline/AI-step blocks.
 
+## Poster Neutral KPI Framing and Language Cleanup (2026-02-25)
+
+### Decision Summary
+
+- Removed failure-emphasis wording from top KPI pill row and replaced third pill with positive capability statement:
+  - `source-only QA` + citation display.
+- Simplified Objective section bullets to role/scope statements and removed policy-like goal/unmet wording.
+- Reworked Results table from `指標/実測/目標/判定` to `指標/実測/補足` to keep factual metrics while reducing judgment framing.
+- Replaced overclaim phrasing for subtitle quality with documented definition:
+  - quality `5/5` under LLM-as-a-Judge five-level scale, with doc reference.
+- Renamed analysis section labels to neutral operational phrasing:
+  - removed explicit `未達`/`目標` terms from headings.
+- Updated demo-video card from pending-language to neutral active-language (`デモ動画`, `QRで視聴`) and removed staff-note text block.
+- Replaced mixed English/Japanese constraint text in key prompt/constraint copy with plain Japanese while keeping factual semantics.
+
+### Rationale
+
+- Poster should keep evidence factual and concrete without sounding defensive or policy-driven.
+- Judge readability improves when metrics are shown as measurements plus operational notes, not pass/fail labels.
+- QR-first print layout does not need long URL strings or operational staff prose.
+
+### Compatibility Rules
+
+- Numeric metrics remain unchanged (`0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`).
+- No new numeric claims were introduced.
+- Keep citation label consistent as `source_id (S-001)` across UI-facing poster text.
+
+### Changelog
+
+- 2026-02-25: Neutralized KPI/result wording, removed printed URL dependence, and aligned prompt/constraint phrasing with QR-first poster style.
+
 ## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
 
 ### Decision Summary
@@ -2744,3 +2775,93 @@ interface PosterContent {
 
 - 2026-02-24: Stabilized live session audio lifecycle and prevented stream cleanup from stopping microphone unexpectedly.
 - 2026-02-24: Scoped lecture-list storage key (v2) and removed optimistic finalize-on-409 local state mutation.
+
+---
+
+## Poster QA Screenshot Additive Variant (2026-02-26)
+
+### Decision Summary
+
+- Created an additive poster variant that keeps the existing live screenshot and adds QA screenshot evidence:
+  - New source file: `poster-gen/poster-preview-qa-added.html`
+  - New output image: `poster-gen/poster-preview-output-qa-added.png`
+- Section 3 screenshot area was changed from single-image to dual-pane:
+  - left: live lecture screen (`live-screen.png`)
+  - right: QA screen (`qa-screen.png`)
+- Added short pane titles and updated caption/legend so reviewers can read QA evidence behavior before scanning QR.
+
+### Rationale
+
+- The previous layout had no dedicated QA screenshot, making source-only QA behavior under-explained.
+- Additive two-pane layout preserves existing narrative while making citation behavior (`source_id`) visually explicit.
+- Aspect-ratio constraints were set per pane to keep A0 composition stable without overflowing page height.
+
+### Compatibility Rules
+
+- Do not replace the current poster by default; keep this as a comparison variant.
+- Preserve factual metrics and avoid adding new claims or URLs in printed text.
+- Keep A0 export size at `3400 x 4804` for preview outputs.
+
+### Changelog
+
+- 2026-02-26: Added QA screenshot additive poster variant with dual-pane screenshot layout and A0-safe export.
+- 2026-02-26: Added inset-style QA screenshot variant (`poster-preview-qa-inset.html`) where QA evidence is shown as a small overlay card on the live screenshot.
+- 2026-02-26: Rebalanced section heights by returning QA screenshot pair to section 4 and compressing section 5 notes into compact horizontal chips.
+
+---
+
+## Poster A0 No-Margin PDF Export (2026-02-26)
+
+### Decision Summary
+
+- For no-margin A0 delivery, export flow was switched to:
+  1) render final poster HTML to PNG,
+  2) trim outer screen-background border,
+  3) place trimmed image to full A0 page and export single-page PDF.
+- Output file remains `poster-gen/poster-preview-a0.pdf`.
+
+### Rationale
+
+- Direct HTML `playwright pdf` path can retain screen-frame artifacts or style differences from WebUI.
+- Image-first export preserves on-screen appearance while guaranteeing zero page margin and single-page A0.
+
+### Compatibility Rules
+
+- Always verify with `pdfinfo`:
+  - `Pages: 1`
+  - `Page size: A0`
+- Re-run trim step when body/frame styling changes.
+
+### Changelog
+
+- 2026-02-26: Adopted no-margin A0 PDF export via trimmed PNG embedding.
+
+---
+
+## Poster A0 Export Skillization (2026-02-26)
+
+### Decision Summary
+
+- Packaged the no-margin A0 poster export method as a Codex skill:
+  - Skill path: `.codex/skills/poster-a0-no-margin-export`
+  - Workflow: `HTML screenshot -> border trim -> full-page A0 PDF`
+- Added reusable scripts:
+  - `.codex/skills/poster-a0-no-margin-export/scripts/export_a0_no_margin.sh`
+  - `.codex/skills/poster-a0-no-margin-export/scripts/trim_uniform_border.py`
+- Default output contract targets `poster-gen/SIT_Copilot_Poster.pdf` with PDF title `SIT_Copilot_Poster`.
+
+### Rationale
+
+- Poster delivery repeats the same export operation across many edit loops.
+- Converting the flow to a skill reduces manual command drift and keeps PDF output consistent.
+
+### Compatibility Rules
+
+- Use `pdfinfo` gate after export:
+  - `Pages: 1`
+  - `Page size: A0`
+- Keep source poster content unchanged during export; this skill is render-only.
+
+### Changelog
+
+- 2026-02-26: Added `poster-a0-no-margin-export` skill with script-driven no-margin A0 PDF export.
