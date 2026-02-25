@@ -193,6 +193,94 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 - Keep final poster export size at A0 ratio (`3400 x 4804`) after any future header typography changes.
 - If identity text is increased further, prefer reducing spacing before shrinking other core content.
 
+## Poster Rubric-Driven Evidence Upgrade (2026-02-25)
+
+### Decision Summary
+
+- Reworked `poster-gen/poster-preview.html` to align with competition-required structure and scoring priorities.
+- Added title-adjacent one-line outcome summary that explicitly states:
+  - achieved: subtitle latency/quality
+  - unmet: QA E2E latency (`9.18s` vs target `<5s`)
+- Elevated central hero section from generic feature bullets to evidence-first AI usage representation:
+  - kept system flow (`input -> caption -> summary -> source-only QA -> output`)
+  - introduced process matrix with columns for AI service, input/settings, output, human decision, verification, and fix actions.
+- Explicitly separated development-support AI usage from product-runtime AI usage to avoid evaluation ambiguity.
+- Replaced metric cards with rubric-friendly evaluation table:
+  - metric / measured / target / judgement / comment
+  - includes `ASR correction latency 6.41s` and adoption constraint (`0/5`).
+- Added reproducibility memo block listing:
+  - measurement date/conditions
+  - API-level measurement points
+  - runtime AI stack and model notes (`gpt-5-nano`, record of `gpt-4.1-nano` operation for subtitle transform).
+- Expanded analysis section with:
+  - caption success factors
+  - QA bottleneck hypotheses
+  - constraints and interpretation
+  - prioritized next actions (max 3).
+- Added explicit safety mini-box:
+  - source-only intent
+  - fail-closed behavior for no-source cases
+  - consent-first handling note.
+- Synced `poster-gen/posters/sit-copilot.json` with factual metrics and constraints so data-driven regeneration remains coherent.
+
+### Rationale
+
+- The competition emphasizes practical AI orchestration and verification over model novelty.
+- Previous layout showed features but under-expressed human validation loops and reproducibility.
+- Rubric-weighted restructuring improves score potential in:
+  - prompt/AI utilization (②),
+  - model performance evidence (①),
+  - analysis depth (④),
+  while preserving A0 fit.
+
+### Compatibility Rules
+
+- Keep factual metrics unchanged unless backed by new measurement artifacts:
+  - `0.76s`, `0.99s`, `5/5`, `9.18s`, `6.41s`.
+- Preserve explicit disclosure of QA latency unmet status; do not hide unmet target.
+- Keep `source-only` terminology consistent across flow/table/analysis/safety copy.
+- Maintain A0 export ratio and current screenshot/QR asset paths.
+- If demo video URL is still pending, retain "準備中/最終確認中" labeling and update only the URL/QR target when finalized.
+
+### Changelog
+
+- 2026-02-25: Rebuilt poster content into rubric-driven evidence structure and synchronized poster JSON facts with runtime metrics.
+
+## Poster A0 Print Readability Hardening (2026-02-25)
+
+### Decision Summary
+
+- Rebuilt web poster layout in `poster-gen/poster-preview.html` for long-distance A0 readability and rubric-first scanning.
+- Enforced large typography policy in print layout:
+  - body copy at high-visibility scale,
+  - tables enlarged and simplified,
+  - caption-size floor retained for annotation text.
+- Replaced dense/low-legibility structures:
+  - competitor comparison table -> 3x4 check grid (3 tools max),
+  - AI dense matrix -> compact `AI利用の要点` block + appendix-to-GitHub callout.
+- Added immediate top-level evidence framing:
+  - one-line core claim under title,
+  - achieved/unmet pill row with explicit QA unmet disclosure.
+- Rationalized section order to sequential numbering (`1..6`) and isolated demo links at bottom.
+- Reduced screenshot area to one lecture screenshot with objective-mapped callouts.
+
+### Rationale
+
+- Prior version required close-range reading due high information density and small text in critical evidence areas.
+- Competition judging requires instant claim recognition plus traceable evidence in 3-minute explanation windows.
+- Shrinking text further was explicitly avoided; content volume was reduced instead.
+
+### Compatibility Rules
+
+- Preserve factual metrics and unmet-status disclosure as-is.
+- Keep A0 output ratio (`3400 x 4804`) for preview exports.
+- Keep demo video label honest (`準備中`) until URL is finalized.
+- If additional details are needed, route to GitHub/docs callouts instead of re-densifying on-poster tables.
+
+### Changelog
+
+- 2026-02-25: Applied A0 readability-first poster restructure with top-level performance pills, simplified AI usage presentation, and sequential sectioning.
+
 ## A0 Technical Poster Layout for SIT Copilot (2026-02-23)
 
 ### Decision Summary

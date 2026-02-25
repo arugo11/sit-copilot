@@ -3,812 +3,632 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SIT Copilot - ポスタープレビュー (A0)</title>
+<title>SIT Copilot - Poster Preview (A0)</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;800&display=swap');
 
   :root {
-    --primary: #0F2742;
-    --secondary: #1F6FEB;
-    --secondary2: #14B8A6;
-    --accent: #F59E0B;
-    --text: #1F2937;
-    --bg: #F7F9FC;
-    --border: #E5E7EB;
-    --white: #FFFFFF;
-    --light-gray: #F3F4F6;
-    --medium-gray: #6B7280;
+    --navy: #0f2742;
+    --blue: #1f6feb;
+    --green: #0f9d58;
+    --red: #dc2626;
+    --ink: #111827;
+    --muted: #374151;
+    --bg: #f4f7fb;
+    --card: #ffffff;
+    --line: #d1d9e6;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
   body {
-    background: #e0e0e0;
-    font-family: 'Noto Sans JP', 'Inter', sans-serif;
+    background: #d9dde4;
+    font-family: 'Noto Sans JP', sans-serif;
+    padding: 16px;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 20px;
+    justify-content: center;
   }
 
-  .controls {
-    position: fixed; top: 10px; right: 10px; z-index: 100;
-    background: var(--white); padding: 12px 16px; border-radius: 8px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 13px;
-    display: flex; gap: 10px; align-items: center;
-  }
-  .controls button {
-    padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px;
-    background: var(--white); cursor: pointer; font-size: 13px;
-  }
-  .controls button:hover { background: var(--light-gray); }
-  .controls span { color: var(--medium-gray); }
-
-  /* A0 = 841 x 1189 mm. Scale to screen. */
   .poster {
     width: 841mm;
     min-height: 1189mm;
     background: var(--bg);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.2);
-    transform-origin: top center;
-    position: relative;
-    overflow: hidden;
+    color: var(--ink);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+    border: 1px solid #c5ccd8;
+    display: flex;
+    flex-direction: column;
   }
 
-  /* ===== HEADER ===== */
   .header {
-    background: var(--primary);
+    background: var(--navy);
+    color: #fff;
+    padding: 14mm 16mm 10mm;
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 6mm 14mm;
-  }
-  .header-left {
-    text-align: left;
-  }
-  .header h1 {
-    font-size: 50pt;
-    font-weight: 700;
-    color: var(--white);
-    letter-spacing: 0.03em;
-    margin-bottom: 1.5mm;
-  }
-  .header .subtitle {
-    font-size: 22pt;
-    color: rgba(255,255,255,0.8);
-    font-weight: 400;
-  }
-  .header-right {
-    text-align: right;
-  }
-  .header .authors {
-    font-size: 22pt;
-    color: var(--white);
-    margin-bottom: 0.6mm;
-  }
-  .header .affiliation {
-    font-size: 17pt;
-    color: rgba(255,255,255,0.7);
-    margin-bottom: 1mm;
-  }
-  .header .event {
-    font-size: 13pt;
-    color: var(--accent);
-    font-weight: 700;
-    background: rgba(255,255,255,0.1);
-    padding: 1.1mm 4.5mm;
-    border-radius: 2mm;
-    display: inline-block;
+    gap: 8mm;
   }
 
-  /* ===== CONTENT AREA ===== */
-  .content {
-    padding: 5mm 14mm 8mm;
-    display: flex;
-    flex-direction: column;
-    gap: 4mm;
-  }
-
-  /* Row layout */
-  .row {
-    display: flex;
-    gap: 4mm;
-  }
-
-  /* ===== SECTION BOX ===== */
-  .section {
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 4mm;
-    padding: 6mm 7mm;
-  }
-  .section-header {
-    font-size: 25pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 4mm;
-    padding: 2mm 0 2mm 5mm;
-    border-left: 3mm solid var(--secondary);
-    border-bottom: 1px solid var(--border);
-  }
-  .sub-header {
-    font-size: 17pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 2mm;
-    margin-top: 3mm;
-  }
-  .sub-header:first-of-type { margin-top: 0; }
-
-  /* ===== ROW 1: Background + Objectives ===== */
-  .row1 .background { flex: 5; }
-  .row1 .objectives { flex: 7; }
-
-  .bullet-list {
-    list-style: none;
-    padding: 0;
-  }
-  .bullet-list li {
-    font-size: 16pt;
-    color: var(--text);
-    line-height: 1.3;
-    padding: 1mm 0;
-    padding-left: 7mm;
-    position: relative;
-  }
-  .bullet-list li::before {
-    content: '\2022';
-    position: absolute;
-    left: 0;
-    color: var(--secondary);
-    font-weight: 700;
-  }
-
-  /* Technical metrics */
-  .tech-metrics {
-    display: flex;
-    gap: 4mm;
-    margin-top: 4mm;
-  }
-  .tech-metric {
-    flex: 1;
-    background: var(--secondary);
-    border-radius: 3mm;
-    padding: 5mm 4mm;
-    text-align: center;
-  }
-  .tech-metric .label {
-    font-size: 13pt;
-    color: rgba(255,255,255,0.85);
-    margin-bottom: 1.5mm;
-  }
-  .tech-metric .value {
-    font-size: 20pt;
-    color: var(--white);
-    font-weight: 700;
-  }
-
-  /* ===== ROW 2: AI Usage (HERO) ===== */
-  .ai-usage {
-    background: var(--light-gray);
-    border: 2px solid var(--primary);
-  }
-  .flow-title {
-    font-size: 20pt;
-    font-weight: 700;
-    color: var(--secondary);
-    text-align: center;
-    margin-bottom: 4mm;
-  }
-
-  /* Swimlane Flow Diagram */
-  .swim-container {
-    border: 2px solid var(--primary);
-    border-radius: 4mm;
-    overflow: hidden;
-    margin-bottom: 4mm;
-    background: var(--white);
-  }
-  .swim-lane {
-    display: flex;
-    align-items: stretch;
-  }
-  .swim-tag {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    padding: 4mm 3mm;
-    font-size: 15pt;
-    font-weight: 700;
-    color: var(--white);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 30mm;
-    letter-spacing: 0.15em;
-  }
-  .swim-body {
-    display: flex;
-    align-items: center;
-    flex: 1;
-    padding: 4mm 5mm;
-    gap: 0;
-  }
-  .swim-bridge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2mm 10mm;
-    background: linear-gradient(90deg, rgba(31,111,235,0.03), rgba(31,111,235,0.08), rgba(31,111,235,0.03));
-    gap: 6mm;
-    border-top: 2px solid var(--secondary);
-    border-bottom: 2px solid var(--secondary);
-  }
-  .swim-bridge-icon {
-    font-size: 16pt;
-    color: var(--secondary);
-    font-weight: 700;
-  }
-  .swim-bridge-text {
-    font-size: 13pt;
-    font-weight: 700;
-    color: var(--primary);
-    padding: 1.5mm 6mm;
-    background: var(--white);
-    border: 2px solid var(--secondary);
-    border-radius: 3mm;
-  }
-  .snode {
-    flex: 1;
-    padding: 4mm 3mm;
-    border-radius: 3mm;
-    text-align: center;
-    color: var(--white);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-  }
-  .snode-title {
-    font-size: 14pt;
-    font-weight: 700;
-    line-height: 1.3;
-  }
-  .snode-sub {
-    font-size: 10pt;
-    font-weight: 400;
-    opacity: 0.85;
-    margin-top: 1mm;
-  }
-  .sarrow {
-    width: 10mm;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    position: relative;
-  }
-  .sarrow::before {
-    content: '';
-    display: block;
-    width: 100%;
-    height: 3px;
-    background: var(--primary);
-  }
-  .sarrow::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    border-left: 9px solid var(--primary);
-    border-top: 6px solid transparent;
-    border-bottom: 6px solid transparent;
-  }
-
-  /* Architecture diagram */
-  .arch-diagram {
-    margin-bottom: 8mm;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-  .arch-layer {
-    padding: 5mm 6mm;
-    border-radius: 3mm;
-    text-align: center;
-    color: var(--white);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  }
-  .arch-name {
-    font-size: 15pt;
-    font-weight: 700;
-  }
-  .arch-tech {
-    font-size: 10.5pt;
-    opacity: 0.85;
-    margin-top: 1mm;
-  }
-  .arch-conn {
-    text-align: center;
-    font-size: 10pt;
-    color: var(--secondary);
-    padding: 1.5mm 0;
-    font-weight: 600;
-    position: relative;
-  }
-  .arch-conn::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: var(--secondary);
-    opacity: 0.3;
-    z-index: 0;
-  }
-
-  /* Feature boxes */
-  .feature-boxes {
-    display: flex;
-    gap: 4mm;
-    margin-bottom: 4mm;
-  }
-  .feature-box {
-    flex: 1;
-    background: var(--white);
-    border: 1px solid var(--secondary);
-    border-radius: 3mm;
-    padding: 4mm 5mm;
-  }
-  .feature-box .name {
-    font-size: 14pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 2mm;
-  }
-  .feature-box .desc {
-    font-size: 11pt;
-    color: var(--text);
-    line-height: 1.5;
-    margin-bottom: 2mm;
-  }
-  .feature-box .kpi {
-    font-size: 12pt;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  /* Prompt example */
-  .prompt-box {
-    background: #FEEBC8;
-    border: 1px solid var(--accent);
-    border-radius: 3mm;
-    padding: 4mm 5mm;
-  }
-  .prompt-box .prompt-title {
-    font-size: 13pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 2mm;
-  }
-  .prompt-box .prompt-content {
-    font-size: 10.5pt;
-    color: var(--text);
-    line-height: 1.5;
-    font-family: 'Noto Sans JP', sans-serif;
-  }
-  .prompt-box .prompt-item {
-    margin-bottom: 1.5mm;
-  }
-  .prompt-box .prompt-item .label {
-    font-weight: 700;
-    color: var(--primary);
-  }
-
-  /* ===== ROW 3: Results + Future Plans ===== */
-  .row3 .results { flex: 1; }
-  .row3 .future-plans { flex: 1; }
-  .row3 .section {
-    padding: 7mm 8mm;
-  }
-  .row3 .section-header {
-    font-size: 27pt;
-    margin-bottom: 4mm;
-    padding: 2mm 0 2mm 5mm;
-    border-left-width: 3mm;
-  }
-  .row3 .sub-header {
-    font-size: 18pt;
-    margin-top: 3mm;
-    margin-bottom: 2mm;
-  }
-  .row3 .bullet-list li {
-    font-size: 16pt;
-    line-height: 1.35;
-    padding: 1mm 0 1mm 7mm;
-  }
-  .row3 table,
-  .row3 table th,
-  .row3 table td {
-    font-size: 12.5pt !important;
-    line-height: 1.35;
-  }
-
-  /* Metrics grid */
-  .metrics-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6mm;
-    margin-bottom: 10mm;
-  }
-  .metric-card {
-    flex: 1 1 calc(33.33% - 6mm);
-    min-width: 120mm;
-    border-radius: 3mm;
-    padding: 8mm 6mm;
-    text-align: center;
-    color: var(--white);
-  }
-  .metric-card .metric-name {
-    font-size: 22pt;
-    margin-bottom: 3mm;
-    opacity: 0.9;
-  }
-  .metric-card .metric-value {
-    font-size: 44pt;
-    font-weight: 700;
-  }
-
-  /* Future plans */
-  .plan-group-label {
-    font-size: 18pt;
-    font-weight: 700;
-    margin-bottom: 2mm;
-    margin-top: 4mm;
-  }
-  .plan-group-label.short { color: var(--secondary); }
-  .plan-group-label.long { color: var(--secondary2); }
-  .plan-group-label:first-of-type { margin-top: 0; }
-
-  .plan-list {
-    list-style: none;
-    padding: 0;
-  }
-  .plan-list li {
-    font-size: 14pt;
-    color: var(--text);
-    line-height: 1.3;
-    padding: 1mm 0 1mm 7mm;
-    position: relative;
-  }
-  .plan-list li::before {
-    content: '\2022';
-    position: absolute;
-    left: 0;
-    color: var(--secondary);
-    font-weight: 700;
-  }
-
-  /* QR Code */
-  .qr-section {
-    margin-top: 10mm;
-    padding-top: 10mm;
-    border-top: 1px solid var(--border);
-  }
-  .qr-row {
-    display: flex;
-    gap: 6mm;
-    justify-content: center;
-  }
-  .qr-item {
-    flex: 1;
-    text-align: center;
-    min-width: 45mm;
-  }
-  .qr-link {
-    display: block;
-    text-decoration: none;
-    color: inherit;
-  }
-  .qr-placeholder {
-    width: 40mm;
-    height: 40mm;
-    border: 2px solid var(--primary);
-    border-radius: 2mm;
-    margin: 0 auto 3mm;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--white);
-    padding: 2mm;
-    color: var(--medium-gray);
-    font-size: 13pt;
-  }
-  .qr-placeholder img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    image-rendering: crisp-edges;
-    display: block;
-  }
-  .qr-label {
-    font-size: 13pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 1mm;
-  }
-  .qr-sublabel {
-    font-size: 10pt;
-    color: var(--text);
-  }
-  .qr-url {
-    margin-top: 1mm;
-    font-size: 8.5pt;
-    color: var(--medium-gray);
-    line-height: 1.35;
-    word-break: break-all;
-  }
-
-  /* Tech Stack */
-  .tech-stack {
-    margin-top: 5mm;
-    padding-top: 5mm;
-    border-top: 1px solid var(--border);
-  }
-  .tech-stack-title {
-    font-size: 18pt;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 3mm;
-  }
-  .tech-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3mm;
-  }
-  .tech-tag {
-    font-size: 12pt;
-    font-weight: 600;
-    padding: 2mm 3mm;
-    border-radius: 2mm;
-    color: var(--white);
-  }
-
-  /* Bottom bar (full-width) */
-  .bottom-bar {
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 4mm;
-    padding: 4mm 6mm;
-    display: flex;
-    align-items: center;
-    gap: 7mm;
-  }
-  .bottom-bar .bb-tech {
-    flex: 1;
-  }
-  .bottom-bar .bb-qr {
-    display: flex;
-    gap: 5mm;
-    align-items: flex-start;
-  }
-
-  /* ===== PLACEHOLDER (empty slots for user to fill) ===== */
-  .placeholder {
-    border: 3px dashed #E53E3E;
-    border-radius: 3mm;
-    background: #FFF5F5;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    color: #E53E3E;
-    font-size: 18pt;
-    font-weight: 700;
-    text-align: center;
-    padding: 6mm;
-    gap: 3mm;
-  }
-  .placeholder .ph-hint {
-    font-size: 14pt;
-    font-weight: 400;
-    color: var(--medium-gray);
-  }
-
-  /* Screenshot row */
-  .screenshot-row {
-    display: grid;
-    grid-template-columns: 1.65fr 1fr;
-    gap: 6mm;
-    align-items: stretch;
-  }
-  .screenshot-slot {
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 4mm;
-    padding: 4mm;
-    box-shadow: 0 2px 8px rgba(15, 39, 66, 0.08);
-    display: flex;
-    flex-direction: column;
-    gap: 2.5mm;
-  }
-  .slot-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4mm;
-  }
-  .slot-title {
-    font-size: 13pt;
-    font-weight: 700;
-    color: var(--primary);
-  }
-  .slot-tag {
-    font-size: 10pt;
-    font-weight: 700;
-    padding: 1mm 2.5mm;
-    border-radius: 999px;
+  .title h1 {
+    font-size: 78pt;
+    line-height: 1;
     letter-spacing: 0.02em;
-  }
-  .screenshot-slot.live .slot-tag {
-    color: #1D4ED8;
-    background: #DBEAFE;
-    border: 1px solid #93C5FD;
-  }
-  .screenshot-slot.qa .slot-tag {
-    color: #BE185D;
-    background: #FCE7F3;
-    border: 1px solid #F9A8D4;
-  }
-  .screen-frame {
-    border: 2px solid var(--border);
-    border-radius: 3mm;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(160deg, #0B1730 0%, #1E2A44 100%);
-  }
-  .screenshot-slot.live .screen-frame {
-    aspect-ratio: 1771 / 845;
-  }
-  .screenshot-slot.qa .screen-frame {
-    aspect-ratio: 432 / 448;
-  }
-  .screen-frame img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: block;
-  }
-  .slot-note {
-    font-size: 10pt;
-    color: var(--medium-gray);
-    line-height: 1.5;
-  }
-  .qa-points {
-    margin-top: auto;
-    background: #F8FAFC;
-    border: 1px solid #E2E8F0;
-    border-radius: 3mm;
-    padding: 4mm 5mm;
-  }
-  .qa-points-title {
-    font-size: 12pt;
-    font-weight: 700;
-    color: #BE185D;
+    font-weight: 800;
     margin-bottom: 2mm;
   }
-  .qa-points ul {
-    list-style: none;
-    padding: 0;
-  }
-  .qa-points li {
-    font-size: 10pt;
-    color: var(--text);
-    line-height: 1.45;
-    padding-left: 5mm;
-    position: relative;
-    margin-bottom: 1mm;
-  }
-  .qa-points li:last-child {
-    margin-bottom: 0;
-  }
-  .qa-points li::before {
-    content: '';
-    width: 2mm;
-    height: 2mm;
-    border-radius: 50%;
-    background: #BE185D;
-    position: absolute;
-    left: 0;
-    top: 0.58em;
+
+  .title .core-claim {
+    font-size: 32pt;
+    line-height: 1.25;
+    font-weight: 700;
+    max-width: 585mm;
+    color: #dbeafe;
+    margin-bottom: 2mm;
   }
 
-  /* Metric placeholder cards */
-  .metric-placeholder-grid {
+  .title .sit-note {
+    font-size: 22pt;
+    line-height: 1.3;
+    color: #bfdbfe;
+    font-weight: 600;
+  }
+
+  .meta {
+    text-align: right;
+    min-width: 155mm;
+    align-self: flex-start;
+  }
+
+  .meta .author {
+    font-size: 28pt;
+    font-weight: 700;
+    margin-bottom: 1mm;
+  }
+
+  .meta .affil {
+    font-size: 24pt;
+    color: #d1d5db;
+    margin-bottom: 2mm;
+  }
+
+  .meta .event {
+    display: inline-block;
+    font-size: 22pt;
+    font-weight: 700;
+    padding: 2mm 4mm;
+    border-radius: 3mm;
+    background: rgba(59, 130, 246, 0.22);
+    border: 1px solid rgba(147, 197, 253, 0.8);
+    color: #fef08a;
+  }
+
+  .pill-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4mm;
+    padding: 6mm 16mm 4mm;
+  }
+
+  .pill {
+    border-radius: 999px;
+    padding: 4mm 5mm;
+    text-align: center;
+    font-size: 30pt;
+    line-height: 1.2;
+    font-weight: 800;
+    border: 2px solid transparent;
+  }
+
+  .pill.ok {
+    background: #dcfce7;
+    color: #065f46;
+    border-color: #16a34a;
+  }
+
+  .pill.ng {
+    background: #fee2e2;
+    color: #991b1b;
+    border-color: #dc2626;
+  }
+
+  .content {
+    padding: 0 16mm 8mm;
+    display: flex;
+    flex-direction: column;
+    gap: 4mm;
+  }
+
+  .row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 4mm;
-    margin-bottom: 6mm;
-  }
-  .metric-placeholder-card {
-    border-radius: 3mm;
-    padding: 3.5mm 3mm;
-    text-align: center;
-    color: var(--white);
-  }
-  .metric-placeholder-card .metric-name {
-    font-size: 12pt;
-    margin-bottom: 1mm;
-    opacity: 0.9;
-  }
-  .metric-placeholder-card .metric-value {
-    font-size: 19pt;
-    font-weight: 700;
-    display: inline-block;
   }
 
-  /* Analysis section */
-  .analysis-box {
-    background: var(--white);
-    border-left: 3mm solid #38A169;
-    border-radius: 0 3mm 3mm 0;
-    padding: 5mm 6mm;
-    margin-top: 4mm;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  .row.ai-result {
+    grid-template-columns: 1fr 1.25fr;
   }
-  .analysis-box .analysis-title {
-    font-size: 14pt;
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4mm;
+    padding: 5mm 6mm;
+  }
+
+  .section-title {
+    font-size: 46pt;
+    line-height: 1.1;
+    font-weight: 800;
+    color: var(--navy);
+    padding-bottom: 1.5mm;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 2.5mm;
+  }
+
+  .body-list {
+    list-style: none;
+  }
+
+  .body-list li {
+    font-size: 30pt;
+    line-height: 1.3;
+    color: var(--ink);
+    padding-left: 8mm;
+    margin-bottom: 2mm;
+    position: relative;
+  }
+
+  .body-list li:last-child {
+    margin-bottom: 0;
+  }
+
+  .body-list li::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--blue);
+    font-weight: 800;
+  }
+
+  .subheading {
+    font-size: 32pt;
+    line-height: 1.2;
+    font-weight: 800;
+    color: var(--navy);
+    margin-bottom: 2mm;
+  }
+
+  .small-note {
+    font-size: 24pt;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  .objective {
+    font-size: 30pt;
+    line-height: 1.35;
     font-weight: 700;
-    color: #38A169;
+    color: #1d4ed8;
+    background: #eff6ff;
+    border: 1px solid #93c5fd;
+    border-radius: 3mm;
+    padding: 3mm 3.5mm;
+    margin-bottom: 2.5mm;
+  }
+
+  .compare-grid {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2mm;
+  }
+
+  .compare-grid th,
+  .compare-grid td {
+    border: 1px solid var(--line);
+    padding: 2mm 2mm;
+    vertical-align: middle;
+    text-align: center;
+    font-size: 26pt;
+    line-height: 1.2;
+  }
+
+  .compare-grid th {
+    background: #eaf1ff;
+    color: var(--navy);
+    font-weight: 800;
+  }
+
+  .compare-grid td.tool {
+    text-align: left;
+    width: 33%;
+  }
+
+  .tool-name {
+    font-size: 27pt;
+    font-weight: 800;
+    color: var(--navy);
+    line-height: 1.1;
+  }
+
+  .tool-note {
+    font-size: 24pt;
+    color: var(--muted);
+    line-height: 1.25;
+  }
+
+  .mark {
+    font-size: 34pt;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .mark.yes {
+    color: #15803d;
+  }
+
+  .mark.no {
+    color: #9ca3af;
+  }
+
+  .sit-adv {
+    margin-top: 2mm;
+    font-size: 26pt;
+    line-height: 1.3;
+    color: #1e3a8a;
+    font-weight: 700;
+  }
+
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 1.5mm;
+    flex-wrap: nowrap;
     margin-bottom: 3mm;
   }
 
-  /* Prompt evolution */
-  .prompt-evolution {
-    display: flex;
-    flex-direction: column;
-    gap: 4mm;
-    margin-top: 6mm;
-  }
-  .prompt-evo-step {
-    border: 2px dashed #805AD5;
+  .flow .node {
+    flex: 1;
+    background: #eaf2ff;
+    border: 2px solid #3b82f6;
     border-radius: 3mm;
-    padding: 6mm 8mm;
-    background: #FAF5FF;
-  }
-  .prompt-evo-step .step-label {
-    font-size: 18pt;
-    font-weight: 700;
-    color: #805AD5;
-    margin-bottom: 4mm;
-  }
-
-  /* ===== FOOTER ===== */
-  .footer {
     text-align: center;
-    padding: 2mm 12mm;
-    font-size: 9pt;
-    color: var(--primary);
-    border-top: 1px solid var(--border);
+    padding: 3mm 1.5mm;
+    font-size: 26pt;
+    line-height: 1.2;
+    font-weight: 800;
+    color: #1e3a8a;
   }
 
-  /* Static poster mode for export/evaluation */
-  @media screen {
-    .controls { display: none; }
-    .poster {
-      transform: none;
-      margin-bottom: 0;
-    }
+  .flow .arrow {
+    text-align: center;
+    width: 12mm;
+    flex: 0 0 12mm;
+    font-size: 32pt;
+    color: #1d4ed8;
+    font-weight: 800;
+  }
+
+  .system-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 3mm;
+    align-items: start;
+  }
+
+  .constraint-box {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    border-radius: 3mm;
+    padding: 3mm 3.5mm;
+  }
+
+  .constraint-box .subheading {
+    margin-bottom: 1.2mm;
+  }
+
+  .constraint-box li {
+    margin-bottom: 1.6mm;
+  }
+
+  .screenshot-wrap {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 3mm;
+    overflow: hidden;
+    background: #0b1730;
+  }
+
+  .screenshot-wrap img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .callout {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid #60a5fa;
+    color: #0f172a;
+    border-radius: 2.5mm;
+    padding: 1.3mm 1.8mm;
+    font-size: 24pt;
+    line-height: 1.2;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+  }
+
+  .c1 {
+    left: 3mm;
+    top: 4mm;
+  }
+
+  .c2 {
+    left: 4mm;
+    bottom: 4mm;
+  }
+
+  .c3 {
+    right: 3mm;
+    top: 36mm;
+  }
+
+  .cap {
+    margin-top: 1.5mm;
+    font-size: 24pt;
+    line-height: 1.3;
+    color: var(--muted);
+  }
+
+  .callout-legend {
+    margin-top: 1.6mm;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1mm;
+  }
+
+  .callout-chip {
+    font-size: 24pt;
+    line-height: 1.25;
+    font-weight: 700;
+    color: #0f172a;
+    border: 1px solid #93c5fd;
+    background: #eff6ff;
+    border-radius: 2.5mm;
+    padding: 1.2mm 1.6mm;
+  }
+
+  .ai-points {
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: 3mm;
+    padding: 3mm 3.5mm;
+    margin-bottom: 2.5mm;
+  }
+
+  .appendix-link {
+    margin-top: 2mm;
+    font-size: 24pt;
+    line-height: 1.35;
+    color: #1d4ed8;
+    font-weight: 700;
+    background: #eff6ff;
+    border: 1px solid #93c5fd;
+    border-radius: 3mm;
+    padding: 2.3mm 2.8mm;
+  }
+
+  .prompt-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2mm;
+    margin-top: 2.5mm;
+  }
+
+  .prompt-snippet {
+    border: 1px solid #f59e0b;
+    background: #fffbeb;
+    border-radius: 3mm;
+    padding: 2.5mm 2.8mm;
+  }
+
+  .prompt-snippet .snippet-title {
+    font-size: 26pt;
+    font-weight: 800;
+    color: #92400e;
+    margin-bottom: 1mm;
+  }
+
+  .prompt-snippet .snippet-body {
+    font-size: 24pt;
+    line-height: 1.35;
+    color: #78350f;
+    font-weight: 600;
+  }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2mm;
+  }
+
+  .results-table th,
+  .results-table td {
+    border: 1px solid var(--line);
+    padding: 1.8mm 1.8mm;
+    font-size: 26pt;
+    line-height: 1.2;
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .results-table th {
+    background: var(--navy);
+    color: #fff;
+    font-weight: 800;
+  }
+
+  .judgement-ok {
+    color: #15803d;
+    font-weight: 800;
+  }
+
+  .judgement-ng {
+    color: #b91c1c;
+    font-weight: 800;
+  }
+
+  .judgement-warn {
+    color: #b45309;
+    font-weight: 800;
+  }
+
+  .measure-line {
+    font-size: 24pt;
+    line-height: 1.35;
+    color: #374151;
+    margin-bottom: 2mm;
+  }
+
+  .repro-box {
+    border: 1px solid #93c5fd;
+    background: #eff6ff;
+    border-radius: 3mm;
+    padding: 2.5mm 3mm;
+  }
+
+  .repro-box .subheading {
+    margin-bottom: 1.2mm;
+  }
+
+  .repro-box li {
+    margin-bottom: 1.3mm;
+  }
+
+  .analysis-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2mm;
+  }
+
+  .analysis-block {
+    border: 1px solid var(--line);
+    border-radius: 3mm;
+    padding: 2.6mm 2.8mm;
+    background: #ffffff;
+  }
+
+  .analysis-block .subheading {
+    font-size: 28pt;
+    margin-bottom: 1.3mm;
+  }
+
+  .demo {
+    margin: 0 16mm 5mm;
+    padding: 4mm 6mm;
+  }
+
+  .demo-title {
+    font-size: 36pt;
+    line-height: 1.15;
+    font-weight: 800;
+    color: var(--navy);
+    margin-bottom: 2mm;
+  }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 3mm;
+    align-items: start;
+  }
+
+  .qr-card {
+    border: 1px solid var(--line);
+    border-radius: 3mm;
+    padding: 2.2mm 2.4mm;
+    background: #f8fafc;
+    text-align: center;
+  }
+
+  .qr-img {
+    width: 42mm;
+    height: 42mm;
+    margin: 0 auto 1.4mm;
+    border: 1px solid #94a3b8;
+    border-radius: 2mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    padding: 1.4mm;
+  }
+
+  .qr-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  .qr-label {
+    font-size: 26pt;
+    line-height: 1.2;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 0.8mm;
+  }
+
+  .qr-sub {
+    font-size: 24pt;
+    line-height: 1.3;
+    color: #374151;
+  }
+
+  .qr-url {
+    margin-top: 1mm;
+    font-size: 22pt;
+    line-height: 1.25;
+    color: #1f6feb;
+    word-break: break-word;
+  }
+
+  .staff-note {
+    margin-top: 1.4mm;
+    font-size: 22pt;
+    line-height: 1.3;
+    color: #7c2d12;
+    background: #ffedd5;
+    border: 1px solid #fdba74;
+    border-radius: 2mm;
+    padding: 1.2mm 1.6mm;
+  }
+
+  .footer {
+    margin-top: auto;
+    text-align: center;
+    font-size: 18pt;
+    line-height: 1.3;
+    color: #6b7280;
+    padding: 2.5mm 10mm 3mm;
   }
 
   @media print {
-    body { background: none; padding: 0; }
-    .controls { display: none; }
+    body {
+      background: none;
+      padding: 0;
+    }
+
     .poster {
-      transform: none;
       box-shadow: none;
+      border: none;
       width: 841mm;
       min-height: 1189mm;
     }
+
     @page {
       size: 841mm 1189mm;
       margin: 0;
@@ -817,383 +637,268 @@
 </style>
 </head>
 <body>
-
-<div class="poster" id="poster">
-
-  <!-- ===== HEADER ===== -->
-  <div class="header">
-    <div class="header-left">
-      <h1>SIT Copilot</h1>
-      <div class="subtitle">講義支援AIシステム</div>
-    </div>
-    <div class="header-right">
-      <div class="authors">嶋中雄大</div>
-      <div class="affiliation">芝浦工業大学</div>
-      <div class="event">AI Innovators Cup @ 芝浦工業大学 2026</div>
-    </div>
-  </div>
-
-  <div class="content">
-
-    <!-- ===== ROW 1: 背景 + 目的・特徴 ===== -->
-    <div class="row row1">
-
-      <!-- 1. 背景 -->
-      <div class="section background">
-        <div class="section-header">1. 背景</div>
-
-        <div class="sub-header">課題</div>
-        <ul class="bullet-list">
-          <li>講義は情報密度が高く、聞き漏らしが発生しやすい</li>
-          <li>非母語話者はリアルタイムでの理解が困難</li>
-          <li>既存ツールには講義固有の文脈理解がない</li>
-        </ul>
-
-        <div class="sub-header">既存ツールとの差別化</div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 16pt; margin-bottom: 4mm;">
-          <tr style="background: var(--primary); color: white;">
-            <th style="padding: 3mm 4mm; text-align: left; width: 22%;">ツール</th>
-            <th style="padding: 3mm 4mm; text-align: left; width: 38%;">講義支援での限界</th>
-            <th style="padding: 3mm 4mm; text-align: left; width: 40%;">SIT Copilotの優位性</th>
-          </tr>
-          <tr style="background: var(--light-gray);">
-            <td style="padding: 3mm 4mm; font-weight: 600;">Otter.ai</td>
-            <td style="padding: 3mm 4mm;">会議議事録向け最適化。講義セッション単位の根拠付き回答は主軸でない</td>
-            <td style="padding: 3mm 4mm;">講義データ限定回答 + chunk_id根拠追跡 + Verifier検証</td>
-          </tr>
-          <tr>
-            <td style="padding: 3mm 4mm; font-weight: 600;">Google翻訳</td>
-            <td style="padding: 3mm 4mm;">翻訳単体は強力だが、講義ログ検索・根拠付きQAは提供範囲外</td>
-            <td style="padding: 3mm 4mm;">翻訳+文脈QA+根拠提示を統合。根拠不足時は回答を拒否する安全設計</td>
-          </tr>
-          <tr style="background: var(--light-gray);">
-            <td style="padding: 3mm 4mm; font-weight: 600;">Teams字幕</td>
-            <td style="padding: 3mm 4mm;">会議視聴支援として有効だが、根拠引用付きQAやfail-closed検証は範囲外</td>
-            <td style="padding: 3mm 4mm;">検索・回答・検証・永続化のパイプラインを講義用途で一貫設計</td>
-          </tr>
-        </table>
-
-        <div class="sub-header">対象者</div>
-        <ul class="bullet-list">
-          <li>大学生全般（特に留学生）</li>
-          <li>アクセシビリティ支援が必要な受講者</li>
-        </ul>
+  <div class="poster">
+    <header class="header">
+      <div class="title">
+        <h1>SIT Copilot</h1>
+        <div class="core-claim">講義ライブを0.76秒字幕で追従し、source-only QAで根拠付き復習まで一気通貫支援</div>
+        <div class="sit-note">SIT = Shibaura Institute of Technology</div>
       </div>
-
-      <!-- 2. 目的・特徴 -->
-      <div class="section objectives">
-        <div class="section-header">2. 目的・特徴</div>
-
-        <div class="sub-header">コア機能</div>
-        <ul class="bullet-list">
-          <li>リアルタイム字幕: 音声認識と日本語自動補正</li>
-          <li>AIアシスト: 30秒ごとの自動要約と専門用語抽出</li>
-          <li>根拠付きミニQA: 講義内容のみを根拠に回答</li>
-          <li>3言語対応: 日本語・やさしい日本語・英語の即時切替</li>
-          <li>アクセシビリティ: テーマ・文字サイズ・高コントラスト対応</li>
-        </ul>
-
-        <div class="sub-header">技術目標</div>
-        <div class="tech-metrics">
-          <div class="tech-metric">
-            <div class="label">字幕変換</div>
-            <div class="value">&lt; 3s</div>
-          </div>
-          <div class="tech-metric">
-            <div class="label">QA応答</div>
-            <div class="value">&lt; 10s</div>
-          </div>
-          <div class="tech-metric">
-            <div class="label">翻訳正確性</div>
-            <div class="value">&gt; 90%</div>
-          </div>
-        </div>
+      <div class="meta">
+        <div class="author">嶋中 雄大</div>
+        <div class="affil">芝浦工業大学</div>
+        <div class="event">AI Innovators Cup 2026</div>
       </div>
+    </header>
 
+    <div class="pill-row">
+      <div class="pill ok">字幕遅延 0.76s / 0.99s 達成</div>
+      <div class="pill ok">字幕品質 5/5 達成</div>
+      <div class="pill ng">QA E2E 9.18s（目標&lt;5s）未達</div>
     </div>
 
-    <!-- ===== ROW 2: AI活用・応用方法 (HERO) ===== -->
-    <div class="section ai-usage">
-      <div class="section-header">3. AI活用・応用方法</div>
-      <div class="flow-title">システム処理フロー</div>
-
-      <!-- Flow Diagram: Horizontal Swimlane -->
-      <div class="swim-container">
-        <!-- 字幕生成レーン -->
-        <div class="swim-lane">
-          <div class="swim-tag" style="background: #3B82F6;">字幕生成</div>
-          <div class="swim-body">
-            <div class="snode" style="background: #3B82F6;"><div class="snode-title">音声入力</div><div class="snode-sub">マイク / ブラウザ</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #14B8A6;"><div class="snode-title">音声認識 (ASR)</div><div class="snode-sub">Azure Speech SDK</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #6366F1;"><div class="snode-title">LLM 日本語補正</div><div class="snode-sub">専門用語・固有名詞</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #10B981;"><div class="snode-title">字幕・要約 表示</div><div class="snode-sub">30秒ローリング要約</div></div>
-          </div>
-        </div>
-        <!-- Bridge: 講義記録共有 -->
-        <div class="swim-bridge">
-          <div class="swim-bridge-icon">↕</div>
-          <div class="swim-bridge-text">講義記録を検索対象として共有</div>
-          <div class="swim-bridge-icon">↕</div>
-        </div>
-        <!-- Q&Aレーン -->
-        <div class="swim-lane">
-          <div class="swim-tag" style="background: #EC4899;">Q &amp; A</div>
-          <div class="swim-body">
-            <div class="snode" style="background: #EC4899;"><div class="snode-title">質問入力</div><div class="snode-sub">テキスト入力</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #6366F1;"><div class="snode-title">ハイブリッド検索</div><div class="snode-sub">BM25 + ベクトル</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #8B5CF6;"><div class="snode-title">LLM 回答生成</div><div class="snode-sub">source-only 制約</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #EC4899;"><div class="snode-title">LLM as a Judge</div><div class="snode-sub">根拠一致を検証</div></div>
-            <div class="sarrow"></div>
-            <div class="snode" style="background: #3B82F6;"><div class="snode-title">根拠付き回答</div><div class="snode-sub">chunk_id 出典引用</div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feature Boxes -->
-      <div class="feature-boxes">
-        <div class="feature-box">
-          <div class="name">字幕生成フロー</div>
-          <div class="desc">Azure Speech SDKによるリアルタイム音声認識。LLMによる日本語補正。30秒ごとのローリング要約生成。</div>
-          <div class="kpi">実測: 変換遅延 0.76s (en) / 0.99s (easy-ja)</div>
-        </div>
-        <div class="feature-box">
-          <div class="name">Q&Aフロー</div>
-          <div class="desc">BM25+ベクトル検索のハイブリッド検索。講義記録のみを根拠としたsource-only回答。LLM as a Judgeによる根拠一致検証。</div>
-          <div class="kpi">実測: QA応答 9.2s (E2E平均)</div>
-        </div>
-      </div>
-
-      <!-- Prompt Examples -->
-      <div class="prompt-box">
-        <div class="prompt-title">プロンプト設計例</div>
-        <div class="prompt-content">
-          <div class="prompt-item"><span class="label">【要約】</span>直近60秒の講義内容を要約。関連するポイントをグループ化。最大150語。</div>
-          <div class="prompt-item"><span class="label">【Q&A】</span>提供された講義記録のみを使用して質問に回答。(chunk_id)でソースを引用。根拠が不十分な場合は「講義内では確認できない」と回答。</div>
-          <div class="prompt-item"><span class="label">【Judge】</span>回答が引用チャンクの内容と整合するか検証。根拠との矛盾や情報の追加があればreject判定。</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== SCREENSHOTS ===== -->
-    <div class="screenshot-row">
-      <div class="screenshot-slot live">
-        <div class="slot-header">
-          <div class="slot-title">Live字幕画面</div>
-          <div class="slot-tag">1771 × 845</div>
-        </div>
-        <div class="screen-frame">
-          <img src="assets/images/live-screen.png" alt="Live字幕画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#E53E3E;font-size:18pt;padding:20mm;&quot;>画像未配置<br><span style=&quot;font-size:14pt;color:#CBD5E1;&quot;>assets/images/live-screen.png</span></div>';">
-        </div>
-        <div class="slot-note">講義の全体ビュー。字幕ログ、言語切替、右パネルの補助情報を同時に確認できる。</div>
-      </div>
-      <div class="screenshot-slot qa">
-        <div class="slot-header">
-          <div class="slot-title">Q&A画面</div>
-          <div class="slot-tag">432 × 448</div>
-        </div>
-        <div class="screen-frame">
-          <img src="assets/images/qa-screen.png" alt="Q&A画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#E53E3E;font-size:18pt;padding:20mm;&quot;>画像未配置<br><span style=&quot;font-size:14pt;color:#CBD5E1;&quot;>assets/images/qa-screen.png</span></div>';">
-        </div>
-        <div class="qa-points">
-          <div class="qa-points-title">画面で確認できる点</div>
-          <ul>
-            <li>根拠付き回答の提示</li>
-            <li>今の要点の即時更新</li>
-            <li>用語サポートと状態表示</li>
+    <main class="content">
+      <div class="row">
+        <section class="card">
+          <div class="section-title">1. 背景</div>
+          <ul class="body-list">
+            <li>前: 履修前に難所が見えず、受講判断が難しい</li>
+            <li>中: 情報密度が高く、聞き漏らしが起きる</li>
+            <li>後: 復習時に根拠追跡が難しい</li>
           </ul>
-        </div>
-      </div>
-    </div>
 
-    <!-- ===== ROW 3: 成果・出力 + 今後の展開 ===== -->
-    <div class="row row3">
+          <div class="subheading" style="margin-top:2.5mm;">既存ツール比較（3×4チェック）</div>
+          <table class="compare-grid">
+            <tr>
+              <th>ツール</th>
+              <th>ライブ字幕</th>
+              <th>source-only QA</th>
+              <th>引用表示</th>
+              <th>検証ゲート</th>
+            </tr>
+            <tr>
+              <td class="tool">
+                <div class="tool-name">Otter.ai</div>
+                <div class="tool-note">会議議事録中心</div>
+              </td>
+              <td><span class="mark yes">✓</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+            </tr>
+            <tr>
+              <td class="tool">
+                <div class="tool-name">Google Translate</div>
+                <div class="tool-note">翻訳機能中心</div>
+              </td>
+              <td><span class="mark yes">✓</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+            </tr>
+            <tr>
+              <td class="tool">
+                <div class="tool-name">Teams字幕</div>
+                <div class="tool-note">会議視聴支援中心</div>
+              </td>
+              <td><span class="mark yes">✓</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+              <td><span class="mark no">—</span></td>
+            </tr>
+          </table>
+          <div class="sit-adv">SIT Copilotは「source-only QA + 引用 + 検証」を実装（講義前中後を接続）</div>
+        </section>
 
-      <!-- 4. 成果・出力 -->
-      <div class="section results">
-        <div class="section-header">4. 成果・出力</div>
-
-        <!-- === 実測メトリクス === -->
-        <div class="sub-header">性能評価（実測値）</div>
-        <div class="metric-placeholder-grid">
-          <div class="metric-placeholder-card" style="background: #14B8A6;">
-            <div class="metric-name">字幕変換 (ja→en)</div>
-            <div class="metric-value">0.76s</div>
-          </div>
-          <div class="metric-placeholder-card" style="background: #3B82F6;">
-            <div class="metric-name">字幕変換 (やさしい日本語)</div>
-            <div class="metric-value">0.99s</div>
-          </div>
-          <div class="metric-placeholder-card" style="background: #6366F1;">
-            <div class="metric-name">翻訳正確性</div>
-            <div class="metric-value">5/5</div>
-          </div>
-          <div class="metric-placeholder-card" style="background: #8B5CF6;">
-            <div class="metric-name">QA応答 (E2E)</div>
-            <div class="metric-value">9.2s</div>
-          </div>
-        </div>
-        <div style="font-size: 14pt; color: var(--medium-gray); margin-bottom: 6mm; padding: 4mm 6mm; background: var(--light-gray); border-radius: 2mm;">
-          計測条件: 専門用語含む講義文3〜5文 / QAは根拠あり質問5問の平均 / BM25検索 / ローカル環境
-        </div>
-
-        <!-- === 主要成果 === -->
-        <div class="sub-header">実装済みシステム設計</div>
-        <ul class="bullet-list">
-          <li>source-only設計: 講義記録のみで回答、外部知識を排除</li>
-          <li>LLM as a Judge: 二重検証で根拠不一致を棄却</li>
-          <li>日本語自動補正: 専門用語の認識ミスを即時修正</li>
-          <li>ローリング要約: 30秒単位の自動要約生成</li>
-        </ul>
-
-        <!-- === 分析・考察 === -->
-        <div class="analysis-box">
-          <div class="analysis-title">分析・考察</div>
-          <div style="display: flex; gap: 8mm;">
-            <div style="flex: 1;">
-              <div style="font-size: 13pt; font-weight: 700; color: #38A169; margin-bottom: 2mm; padding: 1mm 3mm; background: #F0FFF4; border-radius: 2mm; display: inline-block;">達成</div>
-              <ul class="bullet-list">
-                <li>字幕変換 0.76s / 0.99s（目標3s以内を達成）</li>
-                <li>出典ID付き回答で根拠追跡が可能</li>
-              </ul>
-            </div>
-            <div style="flex: 1;">
-              <div style="font-size: 13pt; font-weight: 700; color: #E53E3E; margin-bottom: 2mm; padding: 1mm 3mm; background: #FFF5F5; border-radius: 2mm; display: inline-block;">課題</div>
-              <ul class="bullet-list">
-                <li>QA応答 9.2s（目標5s以内に未達）</li>
-                <li>全文検索は本番精度の向上が必要</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        <div class="sub-header" style="color: var(--accent); margin-top: 5mm;">プロンプト改善（要約）</div>
-        <div style="border: 1px solid #F59E0B; border-radius: 3mm; background: #FFFBEB; padding: 3mm 4mm;">
-          <ul class="bullet-list">
-            <li>source-only制約 + 言語一致指示で回答品質を安定化</li>
-            <li>Judge判定を主張単位にして根拠不一致を棄却</li>
+        <section class="card">
+          <div class="section-title">2. 目的</div>
+          <div class="objective">講義の前・中・後を一貫支援し、聞き漏らしと非母語話者の理解負荷を下げる。</div>
+          <ul class="body-list">
+            <li>対象: 留学生・聞き漏らしが多い受講者・アクセシビリティ配慮対象</li>
+            <li>成果指標: 字幕遅延&lt;3s、QA遅延&lt;5s、字幕品質5/5</li>
+            <li>未達を隠さず、改善順まで提示する</li>
           </ul>
-        </div>
+          <div class="small-note" style="margin-top:2mm;">新規性: 字幕だけで終わらず、source-only QAで根拠付き復習に接続。</div>
+        </section>
       </div>
 
-      <!-- 5. 今後の展開 -->
-      <div class="section future-plans">
-        <div class="section-header">5. 今後の展開</div>
-
-        <!-- システム構成図 -->
-        <div class="sub-header">システム構成</div>
-        <div class="arch-diagram">
-          <div class="arch-layer" style="background: #3178C6;">
-            <div class="arch-name">Frontend</div>
-            <div class="arch-tech">React + TypeScript + Tailwind CSS</div>
-          </div>
-          <div class="arch-conn">↕ REST API / Server-Sent Events</div>
-          <div class="arch-layer" style="background: #009688;">
-            <div class="arch-name">Backend API</div>
-            <div class="arch-tech">FastAPI + SQLite FTS5 (BM25)</div>
-          </div>
-          <div class="arch-conn">↕ Azure SDK</div>
-          <div class="arch-layer" style="background: #0078D4;">
-            <div class="arch-name">Cloud Services</div>
-            <div class="arch-tech">Azure OpenAI / Speech / AI Search</div>
-          </div>
+      <section class="card">
+        <div class="section-title">3. システム概要</div>
+        <div class="flow">
+          <div class="node">音声入力</div>
+          <div class="arrow">→</div>
+          <div class="node">字幕変換</div>
+          <div class="arrow">→</div>
+          <div class="node">source-only QA</div>
+          <div class="arrow">→</div>
+          <div class="node">回答+引用</div>
         </div>
 
-        <div class="sub-header" style="margin-top: 4mm;">利用シナリオ</div>
-        <ul class="plan-list">
-          <li>留学生: 字幕切替 + 根拠付きQ&Aで復習効率を向上</li>
-          <li>一般学生: 要約と用語サポートで聞き漏らしを補完</li>
-          <li>アクセシビリティ: 高コントラストと文字拡大に対応</li>
-        </ul>
-
-        <!-- 短期・長期目標 -->
-        <div class="plan-group-label short" style="margin-top: 8mm;">短期目標</div>
-        <ul class="plan-list">
-          <li>履修前サポート機能の有効化</li>
-          <li>学内手続きQA機能の有効化</li>
-          <li>スライドOCR統合による視覚情報の活用</li>
-        </ul>
-
-        <div class="plan-group-label long">長期目標</div>
-        <ul class="plan-list">
-          <li>LMSプラットフォーム連携</li>
-          <li>モバイルアプリ対応</li>
-          <li>複数講義横断の復習支援</li>
-          <li>教員ダッシュボード（理解度分析）</li>
-        </ul>
-
-        <!-- 技術スタック -->
-        <div class="tech-stack">
-          <div class="tech-stack-title">技術スタック</div>
-          <div class="tech-tags">
-            <span class="tech-tag" style="background: #3178C6;">TypeScript</span>
-            <span class="tech-tag" style="background: #61DAFB; color: #1a1a1a;">React</span>
-            <span class="tech-tag" style="background: #3776AB;">Python</span>
-            <span class="tech-tag" style="background: #009688;">FastAPI</span>
-            <span class="tech-tag" style="background: #0078D4;">Azure OpenAI</span>
-            <span class="tech-tag" style="background: #0078D4;">Azure Speech</span>
-            <span class="tech-tag" style="background: #38BDF8;">Tailwind CSS</span>
-            <span class="tech-tag" style="background: #F59E0B; color: #1a1a1a;">SQLite</span>
+        <div class="system-grid">
+          <div class="constraint-box">
+            <div class="subheading">設計の縛り</div>
+            <ul class="body-list">
+              <li>source-only、citation必須</li>
+              <li>`chunk_id` ベースの検索</li>
+              <li>Judgeで補正・回答をゲート</li>
+            </ul>
           </div>
-        </div>
 
-        <!-- まとめ -->
-        <div style="background: linear-gradient(135deg, var(--primary), var(--secondary)); border-radius: 3mm; padding: 4mm 5mm; margin-top: 4mm; color: white;">
-          <div style="font-size: 14pt; font-weight: 700; margin-bottom: 1mm;">まとめ</div>
-          <div style="font-size: 10.5pt; line-height: 1.45;">SIT Copilotは、リアルタイム字幕・多言語翻訳・根拠付きQAを統合し、講義理解と復習を継続支援する。</div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- ===== BOTTOM BAR: QR Codes (full-width) ===== -->
-    <div class="bottom-bar">
-      <div class="bb-tech">
-        <div style="font-size: 18pt; font-weight: 700; color: var(--primary); margin-bottom: 2mm;">Try it yourself</div>
-        <div style="font-size: 12pt; color: var(--text); line-height: 1.35;">QRコードから、デモ動画視聴・アプリ操作・ソースコード確認ができます。</div>
-      </div>
-      <div class="bb-qr">
-        <div class="qr-item">
-          <div class="qr-placeholder">
-            <img src="assets/images/qr-demo-video.png" alt="デモ動画QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#E53E3E;font-size:11pt;line-height:1.4;text-align:center;&quot;>QR未配置<br>assets/images/qr-demo-video.png</div>';">
-          </div>
-          <div class="qr-label">デモ動画</div>
-          <div class="qr-sublabel">3分デモ</div>
-          <div class="qr-url">Scan with phone camera</div>
-        </div>
-        <div class="qr-item">
-          <a class="qr-link" href="https://proud-sand-00bb37700.1.azurestaticapps.net/" target="_blank" rel="noopener noreferrer">
-            <div class="qr-placeholder">
-              <img src="assets/images/qr-app-url.png" alt="アプリQR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#E53E3E;font-size:11pt;line-height:1.4;text-align:center;&quot;>QR未配置<br>assets/images/qr-app-url.png</div>';">
+          <div>
+            <div class="screenshot-wrap">
+              <img src="assets/images/live-screen.png" alt="講義ライブ画面" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:24pt;padding:12mm;text-align:center;&quot;>画像未配置<br>assets/images/live-screen.png</div>';"></img>
+              <div class="callout c1">① 多言語切替</div>
+              <div class="callout c2">② 引用ID表示（S-001…）</div>
+              <div class="callout c3">③ アクセシビリティ配慮</div>
             </div>
-            <div class="qr-label">アプリ</div>
-            <div class="qr-sublabel">実際に操作</div>
-            <div class="qr-url">https://proud-sand-00bb37700.1.azurestaticapps.net/</div>
-          </a>
-        </div>
-        <div class="qr-item">
-          <a class="qr-link" href="https://github.com/arugo11/sit-copilot" target="_blank" rel="noopener noreferrer">
-            <div class="qr-placeholder">
-              <img src="assets/images/qr-github.png" alt="GitHub QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#E53E3E;font-size:11pt;line-height:1.4;text-align:center;&quot;>QR未配置<br>assets/images/qr-github.png</div>';">
+            <div class="cap">講義資料に基づく例。QA回答でも同形式の引用IDを提示。</div>
+            <div class="callout-legend">
+              <div class="callout-chip">① 多言語切替（日本語 / やさしい日本語 / English）</div>
+              <div class="callout-chip">② source-only QAの引用ID表示（例: S-001）</div>
+              <div class="callout-chip">③ 読みやすさを優先したアクセシビリティ表示</div>
             </div>
-            <div class="qr-label">GitHub</div>
-            <div class="qr-sublabel">ソースコード</div>
-            <div class="qr-url">https://github.com/arugo11/sit-copilot</div>
-          </a>
+          </div>
+        </div>
+      </section>
+
+      <div class="row ai-result">
+        <section class="card">
+          <div class="section-title">4. AI利用とプロンプト設計</div>
+
+          <div class="ai-points">
+            <div class="subheading">AI利用の要点</div>
+            <ul class="body-list">
+              <li>字幕: Azure AI Speech + Azure OpenAI（gpt-5-nano）</li>
+              <li>字幕変換は運用記録として gpt-4.1-nano も利用</li>
+              <li>QA: Azure AI Search + Azure OpenAI + LLM as a Judge</li>
+              <li>OCR: Azure AI Vision、開発支援: Codex / Claude / Gemini</li>
+            </ul>
+            <div class="appendix-link">詳細設定・検証ログは GitHub と docs/performance-evaluation.md を参照</div>
+          </div>
+
+          <div class="subheading">プロンプト設計の工夫（要点）</div>
+          <div class="prompt-grid">
+            <div class="prompt-snippet">
+              <div class="snippet-title">字幕変換</div>
+              <div class="snippet-body">入力: text + target_lang_mode<br>制約: 専門用語保持 / 1発話1出力<br>切替: ja / easy-ja / en</div>
+            </div>
+            <div class="prompt-snippet">
+              <div class="snippet-title">QA（source-only）</div>
+              <div class="snippet-body">Use only lecture sources.<br>`chunk_id` を必ず引用。<br>根拠不足は回答拒否。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-title">5. 結果・再現性</div>
+
+          <table class="results-table">
+            <tr>
+              <th style="width:34%;">指標</th>
+              <th style="width:19%;">実測</th>
+              <th style="width:19%;">目標</th>
+              <th style="width:28%;">判定</th>
+            </tr>
+            <tr>
+              <td>字幕変換遅延（ja→en）</td>
+              <td>0.76s</td>
+              <td>&lt;3s</td>
+              <td class="judgement-ok">達成</td>
+            </tr>
+            <tr>
+              <td>字幕変換遅延（ja→easy-ja）</td>
+              <td>0.99s</td>
+              <td>&lt;3s</td>
+              <td class="judgement-ok">達成</td>
+            </tr>
+            <tr>
+              <td>字幕変換品質</td>
+              <td>5/5</td>
+              <td>5/5</td>
+              <td class="judgement-ok">達成</td>
+            </tr>
+            <tr>
+              <td>QA E2E遅延</td>
+              <td>9.18s</td>
+              <td>&lt;5s</td>
+              <td class="judgement-ng">未達</td>
+            </tr>
+            <tr>
+              <td>ASR補正遅延</td>
+              <td>6.41s</td>
+              <td>要短縮</td>
+              <td class="judgement-warn">要改善</td>
+            </tr>
+          </table>
+
+          <div class="measure-line">測定: 字幕 n=3文、QA n=5問、ASR補正 n=5文。p50/p95は未計測。測定条件は performance-evaluation.md 参照。</div>
+
+          <div class="repro-box">
+            <div class="subheading">再現性</div>
+            <ul class="body-list">
+              <li>環境: ローカル + `.venv` + `./scripts/dev-server.sh start all`</li>
+              <li>モデル/サービス: gpt-5-nano（字幕運用記録 gpt-4.1-nano）、Azure AI Speech / Vision / Search、LLM as a Judge</li>
+              <li>評価手順: docs/performance-evaluation.md、仕様基準: docs/SPEC.md</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="section-title">6. 分析・次アクション</div>
+        <div class="analysis-grid">
+          <div class="analysis-block">
+            <div class="subheading">字幕が目標達成した理由</div>
+            <ul class="body-list">
+              <li>字幕変換は単機能APIで計測し、処理経路を短く保てた</li>
+              <li>3文×2モードで反復計測し、0.76s/0.99sを確認</li>
+            </ul>
+          </div>
+          <div class="analysis-block">
+            <div class="subheading">QAが未達の理由</div>
+            <ul class="body-list">
+              <li>検索→回答→Judge検証が直列でE2E遅延が積算</li>
+              <li>現環境で回答生成タイムアウト→fallbackが発生</li>
+              <li>検索/生成/Judgeの内訳計測は今後</li>
+            </ul>
+          </div>
+          <div class="analysis-block">
+            <div class="subheading">次の3アクション</div>
+            <ul class="body-list">
+              <li>1) QA内訳計測を実装し、遅延支配点を確定</li>
+              <li>2) 回答生成と検証の時間予算・再試行を見直す</li>
+              <li>3) ASR補正閾値とCER評価手順を改善</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="card demo">
+      <div class="demo-title">Demo links</div>
+      <div class="demo-grid">
+        <div class="qr-card">
+          <div class="qr-img"><img src="assets/images/qr-demo-video.png" alt="デモ動画QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">デモ動画 準備中</div>
+          <div class="qr-sub">URL確定後差し替え</div>
+          <div class="staff-note">当日案内文: 動画は準備中です。右のアプリとGitHubを先にご案内します。</div>
+        </div>
+
+        <div class="qr-card">
+          <div class="qr-img"><img src="assets/images/qr-app-url.png" alt="アプリQR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">アプリ 実機デモ</div>
+          <div class="qr-url">https://proud-sand-00bb37700.1.azurestaticapps.net/</div>
+        </div>
+
+        <div class="qr-card">
+          <div class="qr-img"><img src="assets/images/qr-github.png" alt="GitHub QR" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;color:#ef4444;font-size:20pt;line-height:1.25;text-align:center;&quot;>QR未配置</div>';"></div>
+          <div class="qr-label">GitHub 実装と評価手順</div>
+          <div class="qr-url">https://github.com/arugo11/sit-copilot</div>
         </div>
       </div>
-    </div>
+    </section>
 
+    <div class="footer">AI Innovators Cup @ Shibaura Institute of Technology</div>
   </div>
-
-  <!-- ===== FOOTER ===== -->
-  <div class="footer">AI Innovators Cup @ 芝浦工業大学 2026</div>
-
-</div>
-
 </body>
 </html>
