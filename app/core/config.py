@@ -11,7 +11,7 @@ class WeaveSettings(BaseSettings):
     """WandB Weave configuration."""
 
     # Basic settings
-    enabled: bool = Field(default=True, description="Enable Weave tracking (demo mode)")
+    enabled: bool = Field(default=False, description="Enable Weave tracking (demo mode)")
     project: str = Field(default="sit-copilot-demo")
     entity: str = Field(default="")
     mode: Literal["local", "cloud"] = Field(default="local")
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
         ge=0.0,
         le=5.0,
     )
+    lecture_live_asr_review_enabled: bool = False
+    lecture_live_translation_enabled: bool = False
+    lecture_live_summary_enabled: bool = False
+    lecture_live_keyterms_enabled: bool = False
+    lecture_qa_enabled: bool = False
+    lecture_idle_autostop_seconds: int = Field(default=120, ge=30, le=600)
     azure_openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(

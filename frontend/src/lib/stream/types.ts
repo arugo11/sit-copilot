@@ -1,4 +1,5 @@
 export type ConnectionState =
+  | 'idle'
   | 'connecting'
   | 'live'
   | 'reconnecting'
@@ -7,6 +8,7 @@ export type ConnectionState =
 
 export type TranscriptDensity = 'comfortable' | 'compact'
 export type LeftPanelMode = 'slides' | 'board' | 'split'
+export type LiveLifecycleState = 'idle' | 'running' | 'stopping' | 'ended'
 
 export interface TranscriptLine {
   id: string
@@ -94,6 +96,7 @@ export interface StreamTransport {
 
 export interface LiveUiState {
   connection: ConnectionState
+  liveState: LiveLifecycleState
   transcriptLagMs: number
   translationLagMs: number
   sourceLagMs: number

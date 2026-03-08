@@ -42,12 +42,17 @@ class ObservedLectureSummaryService:
         self,
         session_id: str,
         user_id: str,
+        force_rebuild: bool = False,
     ) -> LectureSummaryLatestResponse:
         """Get latest summary with observation tracking."""
         start_time = perf_counter()
 
         # Call inner service
-        result = await self._inner.get_latest_summary(session_id, user_id)
+        result = await self._inner.get_latest_summary(
+            session_id,
+            user_id,
+            force_rebuild=force_rebuild,
+        )
 
         latency_ms = int((perf_counter() - start_time) * 1000)
 
@@ -63,6 +68,7 @@ class ObservedLectureSummaryService:
                 "window_start_ms": result.window_start_ms,
                 "window_end_ms": result.window_end_ms,
                 "status": result.status,
+                "force_rebuild": force_rebuild,
                 "key_terms_count": len(result.key_terms),
                 "evidence_count": len(result.evidence),
             },

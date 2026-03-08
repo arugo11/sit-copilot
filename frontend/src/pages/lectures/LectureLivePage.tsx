@@ -31,6 +31,7 @@ import {
   getApiErrorMessage,
   lectureQaApi,
 } from '@/lib/api/client'
+import { LIVE_FEATURE_FLAGS } from '@/lib/featureFlags'
 import type { QaAnswerChunk } from '@/lib/stream/types'
 import {
   mapSummaryKeyTermsToAssistTerms,
@@ -38,6 +39,7 @@ import {
 
 const ERROR_TOAST_THROTTLE_MS = 5000
 const QA_INDEX_REFRESH_INTERVAL_MS = 30000
+const IDLE_AUTOSTOP_MS = LIVE_FEATURE_FLAGS.idleAutostopSeconds * 1000
 
 type SubtitleTransformResult = {
   text: string
@@ -149,19 +151,18 @@ export function LectureLivePage() {
   const [isQaSubmitting, setIsQaSubmitting] = useState(false)
 
   const connection = useLiveSessionStore((state) => state.connection)
+  const liveState = useLiveSessionStore((state) => state.liveState)
+  const paidFeatureVisibility = useLiveSessionStore(
+    (state) => state.paidFeatureVisibility
+  )
   const transcriptLagMs = useLiveSessionStore((state) => state.transcriptLagMs)
   const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
   const setConnection = useLiveSessionStore((state) => state.setConnection)
+  const setLiveState = useLiveSessionStore((state) => state.setLiveState)
   const setSessionId = useLiveSessionStore((state) => state.setSessionId)
   const applyTranscriptPartial = useLiveSessionStore((state) => state.applyTranscriptPartial)
   const applyTranscriptFinal = useLiveSessionStore((state) => state.applyTranscriptFinal)
-  const replaceTranscriptLineText = useLiveSessionStore(
-    (state) => state.replaceTranscriptLineText
-  )
-  const setTranscriptCorrectionStatus = useLiveSessionStore(
-    (state) => state.setTranscriptCorrectionStatus
-  )
   const applyTranslationFinal = useLiveSessionStore((state) => state.applyTranslationFinal)
   const pushSourceFrame = useLiveSessionStore((state) => state.pushSourceFrame)
   const pushSourceOcr = useLiveSessionStore((state) => state.pushSourceOcr)
@@ -179,7 +180,6 @@ export function LectureLivePage() {
   const failAnswer = useReviewQaStore((state) => state.failAnswer)
   const retryAnswer = useReviewQaStore((state) => state.retryAnswer)
   const resetReviewQa = useReviewQaStore((state) => state.reset)
-  const autoStartedSessionIdRef = useRef<string | null>(null)
   const previousSessionIdRef = useRef<string | null>(null)
   const successfulTurnCountRef = useRef(0)
   const lastQaIndexBuildAtRef = useRef(0)
@@ -188,6 +188,23 @@ export function LectureLivePage() {
   const lastReconnectToastAtRef = useRef(0)
   const lastErrorToastAtRef = useRef(0)
   const lastTranslationFallbackToastAtRef = useRef(0)
+  const didFinalizeSessionRef = useRef(false)
+  const lastInteractionAtRef = useRef(Date.now())
+  const lastSubtitleAtRef = useRef(Date.now())
+  const liveStateRef = useRef(liveState)
+  const sessionIdRef = useRef(sessionId)
+
+  const markInteraction = useCallback(() => {
+    lastInteractionAtRef.current = Date.now()
+  }, [])
+
+  useEffect(() => {
+    liveStateRef.current = liveState
+  }, [liveState])
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
 
   const notifyTranslationFallback = useCallback(
     (mode: 'easy-ja' | 'en', reason: string | null) => {
@@ -227,6 +244,21 @@ export function LectureLivePage() {
           text: normalizedText,
           status: 'passthrough',
           fallbackReason: null,
+        }
+      }
+      if (
+        !paidFeatureVisibility.translation ||
+        liveState !== 'running' ||
+        document.visibilityState !== 'visible'
+      ) {
+        return {
+          text: normalizedText,
+          status: 'fallback',
+          fallbackReason: !paidFeatureVisibility.translation
+            ? 'feature_disabled'
+            : document.visibilityState !== 'visible'
+              ? 'page_hidden'
+              : 'session_inactive',
         }
       }
 
@@ -276,10 +308,13 @@ export function LectureLivePage() {
         }
       }
     },
-    [sessionId]
+    [liveState, paidFeatureVisibility.translation, sessionId]
   )
 
   const refreshQaIndexIfNeeded = useCallback(async () => {
+    if (!paidFeatureVisibility.qa || liveState !== 'running') {
+      return
+    }
     const now = Date.now()
     const elapsed = now - lastQaIndexBuildAtRef.current
     if (elapsed < QA_INDEX_REFRESH_INTERVAL_MS) {
@@ -307,7 +342,7 @@ export function LectureLivePage() {
       }
       throw error
     }
-  }, [sessionId, showToast, t])
+  }, [liveState, paidFeatureVisibility.qa, sessionId, showToast, t])
 
   const executeMiniQuestion = useCallback(
     async (
@@ -315,7 +350,12 @@ export function LectureLivePage() {
       options: { existingAnswerId?: string } = {}
     ) => {
       const normalizedQuestion = rawQuestion.trim()
-      if (!normalizedQuestion || isQaSubmitting) {
+      if (
+        !normalizedQuestion ||
+        isQaSubmitting ||
+        !paidFeatureVisibility.qa ||
+        liveState !== 'running'
+      ) {
         return
       }
 
@@ -419,14 +459,17 @@ export function LectureLivePage() {
       transcriptLines,
       uiLocale,
       selectedLanguage,
+      paidFeatureVisibility.qa,
+      liveState,
     ]
   )
 
   const handleMiniQuestion = useCallback(
     (question: string) => {
+      markInteraction()
       void executeMiniQuestion(question)
     },
-    [executeMiniQuestion]
+    [executeMiniQuestion, markInteraction]
   )
 
   const handleQaRetry = useCallback(
@@ -438,9 +481,10 @@ export function LectureLivePage() {
       if (!turn) {
         return
       }
+      markInteraction()
       void executeMiniQuestion(turn.question, { existingAnswerId: answerId })
     },
-    [executeMiniQuestion, isQaSubmitting, qaTurns]
+    [executeMiniQuestion, isQaSubmitting, markInteraction, qaTurns]
   )
 
   const handleQaRegenerate = useCallback(
@@ -448,25 +492,32 @@ export function LectureLivePage() {
       if (isQaSubmitting) {
         return
       }
+      markInteraction()
       void executeMiniQuestion(question)
     },
-    [executeMiniQuestion, isQaSubmitting]
+    [executeMiniQuestion, isQaSubmitting, markInteraction]
   )
 
   const handleQaCitationSelect = useCallback(
     (citationId: string) => {
+      markInteraction()
       showToast({
         variant: 'info',
         title: t('live.messages.citationInfoTitle'),
         message: t('live.messages.citationInfoMessage', { citationId }),
       })
     },
-    [showToast, t]
+    [markInteraction, showToast, t]
   )
 
   const handleSpeechResult = useCallback(
     async (transcript: string, isFinal: boolean) => {
-      if (!isFinal || !transcript.trim()) {
+      if (
+        !isFinal ||
+        !transcript.trim() ||
+        liveState !== 'running' ||
+        didFinalizeSessionRef.current
+      ) {
         return
       }
 
@@ -475,6 +526,7 @@ export function LectureLivePage() {
       const now = Date.now()
       const startMs = now
       const endMs = now + 2000 // 2秒間と仮定
+      lastSubtitleAtRef.current = now
 
       // バックエンドに送信（SSE経由で表示）
       try {
@@ -503,57 +555,11 @@ export function LectureLivePage() {
           },
         })
 
-        let transcriptForAssist = rawTranscript
-        setTranscriptCorrectionStatus(ingested.event_id, 'pending')
-        const correctionStartedAt = performance.now()
-        console.debug('[subtitle-correction] start', {
-          sessionId,
-          eventId: ingested.event_id,
-        })
-
-        try {
-          const pendingMinDuration = new Promise<void>((resolve) => {
-            window.setTimeout(() => resolve(), 300)
-          })
-          const audited = await demoApi.auditAndApplySpeechChunk({
-            session_id: sessionId,
-            event_id: ingested.event_id,
-          })
-          await pendingMinDuration
-          console.debug('[subtitle-correction] success', {
-            sessionId,
-            eventId: ingested.event_id,
-            elapsedMs: Math.round(performance.now() - correctionStartedAt),
-            correctedText: audited.corrected_text,
-            reviewStatus: audited.review_status,
-            wasCorrected: audited.was_corrected,
-          })
-          if (audited.review_status === 'reviewed') {
-            setTranscriptCorrectionStatus(ingested.event_id, 'reviewed')
-          } else {
-            setTranscriptCorrectionStatus(ingested.event_id, 'review_failed')
-          }
-          if (audited.was_corrected && audited.corrected_text.trim()) {
-            transcriptForAssist = audited.corrected_text.trim()
-            replaceTranscriptLineText(ingested.event_id, transcriptForAssist)
-          }
-        } catch (auditError) {
-          console.warn('[subtitle-correction] audit-apply failed', {
-            sessionId,
-            eventId: ingested.event_id,
-            elapsedMs: Math.round(performance.now() - correctionStartedAt),
-            error: auditError,
-          })
-
-          setTranscriptCorrectionStatus(ingested.event_id, 'review_failed')
-          console.warn('Post-display subtitle audit failed:', auditError)
-        }
-
-        // やさしい日本語・英語は、補正後テキスト（存在する場合）を翻訳元にする
+        // やさしい日本語・英語は原文を翻訳元にする。
         const currentMode = useLiveSessionStore.getState().selectedLanguage
-        if (currentMode !== 'ja') {
+        if (paidFeatureVisibility.translation && currentMode !== 'ja') {
           const transformed = await transformSubtitleForMode(
-            transcriptForAssist,
+            rawTranscript,
             currentMode
           )
           applyTranslationFinal(
@@ -569,12 +575,15 @@ export function LectureLivePage() {
         }
 
         // 専門用語を分析して用語サポートを更新（トグルONの場合のみ）
-        if (useLiveSessionStore.getState().keytermsEnabled) {
+        if (
+          paidFeatureVisibility.keyterms &&
+          useLiveSessionStore.getState().keytermsEnabled
+        ) {
           try {
             const langMode = useLiveSessionStore.getState().langMode
             const keytermsResult = await demoApi.analyzeKeyterms({
               session_id: sessionId,
-              transcript_text: transcriptForAssist,
+              transcript_text: rawTranscript,
               lang_mode: langMode,
             })
 
@@ -609,16 +618,17 @@ export function LectureLivePage() {
     },
     [
       sessionId,
+      liveState,
       applyTranscriptFinal,
       applyTranslationFinal,
-      replaceTranscriptLineText,
-      setTranscriptCorrectionStatus,
       showToast,
       appendAssistTerms,
       setTranslationFallbackActive,
       notifyTranslationFallback,
       t,
       transformSubtitleForMode,
+      paidFeatureVisibility.keyterms,
+      paidFeatureVisibility.translation,
     ]
   )
 
@@ -643,6 +653,116 @@ export function LectureLivePage() {
 
   const { isRecording, audioLevel, lastError, startRecording, stopRecording } =
     useMicrophoneInput()
+
+  const finalizeLiveSession = useCallback(
+    async ({
+      reason,
+      requestFinalize = true,
+      keepalive = false,
+      suppressErrorToast = false,
+    }: {
+      reason: string
+      requestFinalize?: boolean
+      keepalive?: boolean
+      suppressErrorToast?: boolean
+    }) => {
+      if (didFinalizeSessionRef.current) {
+        return
+      }
+
+      didFinalizeSessionRef.current = true
+      setLiveState('stopping')
+      setConnection('idle')
+      streamClient.disconnect()
+      stopListening()
+      stopRecording()
+
+      if (requestFinalize) {
+        try {
+          if (keepalive) {
+            demoApi.finalizeDemoSessionKeepalive(sessionId)
+          } else {
+            await demoApi.finalizeDemoSession(sessionId)
+          }
+        } catch (error) {
+          const status = error instanceof ApiError ? error.status : undefined
+          if (status !== 404 && status !== 409 && !suppressErrorToast) {
+            showToast({
+              variant: 'warning',
+              title: t('lectures.messages.sessionFinalizeFailed'),
+              message: getApiErrorMessage(
+                error,
+                t('lectures.messages.sessionFinalizeApiFailed')
+              ),
+            })
+          }
+        }
+      }
+
+      setLiveState('ended')
+      setConnection('idle')
+
+      if (reason === 'manual') {
+        showToast({
+          variant: 'success',
+          title: t('lectures.messages.sessionFinalized'),
+        })
+      }
+    },
+    [
+      sessionId,
+      setConnection,
+      setLiveState,
+      stopListening,
+      stopRecording,
+      showToast,
+      t,
+    ]
+  )
+
+  const startLiveCapture = useCallback(async () => {
+    if (liveState !== 'idle' || didFinalizeSessionRef.current) {
+      return
+    }
+
+    didFinalizeSessionRef.current = false
+    lastInteractionAtRef.current = Date.now()
+    lastSubtitleAtRef.current = Date.now()
+    setSessionId(sessionId)
+    setConnection('connecting')
+    setLiveState('running')
+    await startRecording()
+
+    if (!useLiveSessionStore.getState().paidFeatureVisibility.translation) {
+      setTranslationFallbackActive(false)
+    }
+
+    if (!useLiveSessionStore.getState().summaryEnabled) {
+      useLiveSessionStore.getState().setAssistSummary({
+        timestampMs: Date.now(),
+        points: [],
+      })
+    }
+
+    streamClient.setTransport(sseStreamTransport)
+    streamClient.connect(sessionId).catch((error) => {
+      showToast({
+        variant: 'warning',
+        title: t('live.messages.sseConnectFailedTitle'),
+        message: `${getApiErrorMessage(error, t('live.messages.sseConnectFailedMessage'))} ${t('live.messages.autoReconnectMessage')}`,
+      })
+    })
+  }, [
+    liveState,
+    sessionId,
+    setConnection,
+    setLiveState,
+    setSessionId,
+    setTranslationFallbackActive,
+    showToast,
+    startRecording,
+    t,
+  ])
 
   // 音声認識の開始/停止を録音状態に同期
   useEffect(() => {
@@ -685,30 +805,25 @@ export function LectureLivePage() {
   useEffect(() => {
     const previousSessionId = previousSessionIdRef.current
     if (previousSessionId && previousSessionId !== sessionId) {
+      if (!didFinalizeSessionRef.current && liveState === 'running') {
+        demoApi.finalizeDemoSessionKeepalive(previousSessionId)
+      }
+      streamClient.disconnect()
+      stopListening()
       stopRecording()
       resetLiveData()
       setSessionId(null)
+      didFinalizeSessionRef.current = false
     }
     previousSessionIdRef.current = sessionId
-  }, [resetLiveData, sessionId, setSessionId, stopRecording])
+  }, [liveState, resetLiveData, sessionId, setSessionId, stopListening, stopRecording])
 
   useEffect(() => {
-    if (isRecording || autoStartedSessionIdRef.current === sessionId) {
-      return
-    }
-    autoStartedSessionIdRef.current = sessionId
-    setSessionId(sessionId)
-    void startRecording()
-  }, [isRecording, startRecording, sessionId, setSessionId])
-
-  useEffect(() => {
+    streamClient.setTransport(sseStreamTransport)
     const subscriptions = [
       streamClient.subscribe('session.status', (event) => {
         setConnection(event.payload.connection)
-        announceConnection(
-          event.payload.connection === 'degraded' ? 'reconnecting' : event.payload.connection === 'error' ? 'error' : event.payload.connection,
-          uiLocale
-        )
+        announceConnection(event.payload.connection, uiLocale)
 
         const previous = previousConnectionRef.current
         const current = event.payload.connection
@@ -729,13 +844,28 @@ export function LectureLivePage() {
             })
           }
         }
+        if (
+          current === 'degraded' &&
+          useLiveSessionStore.getState().liveState === 'running'
+        ) {
+          void finalizeLiveSession({
+            reason: 'server_finalized',
+            requestFinalize: false,
+            suppressErrorToast: true,
+          })
+        }
         previousConnectionRef.current = current
       }),
       streamClient.subscribe('transcript.partial', (event) => applyTranscriptPartial(event.payload)),
       streamClient.subscribe('transcript.final', (event) => {
+        lastSubtitleAtRef.current = Date.now()
         applyTranscriptFinal(event.payload)
         const currentMode = useLiveSessionStore.getState().selectedLanguage
-        if (currentMode !== 'ja') {
+        if (
+          paidFeatureVisibility.translation &&
+          currentMode !== 'ja' &&
+          document.visibilityState === 'visible'
+        ) {
           // Only translate if this line doesn't already have a translation
           // for the current display mode. SSE re-delivers events on reconnect
           // and the redundant transform API calls can return fallback (Japanese)
@@ -771,7 +901,11 @@ export function LectureLivePage() {
       // 旧経路の translation.final が届いても字幕を上書きしない。
       streamClient.subscribe('source.frame', (event) => pushSourceFrame(event.payload)),
       streamClient.subscribe('source.ocr', (event) => pushSourceOcr(event.payload)),
-      streamClient.subscribe('assist.term', (event) => appendAssistTerms(event.payload)),
+      streamClient.subscribe('assist.term', (event) => {
+        if (paidFeatureVisibility.keyterms) {
+          appendAssistTerms(event.payload)
+        }
+      }),
       streamClient.subscribe('error', (event) => {
         showToast({
           variant: event.payload.recoverable ? 'warning' : 'danger',
@@ -781,19 +915,8 @@ export function LectureLivePage() {
       }),
     ]
 
-    streamClient.setTransport(sseStreamTransport)
-
-    streamClient.connect(sessionId).catch((error) => {
-      showToast({
-        variant: 'warning',
-        title: t('live.messages.sseConnectFailedTitle'),
-        message: `${getApiErrorMessage(error, t('live.messages.sseConnectFailedMessage'))} ${t('live.messages.autoReconnectMessage')}`,
-      })
-    })
-
     return () => {
       subscriptions.forEach((unsubscribe) => unsubscribe())
-      streamClient.disconnect()
     }
   }, [
     announceConnection,
@@ -802,8 +925,10 @@ export function LectureLivePage() {
     applyTranslationFinal,
     pushSourceFrame,
     pushSourceOcr,
-    sessionId,
     appendAssistTerms,
+    finalizeLiveSession,
+    paidFeatureVisibility.keyterms,
+    paidFeatureVisibility.translation,
     setConnection,
     setTranslationFallbackActive,
     showToast,
@@ -814,14 +939,84 @@ export function LectureLivePage() {
   ])
 
   useEffect(() => {
+    if (liveState !== 'running') {
+      return
+    }
+
+    const recordInteraction = () => {
+      markInteraction()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        void finalizeLiveSession({
+          reason: 'visibility_hidden',
+          suppressErrorToast: true,
+        })
+        return
+      }
+      recordInteraction()
+    }
+
+    const handleKeepaliveFinalize = () => {
+      void finalizeLiveSession({
+        reason: 'pagehide',
+        keepalive: true,
+        suppressErrorToast: true,
+      })
+    }
+
+    const checkIdleTimeout = () => {
+      const now = Date.now()
+      if (now - lastInteractionAtRef.current >= IDLE_AUTOSTOP_MS) {
+        void finalizeLiveSession({
+          reason: 'inactive_user',
+          suppressErrorToast: true,
+        })
+        return
+      }
+      if (now - lastSubtitleAtRef.current >= IDLE_AUTOSTOP_MS) {
+        void finalizeLiveSession({
+          reason: 'inactive_subtitle',
+          suppressErrorToast: true,
+        })
+      }
+    }
+
+    window.addEventListener('pointerdown', recordInteraction, { passive: true })
+    window.addEventListener('keydown', recordInteraction)
+    window.addEventListener('touchstart', recordInteraction, { passive: true })
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', handleKeepaliveFinalize)
+    window.addEventListener('beforeunload', handleKeepaliveFinalize)
+
+    const timer = window.setInterval(checkIdleTimeout, 5000)
+
     return () => {
+      window.removeEventListener('pointerdown', recordInteraction)
+      window.removeEventListener('keydown', recordInteraction)
+      window.removeEventListener('touchstart', recordInteraction)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', handleKeepaliveFinalize)
+      window.removeEventListener('beforeunload', handleKeepaliveFinalize)
+      window.clearInterval(timer)
+    }
+  }, [finalizeLiveSession, liveState, markInteraction])
+
+  useEffect(() => {
+    return () => {
+      if (!didFinalizeSessionRef.current && liveStateRef.current === 'running') {
+        demoApi.finalizeDemoSessionKeepalive(sessionIdRef.current)
+      }
+      streamClient.disconnect()
+      stopListening()
       stopRecording()
       resetLiveData()
       setSessionId(null)
-      autoStartedSessionIdRef.current = null
       previousSessionIdRef.current = null
+      didFinalizeSessionRef.current = false
     }
-  }, [resetLiveData, setSessionId, stopRecording])
+  }, [resetLiveData, setSessionId, stopListening, stopRecording])
 
   useEffect(() => {
     if (!lastError) {
@@ -831,14 +1026,19 @@ export function LectureLivePage() {
   }, [lastError, showToast, t])
 
   useEffect(() => {
-    if (selectedLanguage !== 'ja') {
+    if (selectedLanguage !== 'ja' && paidFeatureVisibility.translation) {
       return
     }
     setTranslationFallbackActive(false)
-  }, [selectedLanguage, setTranslationFallbackActive])
+  }, [paidFeatureVisibility.translation, selectedLanguage, setTranslationFallbackActive])
 
   useEffect(() => {
-    if (selectedLanguage === 'ja') {
+    if (
+      selectedLanguage === 'ja' ||
+      !paidFeatureVisibility.translation ||
+      liveState !== 'running' ||
+      document.visibilityState !== 'visible'
+    ) {
       return
     }
 
@@ -875,13 +1075,16 @@ export function LectureLivePage() {
     })
   }, [
     applyTranslationFinal,
+    liveState,
     notifyTranslationFallback,
+    paidFeatureVisibility.translation,
     selectedLanguage,
     setTranslationFallbackActive,
     transformSubtitleForMode,
   ])
 
   const CONNECTION_LABELS: Record<string, string> = {
+    idle: t('live.connection.idle'),
     connecting: t('live.connection.connecting'),
     live: t('live.connection.live'),
     reconnecting: t('live.connection.reconnecting'),
@@ -890,12 +1093,42 @@ export function LectureLivePage() {
   }
 
   const CONNECTION_BADGE: Record<string, string> = {
+    idle: 'badge-muted',
     connecting: 'badge-warning',
     live: 'badge-live',
     reconnecting: 'badge-warning',
     degraded: 'badge-warning',
     error: 'badge-danger',
   }
+
+  const connectionBadgeClass =
+    liveState === 'running'
+      ? CONNECTION_BADGE[connection] ?? 'badge-muted'
+      : liveState === 'stopping'
+        ? 'badge-warning'
+        : liveState === 'ended'
+          ? 'badge-default'
+          : CONNECTION_BADGE.idle
+  const connectionLabel =
+    liveState === 'running'
+      ? CONNECTION_LABELS[connection] ?? connection
+      : liveState === 'stopping'
+        ? t('lectures.actions.finalizing')
+        : liveState === 'ended'
+          ? t('lectures.status.ended')
+          : CONNECTION_LABELS.idle
+  const primaryButtonLabel =
+    liveState === 'running'
+      ? t('lectures.actions.finalize')
+      : liveState === 'stopping'
+        ? t('lectures.actions.finalizing')
+        : liveState === 'ended'
+          ? t('lectures.status.ended')
+          : t('live.stream.startRecording')
+  const primaryButtonClass =
+    liveState === 'running' ? 'btn-secondary' : 'btn-primary'
+  const primaryButtonDisabled =
+    liveState === 'stopping' || liveState === 'ended'
 
   const audioBarCount = 5
   const filledBars = Math.round(audioLevel * audioBarCount)
@@ -908,10 +1141,10 @@ export function LectureLivePage() {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold">{t('live.stream.title')}</h1>
             <span
-              className={`badge ${CONNECTION_BADGE[connection] ?? 'badge-muted'}`}
+              className={`badge ${connectionBadgeClass}`}
               title={t('live.aria.sessionIdTitle', { sessionId })}
             >
-              {CONNECTION_LABELS[connection] ?? connection}
+              {connectionLabel}
             </span>
             <button
               type="button"
@@ -932,10 +1165,20 @@ export function LectureLivePage() {
           <div className="flex gap-2 items-center">
             <button
               type="button"
-              className={`btn ${isRecording ? 'btn-secondary' : 'btn-primary'}`}
-              onClick={() => (isRecording ? stopRecording() : startRecording())}
+              className={`btn ${primaryButtonClass}`}
+              onClick={() => {
+                markInteraction()
+                if (liveState === 'running') {
+                  void finalizeLiveSession({ reason: 'manual' })
+                  return
+                }
+                if (liveState === 'idle') {
+                  void startLiveCapture()
+                }
+              }}
+              disabled={primaryButtonDisabled}
             >
-              {isRecording ? t('live.stream.stopRecording') : t('live.stream.startRecording')}
+              {primaryButtonLabel}
             </button>
             {/* Audio level bars */}
             <div

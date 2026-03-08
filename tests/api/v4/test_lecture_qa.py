@@ -219,6 +219,97 @@ async def test_post_qa_index_build_returns_success(
 
 
 @pytest.mark.asyncio
+async def test_post_qa_ask_returns_feature_disabled_when_env_flag_off(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA ask should fail closed when the env kill switch is off."""
+    monkeypatch.setattr(settings, "lecture_qa_enabled", False)
+
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session.add(
+            LectureSession(
+                id="test_session_qa_disabled_ask",
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=False,
+            )
+        )
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/ask",
+        json={
+            "session_id": "test_session_qa_disabled_ask",
+            "question": "機械学習とは何ですか？",
+            "lang_mode": "ja",
+            "retrieval_mode": "source-only",
+            "top_k": 5,
+            "context_window": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["fallback"] == "feature_disabled"
+    assert body["sources"] == []
+
+
+@pytest.mark.asyncio
+async def test_post_qa_followup_returns_feature_disabled_when_env_flag_off(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA follow-up should fail closed when the env kill switch is off."""
+    monkeypatch.setattr(settings, "lecture_qa_enabled", False)
+
+    async with session_factory() as session:
+        from datetime import UTC, datetime
+
+        from app.models.lecture_session import LectureSession
+
+        session.add(
+            LectureSession(
+                id="test_session_qa_disabled_followup",
+                user_id="test_user",
+                course_name="Test Course",
+                status="active",
+                started_at=datetime.now(UTC),
+                qa_index_built=False,
+            )
+        )
+        await session.commit()
+
+    response = await async_client.post(
+        "/api/v4/lecture/qa/followup",
+        json={
+            "session_id": "test_session_qa_disabled_followup",
+            "question": "それはなぜですか？",
+            "lang_mode": "ja",
+            "retrieval_mode": "source-only",
+            "top_k": 5,
+            "context_window": 1,
+            "history_turns": 3,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["fallback"] == "feature_disabled"
+    assert body["resolved_query"] == "それはなぜですか？"
+
+
+@pytest.mark.asyncio
 async def test_post_qa_ask_with_index_returns_answer(
     async_client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],

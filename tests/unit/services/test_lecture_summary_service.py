@@ -165,6 +165,64 @@ async def test_get_latest_summary_returns_no_data_when_no_events(
 
 
 @pytest.mark.asyncio
+async def test_get_latest_summary_reuses_cached_window_until_force_rebuild(
+    db_session: AsyncSession,
+    mock_summary_generator: MockLectureSummaryGeneratorService,
+) -> None:
+    """Cached summary windows should prevent duplicate generation by default."""
+    session = LectureSession(
+        id="lec_summary_cache_001",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="active",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=1000,
+            end_ms=5000,
+            text="最初の説明です。",
+            confidence=0.95,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    await db_session.flush()
+
+    service = SqlAlchemyLectureSummaryService(
+        db_session, summary_generator=mock_summary_generator
+    )
+
+    first = await service.get_latest_summary(
+        session_id=session.id,
+        user_id="demo_user",
+    )
+    second = await service.get_latest_summary(
+        session_id=session.id,
+        user_id="demo_user",
+    )
+    rebuilt = await service.get_latest_summary(
+        session_id=session.id,
+        user_id="demo_user",
+        force_rebuild=True,
+    )
+
+    assert first.status == "ok"
+    assert second.status == "ok"
+    assert rebuilt.status == "ok"
+    assert mock_summary_generator.call_count == 2
+    assert first.summary == second.summary == rebuilt.summary
+
+
+@pytest.mark.asyncio
 async def test_rebuild_windows_creates_window_per_30_seconds(
     db_session: AsyncSession,
     mock_summary_generator: MockLectureSummaryGeneratorService,

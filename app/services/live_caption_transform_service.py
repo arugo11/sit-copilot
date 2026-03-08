@@ -19,6 +19,7 @@ __all__ = [
     "CaptionTransformStatus",
     "CaptionTransformService",
     "AzureOpenAILiveCaptionTransformService",
+    "UnavailableLiveCaptionTransformService",
 ]
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,29 @@ class CaptionTransformService(Protocol):
     ) -> CaptionTransformResult:
         """Transform subtitle text according to target language mode."""
         ...
+
+
+class UnavailableLiveCaptionTransformService:
+    """Fail-closed subtitle transform service used when the feature is disabled."""
+
+    def __init__(self, *, reason: str) -> None:
+        self._reason = reason
+
+    async def transform(
+        self, text: str, target_lang_mode: str
+    ) -> CaptionTransformResult:
+        normalized_text = text.strip()
+        if target_lang_mode == "ja":
+            return CaptionTransformResult(
+                text=normalized_text,
+                status="passthrough",
+                fallback_reason=None,
+            )
+        return CaptionTransformResult(
+            text=normalized_text,
+            status="fallback",
+            fallback_reason=self._reason,
+        )
 
 
 @dataclass(frozen=True, slots=True)
