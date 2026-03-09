@@ -241,6 +241,60 @@ async def test_audit_and_apply_speech_chunk_updates_display_text(
 
 
 @pytest.mark.asyncio
+async def test_audit_and_apply_speech_chunk_returns_noop_when_feature_disabled(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled ASR review should not rewrite persisted subtitle text."""
+    monkeypatch.setattr(settings, "lecture_live_asr_review_enabled", False)
+
+    service = SqlAlchemyLectureLiveService(
+        db_session,
+        user_id="demo_user",
+        correction_service=FakeJapaneseCorrectionService(),
+        judge_service=FakeApproveAllJudgeService(),
+    )
+    start_response = await service.start_session(
+        LectureSessionStartRequest(
+            course_name="統計学基礎",
+            course_id=None,
+            lang_mode="ja",
+            camera_enabled=True,
+            slide_roi=[100, 80, 900, 520],
+            board_roi=[80, 560, 920, 980],
+            consent_acknowledged=True,
+        )
+    )
+    ingest_response = await service.ingest_speech_chunk(
+        SpeechChunkIngestRequest(
+            session_id=start_response.session_id,
+            start_ms=15000,
+            end_ms=20000,
+            text="機械学習の外れ値は散布図で確認します。",
+            confidence=0.93,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+
+    audited = await service.audit_and_apply_speech_chunk(
+        session_id=start_response.session_id,
+        event_id=ingest_response.event_id,
+    )
+
+    assert audited.updated is False
+    assert audited.reviewed is False
+    assert audited.was_corrected is False
+    assert audited.failure_reason == "feature_disabled"
+
+    result = await db_session.execute(
+        select(SpeechEvent).where(SpeechEvent.id == ingest_response.event_id)
+    )
+    event = result.scalar_one()
+    assert event.text == "機械学習の外れ値は散布図で確認します。"
+
+
+@pytest.mark.asyncio
 async def test_audit_and_apply_speech_chunk_raises_not_found_for_unknown_event(
     db_session: AsyncSession,
 ) -> None:

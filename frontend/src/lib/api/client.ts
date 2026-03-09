@@ -342,6 +342,17 @@ function normalizeUserSettings(value: unknown): UserSettings {
   return normalized
 }
 
+function applyAuthHeaders(headers: Headers, authScope: AuthScope): void {
+  if (authScope === 'lecture') {
+    headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
+    headers.set('X-User-Id', DEMO_USER_ID)
+  }
+
+  if (authScope === 'procedure') {
+    headers.set('X-Procedure-Token', PROCEDURE_API_TOKEN)
+  }
+}
+
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.status === 0) {
@@ -376,15 +387,7 @@ class ApiClient {
 
     const headers = new Headers(fetchOptions.headers ?? {})
     headers.set('Content-Type', 'application/json')
-
-    if (authScope === 'lecture') {
-      headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
-      headers.set('X-User-Id', DEMO_USER_ID)
-    }
-
-    if (authScope === 'procedure') {
-      headers.set('X-Procedure-Token', PROCEDURE_API_TOKEN)
-    }
+    applyAuthHeaders(headers, authScope)
 
     const config: RequestInit = {
       ...fetchOptions,
@@ -508,6 +511,24 @@ export const demoApi = {
     )
   },
 
+  finalizeDemoSessionKeepalive(sessionId: string): void {
+    const headers = new Headers()
+    headers.set('Content-Type', 'application/json')
+    applyAuthHeaders(headers, 'lecture')
+    const endpoint = `${API_BASE_URL}/api/v4/lecture/session/finalize`
+    void fetch(endpoint || '/api/v4/lecture/session/finalize', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        session_id: sessionId,
+        build_qa_index: false,
+      }),
+      keepalive: true,
+    }).catch(() => {
+      // Unload keepalive is best-effort by design.
+    })
+  },
+
   async deleteDemoSession(sessionId: string): Promise<LectureSessionDeleteResponse> {
     return withSessionRetry(() =>
       apiClient.delete<LectureSessionDeleteResponse>(
@@ -543,9 +564,12 @@ export const demoApi = {
     )
   },
 
-  async getLatestSummary(sessionId: string): Promise<LectureSummaryLatestResponse> {
+  async getLatestSummary(
+    sessionId: string,
+    forceRebuild = false
+  ): Promise<LectureSummaryLatestResponse> {
     return apiClient.get<LectureSummaryLatestResponse>(
-      `/api/v4/lecture/summary/latest?session_id=${encodeURIComponent(sessionId)}`
+      `/api/v4/lecture/summary/latest?session_id=${encodeURIComponent(sessionId)}&force_rebuild=${forceRebuild ? 'true' : 'false'}`
     )
   },
 

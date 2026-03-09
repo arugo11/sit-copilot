@@ -52,6 +52,7 @@ class LectureSummaryService(Protocol):
         self,
         session_id: str,
         user_id: str,
+        force_rebuild: bool = False,
     ) -> LectureSummaryLatestResponse:
         """Build and return the latest summary window."""
         ...
@@ -80,6 +81,7 @@ class SqlAlchemyLectureSummaryService:
         self,
         session_id: str,
         user_id: str,
+        force_rebuild: bool = False,
     ) -> LectureSummaryLatestResponse:
         """Build and return the latest summary window for a session."""
         session = await self._get_session_with_ownership(session_id, user_id)
@@ -97,6 +99,14 @@ class SqlAlchemyLectureSummaryService:
             )
 
         window_end_ms = _to_window_end(max_event_ms)
+        if not force_rebuild:
+            existing_window = await self._get_summary_window(
+                session_id=session_id,
+                window_end_ms=window_end_ms,
+            )
+            if existing_window is not None:
+                return self._response_from_summary_window(existing_window)
+
         return await self._build_window(
             session_id=session_id,
             window_end_ms=window_end_ms,
@@ -120,6 +130,12 @@ class SqlAlchemyLectureSummaryService:
         for window_end_ms in range(
             WINDOW_SIZE_MS, last_window_end_ms + 1, WINDOW_SIZE_MS
         ):
+            existing_window = await self._get_summary_window(
+                session_id=session_id,
+                window_end_ms=window_end_ms,
+            )
+            if existing_window is not None:
+                continue
             await self._build_window(
                 session_id=session_id,
                 window_end_ms=window_end_ms,
@@ -350,6 +366,20 @@ class SqlAlchemyLectureSummaryService:
                 delay = WRITE_RETRY_BASE_DELAY_SECONDS * (2**attempt)
                 await asyncio.sleep(delay)
 
+    async def _get_summary_window(
+        self,
+        *,
+        session_id: str,
+        window_end_ms: int,
+    ) -> SummaryWindow | None:
+        result = await self._db.execute(
+            select(SummaryWindow).where(
+                SummaryWindow.session_id == session_id,
+                SummaryWindow.end_ms == window_end_ms,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def _count_summary_windows(self, session_id: str) -> int:
         result = await self._db.execute(
             select(func.count(SummaryWindow.id)).where(
@@ -358,6 +388,78 @@ class SqlAlchemyLectureSummaryService:
         )
         count = result.scalar_one()
         return int(count)
+
+    @staticmethod
+    def _response_from_summary_window(
+        summary_window: SummaryWindow,
+    ) -> LectureSummaryLatestResponse:
+        key_terms: list[LectureSummaryKeyTerm] = []
+        for raw_term in summary_window.key_terms_json or []:
+            if isinstance(raw_term, str):
+                normalized_term = raw_term.strip()
+                if not normalized_term:
+                    continue
+                key_terms.append(
+                    LectureSummaryKeyTerm(
+                        term=normalized_term,
+                        explanation="",
+                        translation="",
+                        evidence_tags=["speech"],
+                    )
+                )
+                continue
+            if not isinstance(raw_term, dict):
+                continue
+            term_value = raw_term.get("term", "")
+            if not isinstance(term_value, str) or not term_value.strip():
+                continue
+            evidence_tags_raw = raw_term.get("evidence_tags", ["speech"])
+            if (
+                not isinstance(evidence_tags_raw, list)
+                or not evidence_tags_raw
+                or any(
+                    tag not in EVIDENCE_TAG_ORDER
+                    for tag in evidence_tags_raw
+                    if isinstance(tag, str)
+                )
+            ):
+                evidence_tags: list[LectureEvidenceType] = ["speech"]
+            else:
+                evidence_tags = [
+                    tag for tag in evidence_tags_raw if isinstance(tag, str)
+                ][:MAX_KEY_TERM_EVIDENCE_TAGS]
+            key_terms.append(
+                LectureSummaryKeyTerm(
+                    term=term_value.strip(),
+                    explanation=str(raw_term.get("explanation", "")),
+                    translation=str(raw_term.get("translation", "")),
+                    evidence_tags=evidence_tags or ["speech"],
+                )
+            )
+
+        evidence: list[LectureSummaryEvidence] = []
+        for raw_ref in summary_window.evidence_event_ids_json or []:
+            if not isinstance(raw_ref, str) or ":" not in raw_ref:
+                continue
+            raw_type, ref_id = raw_ref.split(":", 1)
+            if raw_type not in EVIDENCE_TAG_ORDER or not ref_id:
+                continue
+            evidence.append(
+                LectureSummaryEvidence(
+                    type=raw_type,
+                    ref_id=ref_id,
+                )
+            )
+
+        return LectureSummaryLatestResponse(
+            session_id=summary_window.session_id,
+            window_start_ms=summary_window.start_ms,
+            window_end_ms=summary_window.end_ms,
+            summary=summary_window.summary_text,
+            key_terms=key_terms,
+            evidence=evidence,
+            status="ok" if evidence else "no_data",
+        )
 
     @staticmethod
     def _collect_term_evidence_tags(

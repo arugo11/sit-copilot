@@ -157,6 +157,7 @@ class SqlAlchemyLectureLiveService:
         if (
             isinstance(configured_correction_service, NoopJapaneseASRCorrectionService)
             and settings.azure_openai_enabled
+            and settings.lecture_live_asr_review_enabled
         ):
             self._correction_service = AzureOpenAIJapaneseASRCorrectionService(
                 api_key=settings.azure_openai_api_key,
@@ -172,6 +173,7 @@ class SqlAlchemyLectureLiveService:
         if (
             isinstance(configured_judge_service, NoopJapaneseASRHallucinationJudgeService)
             and settings.azure_openai_enabled
+            and settings.lecture_live_asr_review_enabled
         ):
             judge_model = (
                 settings.azure_openai_judge_model.strip()
@@ -279,6 +281,19 @@ class SqlAlchemyLectureLiveService:
             await self._get_active_session(session_id)
             event = await self._get_speech_event(session_id=session_id, event_id=event_id)
             source_text = (event.original_text or event.text).strip()
+            if not settings.lecture_live_asr_review_enabled:
+                return SpeechChunkAuditApplyResponse(
+                    session_id=session_id,
+                    event_id=event.id,
+                    original_text=event.original_text or source_text,
+                    corrected_text=event.text,
+                    updated=False,
+                    review_status="review_failed",
+                    reviewed=False,
+                    was_corrected=False,
+                    retry_count=0,
+                    failure_reason="feature_disabled",
+                )
             review_result = await self._subtitle_review_service.review(source_text)
             updated = review_result.was_corrected and review_result.corrected_text != event.text
             event.text = review_result.corrected_text

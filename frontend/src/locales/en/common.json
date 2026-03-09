@@ -169,6 +169,7 @@
   },
   "live": {
     "connection": {
+      "idle": "Idle",
       "connecting": "Connecting",
       "live": "Live",
       "reconnecting": "Reconnecting",

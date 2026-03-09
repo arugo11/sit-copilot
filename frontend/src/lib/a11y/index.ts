@@ -230,9 +230,16 @@ export function isScreenReaderOnly(element: HTMLElement): boolean {
 /**
  * Set up live region for connection state monitoring
  */
-export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error'
+export type ConnectionState =
+  | 'idle'
+  | 'connecting'
+  | 'live'
+  | 'reconnecting'
+  | 'degraded'
+  | 'error'
 
 const connectionStateMessages: Record<ConnectionState, { ja: string; en: string }> = {
+  idle: { ja: '待機中', en: 'Idle' },
   connecting: { ja: '接続中', en: 'Connecting' },
   live: { ja: '接続済み', en: 'Connected' },
   reconnecting: { ja: '再接続中', en: 'Reconnecting' },

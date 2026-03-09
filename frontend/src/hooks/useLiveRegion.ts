@@ -73,10 +73,11 @@ export function useConnectionAnnouncer() {
 
   const announceConnection = useCallback(
     (
-      state: 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error',
+      state: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error',
       locale: 'ja' | 'en' = 'ja'
     ) => {
       const messages: Record<typeof state, { ja: string; en: string }> = {
+        idle: { ja: '待機中', en: 'Idle' },
         connecting: { ja: '接続中', en: 'Connecting' },
         live: { ja: '接続済み', en: 'Connected' },
         reconnecting: { ja: '再接続中', en: 'Reconnecting' },

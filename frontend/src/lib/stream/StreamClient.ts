@@ -66,7 +66,7 @@ export class StreamClient {
   }
 
   private async connectWithTransport(propagateError = false): Promise<void> {
-    if (!this.sessionId || this.isConnecting) {
+    if (!this.sessionId || this.isConnecting || !this.shouldReconnect) {
       return
     }
 
@@ -117,6 +117,9 @@ export class StreamClient {
     this.clearReconnectTimer()
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
+      if (!this.shouldReconnect) {
+        return
+      }
       void this.connectWithTransport()
     }, delay)
   }
