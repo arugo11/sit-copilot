@@ -14,6 +14,9 @@ export function TranscriptPanel() {
   const transcriptLines = useLiveSessionStore((state) => state.transcriptLines)
   const autoScroll = useLiveSessionStore((state) => state.autoScroll)
   const selectedLanguage = useLiveSessionStore((state) => state.selectedLanguage)
+  const paidFeatureVisibility = useLiveSessionStore(
+    (state) => state.paidFeatureVisibility
+  )
   const density = useLiveSessionStore((state) => state.transcriptDensity)
   const translationFallbackActive = useLiveSessionStore(
     (state) => state.translationFallbackActive
@@ -50,6 +53,12 @@ export function TranscriptPanel() {
     setAutoScroll(true)
   }
 
+  const languageOptions = [
+    { value: 'ja', label: t('transcriptPanel.language.ja') },
+    { value: 'easy-ja', label: t('transcriptPanel.language.easyJa') },
+    { value: 'en', label: t('transcriptPanel.language.en') },
+  ].filter((option) => option.value === 'ja' || paidFeatureVisibility.translation)
+
   return (
     <div className="h-full flex flex-col relative">
       <div className="flex flex-wrap items-start gap-3 border-b border-border bg-bg-surface p-3">
@@ -60,11 +69,7 @@ export function TranscriptPanel() {
             const mode = value as 'ja' | 'easy-ja' | 'en'
             void switchLanguage(mode)
           }}
-          options={[
-            { value: 'ja', label: t('transcriptPanel.language.ja') },
-            { value: 'easy-ja', label: t('transcriptPanel.language.easyJa') },
-            { value: 'en', label: t('transcriptPanel.language.en') },
-          ]}
+          options={languageOptions}
           className="w-full sm:w-auto"
         />
         <SegmentedControl

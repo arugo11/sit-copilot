@@ -615,6 +615,77 @@ async def test_get_lecture_events_stream_returns_sse_events(
 
 
 @pytest.mark.asyncio
+async def test_get_lecture_events_stream_omits_assist_events_when_env_flags_off(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SSE stream should not emit cached assist events when env flags are off."""
+    monkeypatch.setattr(settings, "lecture_live_summary_enabled", False)
+    monkeypatch.setattr(settings, "lecture_live_keyterms_enabled", False)
+
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 4000,
+            "text": "講義導入です。",
+            "confidence": 0.91,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    async with session_factory() as session:
+        session.add(
+            SummaryWindow(
+                session_id=session_id,
+                start_ms=0,
+                end_ms=30000,
+                summary_text="送信されてはいけない要約です。",
+                key_terms_json=[
+                    {
+                        "term": "外れ値",
+                        "explanation": "送信されない",
+                        "translation": "outlier",
+                    }
+                ],
+                evidence_event_ids_json=[],
+            )
+        )
+        await session.commit()
+
+    response = await async_client.get(
+        "/api/v4/lecture/events/stream",
+        params={"session_id": session_id, "once": "true"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    event_types = [event.get("type") for event in events]
+    assert "assist.summary" not in event_types
+    assert "assist.term" not in event_types
+
+
+@pytest.mark.asyncio
 async def test_get_lecture_events_stream_without_token_returns_401(
     async_client: AsyncClient,
 ) -> None:
@@ -799,6 +870,109 @@ async def test_get_lecture_summary_latest_returns_off_when_summary_disabled(
 
 
 @pytest.mark.asyncio
+async def test_get_lecture_summary_latest_returns_feature_disabled_when_env_flag_off(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Summary endpoint should hard-stop when the env kill switch is off."""
+    monkeypatch.setattr(settings, "lecture_live_summary_enabled", False)
+
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={"settings": {"assistSummaryEnabled": True}},
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "feature_disabled"
+
+
+@pytest.mark.asyncio
+async def test_get_lecture_summary_latest_uses_cache_until_force_rebuild(
+    async_client: AsyncClient,
+    mock_summary_generator: Mock,
+) -> None:
+    """Repeated summary fetches should reuse the cached window unless forced."""
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={"settings": {"assistSummaryEnabled": True}},
+        headers=AUTH_HEADERS,
+    )
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 1000,
+            "end_ms": 5000,
+            "text": "キャッシュ確認用の字幕です。",
+            "confidence": 0.95,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    first = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    second = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id},
+        headers=AUTH_HEADERS,
+    )
+    forced = await async_client.get(
+        "/api/v4/lecture/summary/latest",
+        params={"session_id": session_id, "force_rebuild": "true"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert forced.status_code == 200
+    assert mock_summary_generator.generate_summary.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_get_lecture_summary_latest_without_token_returns_401(
     async_client: AsyncClient,
 ) -> None:
@@ -874,8 +1048,13 @@ async def test_get_lecture_summary_latest_with_runtime_error_returns_503(
     )
 
     class FailingSummaryService:
-        async def get_latest_summary(self, session_id: str, user_id: str) -> None:
-            del session_id, user_id
+        async def get_latest_summary(
+            self,
+            session_id: str,
+            user_id: str,
+            force_rebuild: bool = False,
+        ) -> None:
+            del session_id, user_id, force_rebuild
             raise RuntimeError("summary backend down")
 
         async def rebuild_windows(self, session_id: str, user_id: str) -> int:
@@ -946,6 +1125,51 @@ async def test_post_transcript_analyze_keyterms_returns_off_when_keyterms_disabl
     assert body["reason"] == "assist_keyterms_disabled"
     assert body["key_terms"] == []
     assert body["detected_terms"] == []
+
+
+@pytest.mark.asyncio
+async def test_post_transcript_analyze_keyterms_returns_feature_disabled_when_env_flag_off(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Key terms endpoint should hard-stop when the env kill switch is off."""
+    monkeypatch.setattr(settings, "lecture_live_keyterms_enabled", False)
+
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/settings/me",
+        json={"settings": {"assistKeytermsEnabled": True}},
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/transcript/analyze-keyterms",
+        json={
+            "session_id": session_id,
+            "transcript_text": "外れ値を検出します。",
+            "lang_mode": "ja",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "off"
+    assert body["reason"] == "feature_disabled"
 
 
 @pytest.mark.asyncio
@@ -1969,6 +2193,48 @@ async def test_post_lecture_subtitle_transform_returns_passthrough_for_ja(
 
 
 @pytest.mark.asyncio
+async def test_post_lecture_subtitle_transform_returns_feature_disabled_when_flag_off(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subtitle transform should fail closed when translation is disabled."""
+    from app.api.v4.lecture import get_caption_transform_service
+
+    monkeypatch.setattr(settings, "lecture_live_translation_enabled", False)
+    app.dependency_overrides.pop(get_caption_transform_service, None)
+
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/subtitle/transform",
+        json={
+            "session_id": session_id,
+            "text": "機械学習は未知データで性能を確認します。",
+            "target_lang_mode": "en",
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "fallback"
+    assert body["fallback_reason"] == "feature_disabled"
+
+
+@pytest.mark.asyncio
 async def test_post_lecture_subtitle_audit_returns_corrected_text(
     async_client: AsyncClient,
 ) -> None:
@@ -2092,6 +2358,58 @@ async def test_post_lecture_speech_chunk_audit_apply_updates_persisted_text(
         speech_event = result.scalar_one()
     assert speech_event.original_text == "機械学習わ未知データで性能お確認します。"
     assert speech_event.text == body["corrected_text"]
+
+
+@pytest.mark.asyncio
+async def test_post_lecture_speech_chunk_audit_apply_returns_feature_disabled_when_flag_off(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit-apply should no-op when ASR review is disabled."""
+    monkeypatch.setattr(settings, "lecture_live_asr_review_enabled", False)
+
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": True,
+            "slide_roi": [100, 80, 900, 520],
+            "board_roi": [80, 560, 920, 980],
+            "consent_acknowledged": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    ingest_response = await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 0,
+            "end_ms": 4000,
+            "text": "機械学習わ未知データで性能お確認します。",
+            "confidence": 0.91,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    event_id = ingest_response.json()["event_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/speech/chunk/audit-apply",
+        json={"session_id": session_id, "event_id": event_id},
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["updated"] is False
+    assert body["reviewed"] is False
+    assert body["was_corrected"] is False
+    assert body["failure_reason"] == "feature_disabled"
 
 
 @pytest.mark.asyncio

@@ -98,6 +98,13 @@ vi.mock('@/stores/audioInputStore', () => ({
 vi.mock('@/stores/liveSessionStore', () => {
   const state = {
     connection: 'live',
+    liveState: 'idle',
+    paidFeatureVisibility: {
+      translation: true,
+      summary: true,
+      keyterms: true,
+      qa: true,
+    },
     transcriptLagMs: 0,
     transcriptLines: [],
     selectedLanguage: 'ja',
@@ -113,6 +120,7 @@ vi.mock('@/stores/liveSessionStore', () => {
     sourceFrames: [],
     ocrChunks: [],
     setConnection: vi.fn(),
+    setLiveState: vi.fn(),
     setSessionId: vi.fn(),
     applyTranscriptPartial: vi.fn(),
     applyTranscriptFinal: vi.fn(),
@@ -133,8 +141,14 @@ vi.mock('@/stores/liveSessionStore', () => {
     setAutoScroll: vi.fn(),
     setTranscriptDensity: vi.fn(),
   }
+  const useLiveSessionStore = Object.assign(
+    (selector: (value: typeof state) => unknown) => selector(state),
+    {
+      getState: () => state,
+    }
+  )
   return {
-    useLiveSessionStore: (selector: (value: typeof state) => unknown) => selector(state),
+    useLiveSessionStore,
   }
 })
 

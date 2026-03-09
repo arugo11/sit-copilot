@@ -1,5 +1,7 @@
 import { beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
+import { cleanup } from '@testing-library/react'
+import { afterEach } from 'vitest'
 
 type Listener = (event: MediaQueryListEvent) => void
 
@@ -70,4 +72,8 @@ window.resizeTo = (width: number, height: number) => {
 
 beforeEach(() => {
   window.resizeTo(1280, 800)
+})
+
+afterEach(() => {
+  cleanup()
 })

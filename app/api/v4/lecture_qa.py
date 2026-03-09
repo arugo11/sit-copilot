@@ -75,6 +75,8 @@ _shared_lecture_answerer_service: AzureOpenAILectureAnswererService | None = Non
 _shared_lecture_answerer_service_key: (
     tuple[str, str, str, str, int, float, float, str] | None
 ) = None
+QA_DISABLED_ANSWER = "この環境では講義 QA は無効です。"
+QA_DISABLED_ACTION_NEXT = "管理者が QA を有効化するまでお待ちください。"
 
 
 def _append_auto_title_debug_log(
@@ -102,6 +104,33 @@ def _azure_search_available() -> bool:
         settings.azure_search_enabled
         and bool(settings.azure_search_endpoint.strip())
         and bool(settings.azure_search_api_key.strip())
+    )
+
+
+def _lecture_qa_available() -> bool:
+    return settings.azure_openai_enabled and settings.lecture_qa_enabled
+
+
+def _build_qa_disabled_response() -> LectureAskResponse:
+    return LectureAskResponse(
+        answer=QA_DISABLED_ANSWER,
+        confidence="low",
+        sources=[],
+        verification_summary="feature_disabled",
+        action_next=QA_DISABLED_ACTION_NEXT,
+        fallback="feature_disabled",
+    )
+
+
+def _build_followup_disabled_response(question: str) -> LectureFollowupResponse:
+    return LectureFollowupResponse(
+        answer=QA_DISABLED_ANSWER,
+        confidence="low",
+        sources=[],
+        verification_summary="feature_disabled",
+        action_next=QA_DISABLED_ACTION_NEXT,
+        fallback="feature_disabled",
+        resolved_query=question,
     )
 
 
@@ -307,6 +336,9 @@ async def ask_question(
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureAskResponse:
     """Answer a lecture question using configured retrieval + Azure OpenAI."""
+    if not _lecture_qa_available():
+        return _build_qa_disabled_response()
+
     try:
         return await service.ask(
             session_id=request.session_id,
@@ -364,6 +396,9 @@ async def ask_followup(
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureFollowupResponse:
     """Answer a follow-up question with conversation context."""
+    if not _lecture_qa_available():
+        return _build_followup_disabled_response(request.question)
+
     try:
         return await service.followup(
             session_id=request.session_id,

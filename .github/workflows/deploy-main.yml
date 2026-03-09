@@ -70,10 +70,10 @@ jobs:
       contents: read
       id-token: write
     env:
-      RESOURCE_GROUP: rg-sitcopilot-dev-02210594
-      CONTAINER_APP_NAME: ca-sitc-api-02210594
-      ACR_NAME: acrsitc02210594
-      IMAGE_REPOSITORY: sit-copilot-api
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      IMAGE_REPOSITORY: ${{ vars.AZURE_IMAGE_REPOSITORY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,16 +85,29 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Validate deploy variables
+        run: |
+          test -n "${RESOURCE_GROUP}" || { echo "AZURE_RESOURCE_GROUP is required."; exit 1; }
+          test -n "${CONTAINER_APP_NAME}" || { echo "AZURE_CONTAINER_APP_NAME is required."; exit 1; }
+          test -n "${ACR_NAME}" || { echo "AZURE_ACR_NAME is required."; exit 1; }
+          if [ -z "${IMAGE_REPOSITORY}" ]; then
+            echo "IMAGE_REPOSITORY not set; defaulting to sit-copilot-api"
+            echo "IMAGE_REPOSITORY=sit-copilot-api" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Log in to ACR
+        run: |
+          az acr login --name "${ACR_NAME}"
+
       - name: Build and push image to ACR
         id: build_image
         run: |
+          IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-sit-copilot-api}"
           IMAGE_TAG="${GITHUB_SHA}"
           IMAGE_URI="${ACR_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 
-          az acr build \
-            --registry "${ACR_NAME}" \
-            --image "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
-            .
+          docker build -t "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
 
           echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
 
@@ -104,6 +117,38 @@ jobs:
             --name "${CONTAINER_APP_NAME}" \
             --resource-group "${RESOURCE_GROUP}" \
             --image "${{ steps.build_image.outputs.image_uri }}"
+
+      - name: Enforce safe runtime flags
+        run: |
+          az containerapp update \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --set-env-vars \
+              WEAVE_ENABLED=false \
+              AZURE_OPENAI_ENABLED=false \
+              LECTURE_LIVE_ASR_REVIEW_ENABLED=false \
+              LECTURE_LIVE_TRANSLATION_ENABLED=false \
+              LECTURE_LIVE_SUMMARY_ENABLED=false \
+              LECTURE_LIVE_KEYTERMS_ENABLED=false \
+              LECTURE_QA_ENABLED=false \
+              LECTURE_IDLE_AUTOSTOP_SECONDS=120
+
+      - name: Verify safe runtime flags
+        run: |
+          ENV_DUMP="$(az containerapp show \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --query 'properties.template.containers[0].env[].{name:name,value:value}' \
+            -o tsv)"
+
+          echo "${ENV_DUMP}" | grep -F "WEAVE_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "AZURE_OPENAI_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_ASR_REVIEW_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_TRANSLATION_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_SUMMARY_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_KEYTERMS_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_QA_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_IDLE_AUTOSTOP_SECONDS	120"
 
   api_smoke:
     name: API smoke test
@@ -131,6 +176,11 @@ jobs:
     if: needs.detect_changes.outputs.frontend_changed == 'true'
     env:
       VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+      VITE_LECTURE_LIVE_TRANSLATION_ENABLED: "false"
+      VITE_LECTURE_LIVE_SUMMARY_ENABLED: "false"
+      VITE_LECTURE_LIVE_KEYTERMS_ENABLED: "false"
+      VITE_LECTURE_QA_ENABLED: "false"
+      VITE_LECTURE_IDLE_AUTOSTOP_SECONDS: "120"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,6 +194,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --prefix frontend
+
+      - name: Run frontend tests
+        run: npm run test --prefix frontend
 
       - name: Build frontend
         run: npm run build --prefix frontend

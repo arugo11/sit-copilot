@@ -39,9 +39,13 @@ export function AssistPanel({
   const { t } = useTranslation()
   const { showToast } = useToast()
   const connection = useLiveSessionStore((state) => state.connection)
+  const liveState = useLiveSessionStore((state) => state.liveState)
   const summaryPoints = useLiveSessionStore((state) => state.summaryPoints)
   const assistTerms = useLiveSessionStore((state) => state.assistTerms)
   const langMode = useLiveSessionStore((state) => state.langMode)
+  const paidFeatureVisibility = useLiveSessionStore(
+    (state) => state.paidFeatureVisibility
+  )
   const switchLanguage = useLiveSessionStore((state) => state.switchLanguage)
   const sessionId = useLiveSessionStore((state) => state.sessionId)
   const setAssistSummary = useLiveSessionStore((state) => state.setAssistSummary)
@@ -58,7 +62,8 @@ export function AssistPanel({
   const [isUpdatingLangMode, setIsUpdatingLangMode] = useState(false)
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false)
   const isRefreshingSummaryRef = useRef(false)
-  const latestFinalSubtitleKey = useMemo(() => {
+  const lastSummaryWindowEndMsRef = useRef<number | null>(null)
+  const latestSummaryWindowEndMs = useMemo(() => {
     const latestFinalLine = [...transcriptLines]
       .reverse()
       .find((line) => !line.isPartial && line.sourceLangText.trim().length > 0)
@@ -67,14 +72,17 @@ export function AssistPanel({
       return null
     }
 
-    return `${latestFinalLine.id}:${latestFinalLine.sourceLangText.trim()}`
+    return Math.floor(Math.max(0, latestFinalLine.tsEndMs - 1) / 30000 + 1) * 30000
   }, [transcriptLines])
 
   const langModeOptions = [
     { value: 'ja', label: t('assistPanel.languageModes.ja') },
     { value: 'easy-ja', label: t('assistPanel.languageModes.easyJa') },
     { value: 'en', label: t('assistPanel.languageModes.en') },
-  ] as const
+  ].filter((option) => option.value === 'ja' || paidFeatureVisibility.translation) as Array<{
+    value: 'ja' | 'easy-ja' | 'en'
+    label: string
+  }>
 
   const qaStatusLabel = {
     idle: t('assistPanel.qaStatus.idle'),
@@ -83,14 +91,19 @@ export function AssistPanel({
     error: t('assistPanel.qaStatus.error'),
   } as const
 
-  const handleRefreshSummary = useCallback(async () => {
-    if (!sessionId || isRefreshingSummaryRef.current) {
+  const handleRefreshSummary = useCallback(async (forceRebuild = false) => {
+    if (
+      !sessionId ||
+      !paidFeatureVisibility.summary ||
+      !summaryEnabled ||
+      isRefreshingSummaryRef.current
+    ) {
       return
     }
     isRefreshingSummaryRef.current = true
     setIsRefreshingSummary(true)
     try {
-      const summary = await demoApi.getLatestSummary(sessionId)
+      const summary = await demoApi.getLatestSummary(sessionId, forceRebuild)
       if (summary.status === 'ok') {
         const mapped = mapSummaryResponseToAssist(summary)
         setAssistSummary({
@@ -111,17 +124,41 @@ export function AssistPanel({
       isRefreshingSummaryRef.current = false
       setIsRefreshingSummary(false)
     }
-  }, [sessionId, setAssistSummary])
+  }, [paidFeatureVisibility.summary, sessionId, setAssistSummary, summaryEnabled])
 
   useEffect(() => {
-    if (!sessionId || !summaryEnabled || !latestFinalSubtitleKey) {
+    if (
+      !sessionId ||
+      !paidFeatureVisibility.summary ||
+      !summaryEnabled ||
+      liveState !== 'running' ||
+      document.visibilityState !== 'visible' ||
+      latestSummaryWindowEndMs === null ||
+      latestSummaryWindowEndMs === lastSummaryWindowEndMsRef.current
+    ) {
       return
     }
-    void handleRefreshSummary()
-  }, [sessionId, summaryEnabled, latestFinalSubtitleKey, handleRefreshSummary])
+    lastSummaryWindowEndMsRef.current = latestSummaryWindowEndMs
+    void handleRefreshSummary(false)
+  }, [
+    handleRefreshSummary,
+    latestSummaryWindowEndMs,
+    liveState,
+    paidFeatureVisibility.summary,
+    sessionId,
+    summaryEnabled,
+  ])
+
+  useEffect(() => {
+    lastSummaryWindowEndMsRef.current = null
+  }, [sessionId])
 
   const isRecording = useAudioInputStore((state) => state.isRecording)
   const audioLevel = useAudioInputStore((state) => state.audioLevel)
+  const effectiveConnectionLabel =
+    liveState === 'running' || liveState === 'stopping'
+      ? t(`live.connection.${connection}`)
+      : t('live.connection.idle')
 
   const handleLangModeChange = async (value: 'ja' | 'easy-ja' | 'en') => {
     setIsUpdatingLangMode(true)
@@ -163,6 +200,9 @@ export function AssistPanel({
 
   const handleSummaryToggleChange = useCallback(
     async (enabled: boolean) => {
+      if (!paidFeatureVisibility.summary) {
+        return
+      }
       setSummaryEnabled(enabled)
       if (!enabled) {
         setAssistSummary({ timestampMs: Date.now(), points: [] })
@@ -175,11 +215,14 @@ export function AssistPanel({
       }
 
     },
-    [persistAssistToggle, setAssistSummary, setSummaryEnabled]
+    [paidFeatureVisibility.summary, persistAssistToggle, setAssistSummary, setSummaryEnabled]
   )
 
   const handleKeytermsToggleChange = useCallback(
     async (enabled: boolean) => {
+      if (!paidFeatureVisibility.keyterms) {
+        return
+      }
       setKeytermsEnabled(enabled)
       if (!enabled) {
         setAssistTerms([])
@@ -224,6 +267,7 @@ export function AssistPanel({
     },
     [
       langMode,
+      paidFeatureVisibility.keyterms,
       persistAssistToggle,
       sessionId,
       appendAssistTerms,
@@ -262,9 +306,25 @@ export function AssistPanel({
       <section className="card p-3 space-y-2">
         <h2 className="text-sm font-semibold">{t('assistPanel.sections.status')}</h2>
         <StatusRow label={t('assistPanel.status.recording')} value={isRecording ? 'ON' : 'OFF'} ok={isRecording} />
-        <StatusRow label={t('assistPanel.status.transcription')} value={t('assistPanel.status.running')} ok />
-        <StatusRow label={t('assistPanel.status.translation')} value={t('assistPanel.status.running')} ok />
-        <StatusRow label={t('assistPanel.status.connection')} value={t(`live.connection.${connection}`)} ok={connection === 'live'} />
+        <StatusRow
+          label={t('assistPanel.status.transcription')}
+          value={liveState === 'running' ? t('assistPanel.status.running') : 'OFF'}
+          ok={liveState === 'running'}
+        />
+        <StatusRow
+          label={t('assistPanel.status.translation')}
+          value={
+            paidFeatureVisibility.translation && liveState === 'running'
+              ? t('assistPanel.status.running')
+              : 'OFF'
+          }
+          ok={paidFeatureVisibility.translation && liveState === 'running'}
+        />
+        <StatusRow
+          label={t('assistPanel.status.connection')}
+          value={effectiveConnectionLabel}
+          ok={connection === 'live'}
+        />
         <div className="mt-2">
           <div className="text-xs text-fg-secondary mb-1">{t('assistPanel.status.micLevel')}</div>
           <div className="h-2 rounded bg-bg-muted overflow-hidden">
@@ -273,8 +333,9 @@ export function AssistPanel({
         </div>
       </section>
 
-      <section className="card p-3 space-y-2">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {paidFeatureVisibility.summary && (
+        <section className="card p-3 space-y-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">{t('assistPanel.sections.summary')}</h2>
             <ToggleSwitch
@@ -288,102 +349,114 @@ export function AssistPanel({
           <button
             type="button"
             className="btn btn-secondary w-full sm:w-auto"
-            onClick={handleRefreshSummary}
-            disabled={!summaryEnabled || isRefreshingSummary || !sessionId}
+            onClick={() => {
+              void handleRefreshSummary(true)
+            }}
+            disabled={
+              !summaryEnabled ||
+              isRefreshingSummary ||
+              !sessionId ||
+              liveState !== 'running'
+            }
           >
             {isRefreshingSummary ? t('assistPanel.updating') : t('assistPanel.refreshNow')}
           </button>
-        </div>
-        {!summaryEnabled ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.off')}</p>
-        ) : summaryPoints.length === 0 ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.waiting')}</p>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {summaryPoints.map((point) => (
-              <li key={point} className="bg-bg-muted rounded px-2 py-1">• {point}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="card p-3 space-y-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
-          <ToggleSwitch
-            checked={keytermsEnabled}
-            onChange={() => {
-              void handleKeytermsToggleChange(!keytermsEnabled)
-            }}
-            label={t('assistPanel.keytermsToggleAria')}
-          />
-        </div>
-        {!keytermsEnabled ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>
-        ) : assistTerms.length === 0 ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.waiting')}</p>
-        ) : (
-          <ul className="space-y-2">
-            {assistTerms.map((term) => (
-              <li key={term.term} className="text-sm">
-                <p className="font-medium text-fg-primary">{term.term} <span className="text-fg-secondary">({term.translation})</span></p>
-                <p className="text-fg-secondary">{term.explanation}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="card p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">{t('assistPanel.sections.qa')}</h2>
-          <span
-            className={`badge ${
-              qaStatus === 'streaming'
-                ? 'badge-warning'
-                : qaStatus === 'error'
-                  ? 'badge-danger'
-                  : 'badge-success'
-            }`}
-          >
-            {qaStatusLabel[qaStatus]}
-          </span>
-        </div>
-        <div className="pt-2 border-t border-border">
-          <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              id="mini-qa-input"
-              className="input"
-              value={miniQuestion}
-              onChange={(event) => setMiniQuestion(event.target.value)}
-              placeholder={t('assistPanel.miniQuestionPlaceholder')}
-              disabled={isQaSubmitting}
-            />
-            <button
-              type="button"
-              className="btn btn-primary w-full sm:w-auto"
-              disabled={isQaSubmitting}
-              onClick={() => {
-                const q = miniQuestion.trim()
-                if (!q) return
-                onAskMiniQuestion(q)
-                setMiniQuestion('')
-              }}
-            >
-              {isQaSubmitting ? t('assistPanel.submitting') : t('assistPanel.submit')}
-            </button>
           </div>
-        </div>
-        <QAStreamBlocks
-          turns={qaTurns}
-          isBusy={isQaSubmitting}
-          labels={{ resume: t('assistPanel.retry'), regenerate: t('assistPanel.regenerate') }}
-          onCitationSelect={onQaCitationSelect}
-          onRetry={onQaRetry}
-          onRegenerate={onQaRegenerate}
-        />
-      </section>
+          {!summaryEnabled ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.summary.off')}</p>
+          ) : summaryPoints.length === 0 ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.summary.waiting')}</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {summaryPoints.map((point) => (
+                <li key={point} className="bg-bg-muted rounded px-2 py-1">• {point}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {paidFeatureVisibility.keyterms && (
+        <section className="card p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
+            <ToggleSwitch
+              checked={keytermsEnabled}
+              onChange={() => {
+                void handleKeytermsToggleChange(!keytermsEnabled)
+              }}
+              label={t('assistPanel.keytermsToggleAria')}
+            />
+          </div>
+          {!keytermsEnabled ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>
+          ) : assistTerms.length === 0 ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.waiting')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {assistTerms.map((term) => (
+                <li key={term.term} className="text-sm">
+                  <p className="font-medium text-fg-primary">{term.term} <span className="text-fg-secondary">({term.translation})</span></p>
+                  <p className="text-fg-secondary">{term.explanation}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {paidFeatureVisibility.qa && (
+        <section className="card p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t('assistPanel.sections.qa')}</h2>
+            <span
+              className={`badge ${
+                qaStatus === 'streaming'
+                  ? 'badge-warning'
+                  : qaStatus === 'error'
+                    ? 'badge-danger'
+                    : 'badge-success'
+              }`}
+            >
+              {qaStatusLabel[qaStatus]}
+            </span>
+          </div>
+          <div className="pt-2 border-t border-border">
+            <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                id="mini-qa-input"
+                className="input"
+                value={miniQuestion}
+                onChange={(event) => setMiniQuestion(event.target.value)}
+                placeholder={t('assistPanel.miniQuestionPlaceholder')}
+                disabled={isQaSubmitting}
+              />
+              <button
+                type="button"
+                className="btn btn-primary w-full sm:w-auto"
+                disabled={isQaSubmitting}
+                onClick={() => {
+                  const q = miniQuestion.trim()
+                  if (!q) return
+                  onAskMiniQuestion(q)
+                  setMiniQuestion('')
+                }}
+              >
+                {isQaSubmitting ? t('assistPanel.submitting') : t('assistPanel.submit')}
+              </button>
+            </div>
+          </div>
+          <QAStreamBlocks
+            turns={qaTurns}
+            isBusy={isQaSubmitting}
+            labels={{ resume: t('assistPanel.retry'), regenerate: t('assistPanel.regenerate') }}
+            onCitationSelect={onQaCitationSelect}
+            onRetry={onQaRetry}
+            onRegenerate={onQaRegenerate}
+          />
+        </section>
+      )}
     </div>
   )
 }

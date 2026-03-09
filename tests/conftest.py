@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
+from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
 from app.models import (  # noqa: F401  # Ensure model metadata is loaded
@@ -30,6 +31,22 @@ from app.services.lecture_summary_generator_service import (
     LectureSummaryGeneratorService,
     LectureSummaryResult,
 )
+
+
+@pytest.fixture(autouse=True)
+def enable_live_features_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy integration tests exercising feature-on paths.
+
+    Production defaults remain fail-closed; tests opt back into the relevant
+    endpoints unless a test explicitly overrides them.
+    """
+
+    monkeypatch.setattr(settings, "azure_openai_enabled", True)
+    monkeypatch.setattr(settings, "lecture_live_asr_review_enabled", True)
+    monkeypatch.setattr(settings, "lecture_live_translation_enabled", True)
+    monkeypatch.setattr(settings, "lecture_live_summary_enabled", True)
+    monkeypatch.setattr(settings, "lecture_live_keyterms_enabled", True)
+    monkeypatch.setattr(settings, "lecture_qa_enabled", True)
 
 
 @pytest.fixture
@@ -86,8 +103,12 @@ async def async_client(
                 raise
 
     # Import here to avoid circular dependency
-    from app.api.v4.lecture import get_lecture_summary_service
+    from app.api.v4.lecture import (
+        get_caption_transform_service,
+        get_lecture_summary_service,
+    )
     from app.services.lecture_summary_service import SqlAlchemyLectureSummaryService
+    from app.services.live_caption_transform_service import CaptionTransformResult
 
     def override_summary_service():
         return SqlAlchemyLectureSummaryService(
@@ -95,8 +116,35 @@ async def async_client(
             summary_generator=mock_summary_generator,
         )
 
+    class FakeCaptionTransformService:
+        async def transform(
+            self,
+            text: str,
+            target_lang_mode: str,
+        ) -> CaptionTransformResult:
+            if target_lang_mode == "ja":
+                return CaptionTransformResult(
+                    text=text.strip(),
+                    status="passthrough",
+                    fallback_reason=None,
+                )
+            if target_lang_mode == "en":
+                return CaptionTransformResult(
+                    text=f"EN: {text.strip()}",
+                    status="translated",
+                    fallback_reason=None,
+                )
+            return CaptionTransformResult(
+                text=f"やさしい: {text.strip()}",
+                status="translated",
+                fallback_reason=None,
+            )
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_lecture_summary_service] = override_summary_service
+    app.dependency_overrides[get_caption_transform_service] = (
+        FakeCaptionTransformService
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:

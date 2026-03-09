@@ -116,6 +116,7 @@ from app.services.lecture_summary_service import (
 from app.services.live_caption_transform_service import (
     AzureOpenAILiveCaptionTransformService,
     CaptionTransformService,
+    UnavailableLiveCaptionTransformService,
 )
 from app.services.observability import (
     NoopWeaveObserverService,
@@ -354,6 +355,8 @@ async def _stream_lecture_events(
     single_batch: bool = False,
 ) -> AsyncIterator[str]:
     offsets = _EventOffsets()
+    summary_events_enabled = settings.lecture_live_summary_enabled
+    keyterms_events_enabled = settings.lecture_live_keyterms_enabled
     yield _to_sse_payload({"type": "session.status", "payload": {"connection": "live"}})
 
     while True:
@@ -439,7 +442,7 @@ async def _stream_lecture_events(
 
         for window in summary_windows:
             summary_points = _extract_summary_points(window.summary_text)
-            if summary_points:
+            if summary_events_enabled and summary_points:
                 yield _to_sse_payload(
                     {
                         "type": "assist.summary",
@@ -452,7 +455,7 @@ async def _stream_lecture_events(
                 emitted = True
 
             assist_terms = _extract_assist_terms(window.key_terms_json)
-            if assist_terms:
+            if keyterms_events_enabled and assist_terms:
                 yield _to_sse_payload({"type": "assist.term", "payload": assist_terms})
                 emitted = True
 
@@ -490,6 +493,27 @@ def _azure_search_available() -> bool:
 def _azure_openai_summary_available() -> bool:
     return (
         settings.azure_openai_enabled
+        and settings.lecture_live_summary_enabled
+        and bool(settings.azure_openai_api_key.strip())
+        and bool(settings.azure_openai_endpoint.strip())
+        and bool(settings.azure_openai_model.strip())
+    )
+
+
+def _azure_openai_keyterms_available() -> bool:
+    return (
+        settings.azure_openai_enabled
+        and settings.lecture_live_keyterms_enabled
+        and bool(settings.azure_openai_api_key.strip())
+        and bool(settings.azure_openai_endpoint.strip())
+        and bool(settings.azure_openai_model.strip())
+    )
+
+
+def _azure_openai_caption_transform_available() -> bool:
+    return (
+        settings.azure_openai_enabled
+        and settings.lecture_live_translation_enabled
         and bool(settings.azure_openai_api_key.strip())
         and bool(settings.azure_openai_endpoint.strip())
         and bool(settings.azure_openai_model.strip())
@@ -507,7 +531,7 @@ def get_azure_search_service() -> AzureSearchService:
 
 def get_japanese_asr_correction_service() -> JapaneseASRCorrectionService:
     """Dependency provider for Japanese ASR minimal correction service."""
-    if settings.azure_openai_enabled:
+    if settings.azure_openai_enabled and settings.lecture_live_asr_review_enabled:
         return AzureOpenAIJapaneseASRCorrectionService(
             api_key=settings.azure_openai_api_key,
             endpoint=settings.azure_openai_endpoint,
@@ -524,7 +548,7 @@ def get_japanese_asr_correction_service() -> JapaneseASRCorrectionService:
 
 def get_japanese_asr_hallucination_judge_service() -> JapaneseASRHallucinationJudgeService:
     """Dependency provider for strict hallucination judge."""
-    if settings.azure_openai_enabled:
+    if settings.azure_openai_enabled and settings.lecture_live_asr_review_enabled:
         judge_model = settings.azure_openai_judge_model.strip() or settings.azure_openai_model
         return AzureOpenAIJapaneseASRHallucinationJudgeService(
             api_key=settings.azure_openai_api_key,
@@ -606,7 +630,11 @@ def get_lecture_summary_service(
     # Create observed summary generator
     summary_generator: LectureSummaryGeneratorService
     fallback_generator = UnavailableLectureSummaryGeneratorService(
-        reason="azure openai summary backend is unavailable"
+        reason=(
+            "feature_disabled"
+            if not settings.lecture_live_summary_enabled
+            else "azure openai summary backend is unavailable"
+        )
     )
     if _azure_openai_summary_available():
         inner_generator = AzureOpenAILectureSummaryGeneratorService(
@@ -675,9 +703,13 @@ def get_lecture_finalize_service(
 def get_lecture_keyterms_service() -> LectureKeyTermsService:
     """Dependency provider for lecture key terms service."""
     fallback_service = UnavailableLectureKeyTermsService(
-        reason="azure openai key terms backend is unavailable"
+        reason=(
+            "feature_disabled"
+            if not settings.lecture_live_keyterms_enabled
+            else "azure openai key terms backend is unavailable"
+        )
     )
-    if _azure_openai_summary_available():
+    if _azure_openai_keyterms_available():
         primary_service = AzureOpenAILectureKeyTermsService(
             api_key=settings.azure_openai_api_key,
             endpoint=settings.azure_openai_endpoint,
@@ -694,6 +726,10 @@ def get_lecture_keyterms_service() -> LectureKeyTermsService:
 
 def get_caption_transform_service() -> CaptionTransformService:
     """Dependency provider for live subtitle transform service."""
+    if not settings.lecture_live_translation_enabled:
+        return UnavailableLiveCaptionTransformService(reason="feature_disabled")
+    if not _azure_openai_caption_transform_available():
+        return UnavailableLiveCaptionTransformService(reason="azure_openai_unavailable")
     return AzureOpenAILiveCaptionTransformService(
         api_key=settings.azure_openai_api_key,
         endpoint=settings.azure_openai_endpoint,
@@ -995,6 +1031,7 @@ async def get_latest_summary(
     user_id: Annotated[str, Depends(require_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     service: Annotated[LectureSummaryService, Depends(get_lecture_summary_service)],
+    force_rebuild: Annotated[bool, Query()] = False,
 ) -> LectureSummaryLatestResponse:
     """Return latest 30-second summary for the lecture session."""
     normalized_session_id = session_id.strip()
@@ -1016,6 +1053,22 @@ async def get_latest_summary(
         )
 
     assist_settings = await resolve_assist_generation_settings(db, user_id=user_id)
+    if not assist_settings.summary_available:
+        logger.info(
+            "assist_summary_feature_disabled session_id=%s user_id=%s",
+            normalized_session_id,
+            user_id,
+        )
+        return LectureSummaryLatestResponse(
+            session_id=normalized_session_id,
+            window_start_ms=0,
+            window_end_ms=0,
+            summary="",
+            key_terms=[],
+            evidence=[],
+            status="off",
+            reason="feature_disabled",
+        )
     if not assist_settings.summary_enabled:
         logger.info(
             "assist_summary_disabled session_id=%s user_id=%s",
@@ -1038,6 +1091,7 @@ async def get_latest_summary(
             return await service.get_latest_summary(
                 session_id=normalized_session_id,
                 user_id=user_id,
+                force_rebuild=force_rebuild,
             )
     except LectureSessionNotFoundError as exc:
         raise HTTPException(
@@ -1148,6 +1202,18 @@ async def analyze_transcript_keyterms(
         )
 
     assist_settings = await resolve_assist_generation_settings(db, user_id=user_id)
+    if not assist_settings.keyterms_available:
+        logger.info(
+            "assist_keyterms_feature_disabled session_id=%s user_id=%s",
+            request.session_id,
+            user_id,
+        )
+        return TranscriptKeyTermsResponse(
+            key_terms=[],
+            detected_terms=[],
+            status="off",
+            reason="feature_disabled",
+        )
     if not assist_settings.keyterms_enabled:
         logger.info(
             "assist_keyterms_disabled session_id=%s user_id=%s",

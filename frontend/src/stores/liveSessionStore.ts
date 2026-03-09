@@ -1,10 +1,15 @@
 import { create } from 'zustand'
 import { demoApi } from '@/lib/api/client'
+import {
+  LIVE_FEATURE_FLAGS,
+  sanitizeSelectableLanguage,
+} from '@/lib/featureFlags'
 import type {
   AssistSummaryPayload,
   AssistTermPayload,
   ConnectionState,
   LeftPanelMode,
+  LiveLifecycleState,
   LiveUiState,
   SourceFrame,
   SourceOcrChunk,
@@ -14,6 +19,13 @@ import type {
 
 const MAX_HISTORY = 10
 const MAX_ASSIST_TERMS = 20
+
+const defaultPaidFeatureVisibility = {
+  translation: LIVE_FEATURE_FLAGS.translation,
+  summary: LIVE_FEATURE_FLAGS.summary,
+  keyterms: LIVE_FEATURE_FLAGS.keyterms,
+  qa: LIVE_FEATURE_FLAGS.qa,
+} as const
 
 function normalizeAssistTermKey(term: string): string {
   return term.replace(/[\s\u3000]+/g, '').trim().toLowerCase()
@@ -64,13 +76,21 @@ interface LiveSessionStore extends LiveUiState {
   sessionId: string | null
   langMode: 'ja' | 'easy-ja' | 'en'
   translationFallbackActive: boolean
+  paidFeatureVisibility: {
+    translation: boolean
+    summary: boolean
+    keyterms: boolean
+    qa: boolean
+  }
   setConnection: (connection: ConnectionState) => void
+  setLiveState: (liveState: LiveLifecycleState) => void
   setAutoScroll: (autoScroll: boolean) => void
   setCameraEnabled: (enabled: boolean) => void
   setSelectedLanguage: (lang: 'ja' | 'easy-ja' | 'en') => void
   setTranscriptDensity: (density: TranscriptDensity) => void
   setLeftPanelMode: (mode: LeftPanelMode) => void
   setSessionId: (sessionId: string | null) => void
+  setPaidFeatureVisibility: (visibility: LiveSessionStore['paidFeatureVisibility']) => void
   setLangMode: (langMode: 'ja' | 'easy-ja' | 'en') => Promise<void>
   switchLanguage: (langMode: 'ja' | 'easy-ja' | 'en') => Promise<void>
   applyTranscriptPartial: (line: TranscriptLine) => void
@@ -109,6 +129,7 @@ interface LiveSessionStore extends LiveUiState {
 const initialState: Pick<
   LiveSessionStore,
   | 'connection'
+  | 'liveState'
   | 'transcriptLagMs'
   | 'translationLagMs'
   | 'sourceLagMs'
@@ -125,10 +146,12 @@ const initialState: Pick<
   | 'sessionId'
   | 'langMode'
   | 'translationFallbackActive'
+  | 'paidFeatureVisibility'
   | 'summaryEnabled'
   | 'keytermsEnabled'
 > = {
-  connection: 'connecting',
+  connection: 'idle',
+  liveState: 'idle',
   transcriptLagMs: 0,
   translationLagMs: 0,
   sourceLagMs: 0,
@@ -145,6 +168,7 @@ const initialState: Pick<
   sessionId: null,
   langMode: 'ja',
   translationFallbackActive: false,
+  paidFeatureVisibility: { ...defaultPaidFeatureVisibility },
   summaryEnabled: false,
   keytermsEnabled: false,
 }
@@ -153,12 +177,15 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
   ...initialState,
 
   setConnection: (connection) => set({ connection }),
+  setLiveState: (liveState) => set({ liveState }),
   setAutoScroll: (autoScroll) => set({ autoScroll }),
   setCameraEnabled: (cameraEnabled) => set({ cameraEnabled }),
-  setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
+  setSelectedLanguage: (selectedLanguage) =>
+    set({ selectedLanguage: sanitizeSelectableLanguage(selectedLanguage) }),
   setTranscriptDensity: (transcriptDensity) => set({ transcriptDensity }),
   setLeftPanelMode: (leftPanelMode) => set({ leftPanelMode }),
   setSessionId: (sessionId) => set({ sessionId }),
+  setPaidFeatureVisibility: (paidFeatureVisibility) => set({ paidFeatureVisibility }),
   setTranslationFallbackActive: (translationFallbackActive) =>
     set({ translationFallbackActive }),
 
@@ -168,10 +195,14 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       console.warn('Cannot update lang_mode: no active session')
       return
     }
+    const nextLangMode = sanitizeSelectableLanguage(langMode)
     const previousLangMode = get().langMode
-    set({ langMode })
+    set({ langMode: nextLangMode })
     try {
-      await demoApi.updateLangMode({ session_id: sessionId, lang_mode: langMode })
+      await demoApi.updateLangMode({
+        session_id: sessionId,
+        lang_mode: nextLangMode,
+      })
     } catch (error) {
       set({ langMode: previousLangMode })
       throw error
@@ -180,14 +211,22 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
 
   switchLanguage: async (langMode) => {
     const { sessionId, selectedLanguage, langMode: previousLangMode } = get()
-    set({ selectedLanguage: langMode, langMode, translationFallbackActive: false })
+    const nextLangMode = sanitizeSelectableLanguage(langMode)
+    set({
+      selectedLanguage: nextLangMode,
+      langMode: nextLangMode,
+      translationFallbackActive: false,
+    })
 
     if (!sessionId) {
       return
     }
 
     try {
-      await demoApi.updateLangMode({ session_id: sessionId, lang_mode: langMode })
+      await demoApi.updateLangMode({
+        session_id: sessionId,
+        lang_mode: nextLangMode,
+      })
     } catch (error) {
       // 表示言語の切替はローカル機能として維持し、
       // サーバー側の lang_mode 更新だけを元に戻す。
@@ -196,7 +235,7 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         error,
         sessionId,
         selectedLanguage,
-        requestedLangMode: langMode,
+        requestedLangMode: nextLangMode,
       })
       throw error
     }
@@ -394,11 +433,25 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       }
     }),
 
-  setSummaryEnabled: (summaryEnabled) => set({ summaryEnabled }),
-  setKeytermsEnabled: (keytermsEnabled) => set({ keytermsEnabled }),
+  setSummaryEnabled: (summaryEnabled) =>
+    set((state) => ({
+      summaryEnabled: state.paidFeatureVisibility.summary && summaryEnabled,
+    })),
+  setKeytermsEnabled: (keytermsEnabled) =>
+    set((state) => ({
+      keytermsEnabled: state.paidFeatureVisibility.keyterms && keytermsEnabled,
+    })),
 
-  toggleSummary: () => set((state) => ({ summaryEnabled: !state.summaryEnabled })),
-  toggleKeyterms: () => set((state) => ({ keytermsEnabled: !state.keytermsEnabled })),
+  toggleSummary: () =>
+    set((state) => ({
+      summaryEnabled:
+        state.paidFeatureVisibility.summary && !state.summaryEnabled,
+    })),
+  toggleKeyterms: () =>
+    set((state) => ({
+      keytermsEnabled:
+        state.paidFeatureVisibility.keyterms && !state.keytermsEnabled,
+    })),
 
   hydrateFromSettings: (settings) =>
     set((state) => {
@@ -407,7 +460,9 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       // during the live session, don't override it with persisted settings.
       const userHasSwitched =
         state.selectedLanguage !== 'ja' || state.langMode !== 'ja'
-      const hydratedLang = settings.language ?? state.selectedLanguage
+      const hydratedLang = sanitizeSelectableLanguage(
+        settings.language ?? state.selectedLanguage
+      )
       return {
         selectedLanguage: userHasSwitched ? state.selectedLanguage : hydratedLang,
         langMode: userHasSwitched ? state.langMode : hydratedLang,
@@ -424,7 +479,10 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
       autoScroll: true,
       cameraEnabled: false,
       sessionId: null,
+      liveState: 'idle',
+      connection: 'idle',
       langMode: 'ja',
       translationFallbackActive: false,
+      paidFeatureVisibility: { ...defaultPaidFeatureVisibility },
     }),
 }))

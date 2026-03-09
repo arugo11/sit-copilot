@@ -9,7 +9,13 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks'
 
-export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error'
+export type ConnectionState =
+  | 'idle'
+  | 'connecting'
+  | 'live'
+  | 'reconnecting'
+  | 'degraded'
+  | 'error'
 
 interface AppShellProps {
   children: ReactNode

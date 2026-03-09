@@ -169,6 +169,7 @@
   },
   "live": {
     "connection": {
+      "idle": "待機中",
       "connecting": "接続中",
       "live": "ライブ",
       "reconnecting": "再接続中",
