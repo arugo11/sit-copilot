@@ -98,7 +98,7 @@ function SourceFrameList({
 
       <div className="card p-3 space-y-2">
         <h3 className="text-sm font-medium text-fg-primary">{t('sourcePanel.recentHistory')}</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {frames.slice(0, 10).map((frame) => (
             <button
               type="button"

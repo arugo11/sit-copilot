@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
+import { useIsMobile } from '@/hooks'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'degraded' | 'error'
 
@@ -33,6 +34,7 @@ export function AppShell({
 }: AppShellProps) {
   const { t, i18n } = useTranslation()
   const { theme, toggleTheme } = useTheme()
+  const isMobile = useIsMobile()
   const resolvedLocale: 'ja' | 'en' =
     locale ??
     ((i18n.resolvedLanguage ?? i18n.language).startsWith('en') ? 'en' : 'ja')
@@ -64,7 +66,7 @@ export function AppShell({
           className="sticky top-0 z-40 w-full bg-bg-surface border-b border-border"
           role="banner"
         >
-          <div className="container mx-auto px-4 flex items-center">
+          <div className="mx-auto flex w-full max-w-7xl items-center px-4">
             <div className="flex-1">{topbar}</div>
             {/* Theme toggle */}
             <button
@@ -98,11 +100,11 @@ export function AppShell({
       )}
 
       {/* Main Content Area */}
-      <div className="flex">
+      <div className="mx-auto flex w-full max-w-7xl flex-col lg:flex-row">
         {/* Left Sidebar */}
         {sidebar && (
           <aside
-            className="w-64 bg-bg-surface border-r border-border min-h-[calc(100vh-60px)]"
+            className="order-2 border-t border-border bg-bg-surface lg:order-1 lg:min-h-[calc(100vh-60px)] lg:w-64 lg:border-t-0 lg:border-r"
             role="complementary"
             aria-label={t('appShell.sidebarLabel')}
           >
@@ -115,11 +117,11 @@ export function AppShell({
         {/* Main Content */}
         <main
           id="main-content"
-          className="flex-1 p-4 md:p-6 lg:p-8"
+          className="order-1 min-w-0 flex-1 p-4 md:p-6 lg:order-2 lg:p-8"
           role="main"
           tabIndex={-1}
         >
-          <div className="max-w-7xl mx-auto">
+          <div className="mx-auto max-w-7xl">
             {children}
           </div>
         </main>
@@ -127,9 +129,13 @@ export function AppShell({
         {/* Right Rail */}
         {rightRail && (
           <aside
-            className="w-80 bg-bg-surface border-l border-border min-h-[calc(100vh-60px)]"
+            className="order-3 border-t border-border bg-bg-surface lg:min-h-[calc(100vh-60px)] lg:w-80 lg:border-t-0 lg:border-l"
             role="complementary"
-            aria-label={t('appShell.rightRailLabel')}
+            aria-label={
+              isMobile
+                ? t('appShell.rightRailLabel')
+                : t('appShell.rightRailLabel')
+            }
           >
             <div className="p-4">
               {rightRail}

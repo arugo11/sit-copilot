@@ -134,7 +134,12 @@ export function SettingsPage() {
             <label className="block text-sm font-medium text-fg-primary mb-2" id="theme-label">
               {t('settings.theme.title')}
             </label>
-            <div className="flex gap-2" role="radiogroup" aria-labelledby="theme-label" aria-label={t('settings.theme.ariaLabel')}>
+            <div
+              className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"
+              role="radiogroup"
+              aria-labelledby="theme-label"
+              aria-label={t('settings.theme.ariaLabel')}
+            >
               <button onClick={() => handleSettingChange('theme', 'light')} className={`btn ${effectiveSettings.theme === 'light' ? 'btn-primary' : 'btn-secondary'}`} role="radio" aria-checked={effectiveSettings.theme === 'light'}>
                 {t('settings.theme.light')}
               </button>
@@ -164,7 +169,7 @@ export function SettingsPage() {
             </select>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <label htmlFor="auto-scroll-default" className="text-sm font-medium text-fg-primary">
                 {t('settings.transcriptDensity.autoScrollDefault')}
@@ -200,7 +205,7 @@ export function SettingsPage() {
 
         <section className="card p-6 space-y-4">
           <h2 className="text-lg font-semibold">{t('settings.sections.accessibility')}</h2>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <label htmlFor="reduced-motion" className="text-sm font-medium text-fg-primary">{t('settings.accessibility.reducedMotion')}</label>
               <p className="text-xs text-fg-secondary">{t('settings.accessibility.reducedMotionDesc')}</p>
@@ -209,11 +214,11 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <div className="flex justify-end gap-2">
-          <button onClick={handleReset} className="btn btn-secondary" disabled={!hasChanges || updateSettingsMutation.isPending}>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button onClick={handleReset} className="btn btn-secondary w-full sm:w-auto" disabled={!hasChanges || updateSettingsMutation.isPending}>
             {t('settings.actions.reset')}
           </button>
-          <button onClick={handleSave} className="btn btn-primary" disabled={!hasChanges || updateSettingsMutation.isPending}>
+          <button onClick={handleSave} className="btn btn-primary w-full sm:w-auto" disabled={!hasChanges || updateSettingsMutation.isPending}>
             {updateSettingsMutation.isPending
               ? t('settings.actions.saving')
               : t('settings.actions.save')}

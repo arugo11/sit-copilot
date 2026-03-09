@@ -27,15 +27,15 @@ export function TopBar({
   className,
 }: TopBarProps) {
   return (
-    <div className={cn('flex items-center justify-between gap-4', className)}>
+    <div className={cn('flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between', className)}>
       {/* Left: Title and subtitle */}
-      <div className="flex items-center gap-4">
+      <div className="min-w-0 flex items-center gap-4">
         <div>
           <h1 className="text-xl font-semibold text-fg-primary">
             {title}
           </h1>
           {subtitle && (
-            <p className="text-sm text-fg-secondary mt-0.5">
+            <p className="mt-0.5 text-sm text-fg-secondary">
               {subtitle}
             </p>
           )}
@@ -43,7 +43,7 @@ export function TopBar({
       </div>
 
       {/* Right: Actions and status */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {/* Connection Status Pill */}
         {connectionStatus && (
           <ConnectionStatusPill status={connectionStatus} />
@@ -51,7 +51,7 @@ export function TopBar({
 
         {/* Action buttons */}
         {actions.length > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {actions.map((action, index) => (
               <div key={index}>
                 {action}

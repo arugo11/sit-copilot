@@ -274,7 +274,7 @@ export function AssistPanel({
       </section>
 
       <section className="card p-3 space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">{t('assistPanel.sections.summary')}</h2>
             <ToggleSwitch
@@ -287,7 +287,7 @@ export function AssistPanel({
           </div>
           <button
             type="button"
-            className="btn btn-xs btn-secondary"
+            className="btn btn-secondary w-full sm:w-auto"
             onClick={handleRefreshSummary}
             disabled={!summaryEnabled || isRefreshingSummary || !sessionId}
           >
@@ -351,7 +351,7 @@ export function AssistPanel({
         </div>
         <div className="pt-2 border-t border-border">
           <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <input
               id="mini-qa-input"
               className="input"
@@ -362,7 +362,7 @@ export function AssistPanel({
             />
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary w-full sm:w-auto"
               disabled={isQaSubmitting}
               onClick={() => {
                 const q = miniQuestion.trim()

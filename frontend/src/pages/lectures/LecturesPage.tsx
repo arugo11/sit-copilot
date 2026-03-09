@@ -607,7 +607,7 @@ function SessionCard({
   return (
     <div className="card p-6 space-y-4 hover:shadow-md transition-shadow">
       <div className="space-y-2">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           {isEditingTitle ? (
             <div className="flex-1 space-y-2">
               <input
@@ -650,7 +650,7 @@ function SessionCard({
               {session.course_name}
             </h3>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 self-end sm:self-start">
             <span className={`badge ${session.status === 'live' ? 'badge-live' : 'badge-muted'}`}>
               {statusLabel}
             </span>
@@ -1729,7 +1729,7 @@ export function LecturesPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-fg-primary mb-2">{t('lectures.title')}</h1>
+        <h1 className="mb-2 text-3xl font-bold text-fg-primary">{t('lectures.title')}</h1>
         <p className="text-fg-secondary">
           {hasSessions
             ? t('lectures.pageDescription.withSessions')
@@ -1737,12 +1737,12 @@ export function LecturesPage() {
         </p>
       </div>
 
-      <div className="mb-6 flex flex-wrap gap-3 items-center">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <button
           type="button"
           onClick={handleStartSession}
           disabled={isStarting}
-          className="btn btn-primary"
+          className="btn btn-primary w-full sm:w-auto"
         >
           {isStarting ? t('lectures.actions.starting') : t('lectures.actions.startSession')}
         </button>
@@ -1774,11 +1774,11 @@ export function LecturesPage() {
 
       {hasSessions && (
         <>
-          <div className="flex flex-wrap gap-4 mb-6" role="group" aria-label={t('lectures.filters.ariaLabel')}>
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap" role="group" aria-label={t('lectures.filters.ariaLabel')}>
             <button
               type="button"
               onClick={() => setFilter('all')}
-              className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+              className={`btn w-full sm:w-auto ${filter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
               aria-pressed={filter === 'all'}
             >
               {t('lectures.filters.all')}
@@ -1786,7 +1786,7 @@ export function LecturesPage() {
             <button
               type="button"
               onClick={() => setFilter('live')}
-              className={`btn ${filter === 'live' ? 'btn-primary' : 'btn-ghost'}`}
+              className={`btn w-full sm:w-auto ${filter === 'live' ? 'btn-primary' : 'btn-ghost'}`}
               aria-pressed={filter === 'live'}
             >
               {t('lectures.filters.live')}
@@ -1794,7 +1794,7 @@ export function LecturesPage() {
             <button
               type="button"
               onClick={() => setFilter('ended')}
-              className={`btn ${filter === 'ended' ? 'btn-primary' : 'btn-ghost'}`}
+              className={`btn w-full sm:w-auto ${filter === 'ended' ? 'btn-primary' : 'btn-ghost'}`}
               aria-pressed={filter === 'ended'}
             >
               {t('lectures.filters.ended')}
@@ -1813,7 +1813,7 @@ export function LecturesPage() {
               }
             />
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {filteredSessions.map((session) => (
                 <SessionCard
                   key={session.session_id}

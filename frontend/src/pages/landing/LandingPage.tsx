@@ -32,13 +32,13 @@ export function LandingPage() {
   return (
     <div className="min-h-screen bg-bg-page">
       <div className="container mx-auto px-4 py-12">
-        <div className="grid lg:grid-cols-5 gap-12 items-center">
+        <div className="grid gap-10 lg:grid-cols-5 lg:items-center lg:gap-12">
           {/* Left Content (60%) */}
           <div className="lg:col-span-3 space-y-8">
-            <h1 className="text-4xl md:text-5xl font-bold text-fg-primary">
+            <h1 className="text-3xl font-bold text-fg-primary sm:text-4xl md:text-5xl">
               {t('landing.title')}
             </h1>
-            <p className="text-lg text-fg-secondary">
+            <p className="text-base text-fg-secondary sm:text-lg">
               {t('landing.subtitle')}
             </p>
 
@@ -96,7 +96,7 @@ export function LandingPage() {
           </div>
 
           {/* Right Content (40%) */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="space-y-6 lg:col-span-2">
             <div className="card p-6 space-y-4">
               <h2 className="text-xl font-semibold text-fg-primary text-center">
                 {t('landing.quickStart.title')}
@@ -136,7 +136,7 @@ export function LandingPage() {
               </p>
             </div>
 
-            <div className="card p-5 bg-gradient-to-br from-bg-muted to-bg-surface border-border">
+            <div className="card border-border bg-gradient-to-br from-bg-muted to-bg-surface p-5">
               <h3 className="text-base font-semibold text-fg-primary mb-2">
                 {t('landing.support.title')}
               </h3>

@@ -112,7 +112,7 @@ export function Tabs({
         aria-label="Content tabs"
         className="border-b border-border"
       >
-        <div className="flex gap-1 -mb-px">
+        <div className="-mb-px flex flex-wrap gap-1 sm:flex-nowrap">
           {tabs.map((tab, index) => {
             const isActive = tab.value === activeTab
             const isDisabled = tab.disabled ?? false
@@ -131,10 +131,11 @@ export function Tabs({
                 onClick={() => setActiveTab(tab.value)}
                 onKeyDown={(e) => handleKeyDown(e, index as number)}
                 className={cn(
-                  'inline-flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2',
+                  'inline-flex min-w-0 items-center justify-center gap-2 rounded-t-md border-b-2 px-3 py-3 text-sm font-medium sm:px-4',
                   'transition-colors duration-180 ease-in-out',
                   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
                   'min-h-[44px]',
+                  'flex-1 sm:flex-none',
                   isActive
                     ? 'border-accent text-accent'
                     : 'border-transparent text-fg-secondary hover:text-fg-primary hover:border-fg-secondary/30',
@@ -146,7 +147,7 @@ export function Tabs({
                     {tab.icon}
                   </span>
                 )}
-                <span>{tab.label}</span>
+                <span className="whitespace-normal text-center">{tab.label}</span>
               </button>
             )
           })}

@@ -3,6 +3,7 @@
  */
 
 export { useLiveRegion, useConnectionAnnouncer, useQaAnnouncer } from './useLiveRegion'
+export { useMediaQuery, useIsMobile } from './useMediaQuery'
 export {
   useFocusTrap,
   useFocusReturn,
