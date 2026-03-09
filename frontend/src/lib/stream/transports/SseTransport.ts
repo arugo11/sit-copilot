@@ -31,6 +31,26 @@ function parseWsEvent(raw: string): WsEvent | null {
   }
 }
 
+type ConnectError = Error & {
+  status?: number
+  recoverable?: boolean
+}
+
+function buildConnectError(
+  message: string,
+  options: { status?: number; recoverable?: boolean } = {}
+): ConnectError {
+  const { status, recoverable } = options
+  const error = new Error(message) as ConnectError
+  if (typeof status === 'number') {
+    error.status = status
+  }
+  if (typeof recoverable === 'boolean') {
+    error.recoverable = recoverable
+  }
+  return error
+}
+
 export class SseTransport implements StreamTransport {
   private handler: ((event: WsEvent) => void) | null = null
   private controller: AbortController | null = null
@@ -58,13 +78,23 @@ export class SseTransport implements StreamTransport {
     })
 
     if (!response.ok) {
+      this.controller = null
       if (response.status === 401) {
-        throw new Error(getUnauthorizedMessage('lecture'))
+        throw buildConnectError(getUnauthorizedMessage('lecture'), {
+          status: 401,
+          recoverable: false,
+        })
       }
-      throw new Error(`SSE connection failed (${response.status})`)
+      throw buildConnectError(`SSE connection failed (${response.status})`, {
+        status: response.status,
+        recoverable: response.status !== 404,
+      })
     }
     if (!response.body) {
-      throw new Error('SSE response has no readable body')
+      this.controller = null
+      throw buildConnectError('SSE response has no readable body', {
+        recoverable: true,
+      })
     }
 
     this.emit({ type: 'session.status', payload: { connection: 'live' } })

@@ -95,14 +95,43 @@ export class StreamClient {
       await this.transport.connect(this.sessionId)
       this.reconnectAttempt = 0
     } catch (error) {
-      this.emit({ type: 'session.status', payload: { connection: 'reconnecting' } })
-      this.scheduleReconnect()
+      if (this.shouldReconnectAfterError(error)) {
+        this.emit({ type: 'session.status', payload: { connection: 'reconnecting' } })
+        this.scheduleReconnect()
+      } else {
+        this.shouldReconnect = false
+        this.clearReconnectTimer()
+        this.emit({ type: 'session.status', payload: { connection: 'error' } })
+      }
       if (propagateError) {
         throw error
       }
     } finally {
       this.isConnecting = false
     }
+  }
+
+  private shouldReconnectAfterError(error: unknown): boolean {
+    if (error && typeof error === 'object') {
+      const candidate = error as { recoverable?: unknown; status?: unknown }
+      if (typeof candidate.recoverable === 'boolean') {
+        return candidate.recoverable
+      }
+      if (candidate.status === 401 || candidate.status === 404) {
+        return false
+      }
+    }
+
+    if (error instanceof Error) {
+      if (error.message.includes('(401)') || error.message.includes('(404)')) {
+        return false
+      }
+      if (error.message.includes('Unauthorized')) {
+        return false
+      }
+    }
+
+    return true
   }
 
   private scheduleReconnect(): void {

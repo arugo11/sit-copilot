@@ -1443,6 +1443,79 @@ async def test_post_lecture_session_finalize_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_post_lecture_session_finalize_uses_session_event_window_range(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Finalize should rebuild summary windows based on session event range."""
+    start_payload = {
+        "course_name": "統計学基礎",
+        "course_id": None,
+        "lang_mode": "ja",
+        "camera_enabled": True,
+        "slide_roi": [100, 80, 900, 520],
+        "board_roi": [80, 560, 920, 980],
+        "consent_acknowledged": True,
+    }
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json=start_payload,
+        headers=AUTH_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 1_770_000_000_000,
+            "end_ms": 1_770_000_005_000,
+            "text": "序盤の説明です。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+    await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 1_770_000_070_000,
+            "end_ms": 1_770_000_095_000,
+            "text": "終盤の説明です。",
+            "confidence": 0.93,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    response = await async_client.post(
+        "/api/v4/lecture/session/finalize",
+        json={
+            "session_id": session_id,
+            "build_qa_index": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "finalized"
+    assert body["stats"]["summary_windows"] == 5
+
+    async with session_factory() as session:
+        summary_count_result = await session.execute(
+            select(SummaryWindow).where(SummaryWindow.session_id == session_id)
+        )
+        summary_windows = list(summary_count_result.scalars().all())
+
+    assert len(summary_windows) == 5
+    assert min(window.start_ms for window in summary_windows) > 1_000_000_000_000
+
+
+@pytest.mark.asyncio
 async def test_post_lecture_session_finalize_without_token_returns_401(
     async_client: AsyncClient,
 ) -> None:

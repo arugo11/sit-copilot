@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import re
 import asyncio
+import logging
+import re
 from typing import Literal, Protocol
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.user_id import get_user_id_candidates
@@ -33,6 +34,8 @@ from app.services.lecture_summary_generator_service import (
 
 __all__ = ["LectureSummaryService", "SqlAlchemyLectureSummaryService"]
 
+logger = logging.getLogger(__name__)
+
 WINDOW_SIZE_MS = 30_000
 LOOKBACK_MS = 60_000
 MAX_SUMMARY_CHARS = 600
@@ -43,6 +46,8 @@ EVIDENCE_TAG_ORDER: tuple[LectureEvidenceType, ...] = ("speech", "slide", "board
 SUMMARY_ALLOWED_SESSION_STATUSES = {"active", "live", "finalized"}
 WRITE_RETRY_ATTEMPTS = 5
 WRITE_RETRY_BASE_DELAY_SECONDS = 0.05
+DEFAULT_MAX_REBUILD_WINDOWS = 1_200
+NO_DATA_SUMMARY_MESSAGE = "要約に利用できる講義データがありません。"
 
 
 class LectureSummaryService(Protocol):
@@ -73,9 +78,12 @@ class SqlAlchemyLectureSummaryService:
         self,
         db: AsyncSession,
         summary_generator: LectureSummaryGeneratorService,
+        *,
+        max_rebuild_windows: int = DEFAULT_MAX_REBUILD_WINDOWS,
     ) -> None:
         self._db = db
         self._summary_generator = summary_generator
+        self._max_rebuild_windows = max(1, max_rebuild_windows)
 
     async def get_latest_summary(
         self,
@@ -86,18 +94,19 @@ class SqlAlchemyLectureSummaryService:
         """Build and return the latest summary window for a session."""
         session = await self._get_session_with_ownership(session_id, user_id)
 
-        max_event_ms = await self._get_max_event_ms(session_id)
-        if max_event_ms is None:
+        event_bounds = await self._get_event_bounds(session_id)
+        if event_bounds is None:
             return LectureSummaryLatestResponse(
                 session_id=session_id,
                 window_start_ms=0,
                 window_end_ms=0,
-                summary="要約に利用できる講義データがありません。",
+                summary=NO_DATA_SUMMARY_MESSAGE,
                 key_terms=[],
                 evidence=[],
                 status="no_data",
             )
 
+        _, max_event_ms = event_bounds
         window_end_ms = _to_window_end(max_event_ms)
         if not force_rebuild:
             existing_window = await self._get_summary_window(
@@ -122,13 +131,31 @@ class SqlAlchemyLectureSummaryService:
         """Rebuild all windows from session start to latest event timestamp."""
         session = await self._get_session_with_ownership(session_id, user_id)
 
-        max_event_ms = await self._get_max_event_ms(session_id)
-        if max_event_ms is None:
+        event_bounds = await self._get_event_bounds(session_id)
+        if event_bounds is None:
             return 0
 
+        min_event_ms, max_event_ms = event_bounds
+        first_window_end_ms = _to_window_end(min_event_ms)
         last_window_end_ms = _to_window_end(max_event_ms)
+        start_window_end_ms = first_window_end_ms
+
+        window_count = (
+            (last_window_end_ms - first_window_end_ms) // WINDOW_SIZE_MS
+        ) + 1
+        if window_count > self._max_rebuild_windows:
+            start_window_end_ms = last_window_end_ms - (
+                (self._max_rebuild_windows - 1) * WINDOW_SIZE_MS
+            )
+            logger.warning(
+                "summary_rebuild_window_count_capped session_id=%s requested=%s capped=%s",
+                session_id,
+                window_count,
+                self._max_rebuild_windows,
+            )
+
         for window_end_ms in range(
-            WINDOW_SIZE_MS, last_window_end_ms + 1, WINDOW_SIZE_MS
+            start_window_end_ms, last_window_end_ms + 1, WINDOW_SIZE_MS
         ):
             existing_window = await self._get_summary_window(
                 session_id=session_id,
@@ -169,6 +196,26 @@ class SqlAlchemyLectureSummaryService:
             start_ms=lookback_start_ms,
             end_ms=window_end_ms,
         )
+
+        if not speech_events and not visual_events:
+            if persist:
+                await self._upsert_summary_window(
+                    session_id=session_id,
+                    window_start_ms=window_start_ms,
+                    window_end_ms=window_end_ms,
+                    summary_text="",
+                    key_terms=[],
+                    evidence=[],
+                )
+            return LectureSummaryLatestResponse(
+                session_id=session_id,
+                window_start_ms=window_start_ms,
+                window_end_ms=window_end_ms,
+                summary="",
+                key_terms=[],
+                evidence=[],
+                status="no_data",
+            )
 
         summary_result = await self._summary_generator.generate_summary(
             speech_events=speech_events,
@@ -265,25 +312,41 @@ class SqlAlchemyLectureSummaryService:
             )
         return session
 
-    async def _get_max_event_ms(self, session_id: str) -> int | None:
+    async def _get_event_bounds(self, session_id: str) -> tuple[int, int] | None:
         speech_result = await self._db.execute(
-            select(func.max(SpeechEvent.end_ms)).where(
+            select(
+                func.min(SpeechEvent.start_ms),
+                func.max(SpeechEvent.end_ms),
+            ).where(
                 SpeechEvent.session_id == session_id,
                 SpeechEvent.is_final == True,  # noqa: E712
             )
         )
+        speech_min, speech_max = speech_result.one()
         visual_result = await self._db.execute(
-            select(func.max(VisualEvent.timestamp_ms)).where(
-                VisualEvent.session_id == session_id
-            )
+            select(
+                func.min(VisualEvent.timestamp_ms),
+                func.max(VisualEvent.timestamp_ms),
+            ).where(VisualEvent.session_id == session_id)
         )
-        speech_max = speech_result.scalar_one_or_none()
-        visual_max = visual_result.scalar_one_or_none()
+        visual_min, visual_max = visual_result.one()
 
-        values = [value for value in [speech_max, visual_max] if value is not None]
-        if not values:
+        min_candidates = [
+            value for value in [speech_min, visual_min] if isinstance(value, int)
+        ]
+        max_candidates = [
+            value for value in [speech_max, visual_max] if isinstance(value, int)
+        ]
+        if not min_candidates or not max_candidates:
             return None
-        return max(values)
+        return min(min_candidates), max(max_candidates)
+
+    async def _get_max_event_ms(self, session_id: str) -> int | None:
+        event_bounds = await self._get_event_bounds(session_id)
+        if event_bounds is None:
+            return None
+        _, max_event_ms = event_bounds
+        return max_event_ms
 
     async def _fetch_speech_events(
         self,
