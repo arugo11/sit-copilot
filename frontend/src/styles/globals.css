@@ -96,6 +96,7 @@
 }
 
 html {
+  min-width: 320px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -106,6 +107,10 @@ body {
   font-family: 'Noto Sans JP', 'Segoe UI', system-ui, -apple-system, sans-serif;
   background-color: var(--color-bg-page);
   color: var(--color-fg-primary);
+}
+
+#root {
+  min-height: 100vh;
 }
 
 /* Focus Ring - Accessibility requirement */

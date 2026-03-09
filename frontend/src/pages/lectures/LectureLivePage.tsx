@@ -11,6 +11,8 @@ import { useToast } from '@/components/common/Toast'
 import { AppShell } from '@/components/common/AppShell'
 import { TranscriptPanel } from '@/features/live/components/TranscriptPanel'
 import { AssistPanel } from '@/features/live/components/AssistPanel'
+import { SourcePanel } from '@/features/live/components/SourcePanel'
+import { Tabs } from '@/components/ui'
 import {
   createReviewAnswerId,
   requestReviewQaAnswer,
@@ -25,6 +27,7 @@ import { useReviewQaStore } from '@/stores/reviewQaStore'
 import { useMicrophoneInput } from '@/features/audio/useMicrophoneInput'
 import { useSpeechRecognition } from '@/features/audio/useSpeechRecognition'
 import { useUserSettings } from '@/lib/api/hooks'
+import { useIsMobile } from '@/hooks'
 import {
   ApiError,
   demoApi,
@@ -143,6 +146,7 @@ export function LectureLivePage() {
   const { id } = useParams()
   const sessionId = id ?? 'session'
   const { showToast } = useToast()
+  const isMobile = useIsMobile()
   const { announceConnection } = useConnectionAnnouncer()
   const { announceQaStatus } = useQaAnnouncer()
   const { data: userSettings } = useUserSettings()
@@ -720,6 +724,19 @@ export function LectureLivePage() {
     ]
   )
 
+  const connectStream = useCallback(() => {
+    if (document.visibilityState !== 'visible') {
+      return
+    }
+    streamClient.connect(sessionId).catch((error) => {
+      showToast({
+        variant: 'warning',
+        title: t('live.messages.sseConnectFailedTitle'),
+        message: `${getApiErrorMessage(error, t('live.messages.sseConnectFailedMessage'))} ${t('live.messages.autoReconnectMessage')}`,
+      })
+    })
+  }, [sessionId, showToast, t])
+
   const startLiveCapture = useCallback(async () => {
     if (liveState !== 'idle' || didFinalizeSessionRef.current) {
       return
@@ -745,23 +762,16 @@ export function LectureLivePage() {
     }
 
     streamClient.setTransport(sseStreamTransport)
-    streamClient.connect(sessionId).catch((error) => {
-      showToast({
-        variant: 'warning',
-        title: t('live.messages.sseConnectFailedTitle'),
-        message: `${getApiErrorMessage(error, t('live.messages.sseConnectFailedMessage'))} ${t('live.messages.autoReconnectMessage')}`,
-      })
-    })
+    connectStream()
   }, [
+    connectStream,
     liveState,
     sessionId,
     setConnection,
     setLiveState,
     setSessionId,
     setTranslationFallbackActive,
-    showToast,
     startRecording,
-    t,
   ])
 
   // 音声認識の開始/停止を録音状態に同期
@@ -936,6 +946,7 @@ export function LectureLivePage() {
     uiLocale,
     notifyTranslationFallback,
     transformSubtitleForMode,
+    connectStream,
   ])
 
   useEffect(() => {
@@ -1133,12 +1144,23 @@ export function LectureLivePage() {
   const audioBarCount = 5
   const filledBars = Math.round(audioLevel * audioBarCount)
   const shortSessionId = sessionId.length > 8 ? `${sessionId.slice(0, 8)}…` : sessionId
+  const assistPanel = (
+    <AssistPanel
+      onAskMiniQuestion={handleMiniQuestion}
+      qaTurns={qaTurns}
+      qaStatus={qaStatus}
+      isQaSubmitting={isQaSubmitting}
+      onQaCitationSelect={handleQaCitationSelect}
+      onQaRetry={handleQaRetry}
+      onQaRegenerate={handleQaRegenerate}
+    />
+  )
 
   return (
     <AppShell
       topbar={
-        <div className="py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h1 className="text-lg font-semibold">{t('live.stream.title')}</h1>
             <span
               className={`badge ${connectionBadgeClass}`}
@@ -1162,10 +1184,10 @@ export function LectureLivePage() {
               <span className="text-xs text-warning" title={t('live.aria.transcriptLag')}>⚠️ {transcriptLagMs}ms</span>
             )}
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <button
               type="button"
-              className={`btn ${primaryButtonClass}`}
+              className={`btn w-full sm:w-auto ${primaryButtonClass}`}
               onClick={() => {
                 markInteraction()
                 if (liveState === 'running') {
@@ -1199,29 +1221,45 @@ export function LectureLivePage() {
             </div>
             <Link
               to="/lectures"
-              state={{ autoTitleSessionId: sessionId }}
-              className="btn btn-secondary"
+              className="btn btn-secondary w-full sm:w-auto"
             >
               {t('nav.lectures')}
             </Link>
           </div>
         </div>
       }
-      rightRail={
-        <AssistPanel
-          onAskMiniQuestion={handleMiniQuestion}
-          qaTurns={qaTurns}
-          qaStatus={qaStatus}
-          isQaSubmitting={isQaSubmitting}
-          onQaCitationSelect={handleQaCitationSelect}
-          onQaRetry={handleQaRetry}
-          onQaRegenerate={handleQaRegenerate}
-        />
-      }
+      rightRail={!isMobile ? <div className="space-y-4">{assistPanel}<SourcePanel /></div> : undefined}
     >
-      <div className="h-[calc(100vh-130px)]">
-        <TranscriptPanel />
-      </div>
+      {isMobile ? (
+        <Tabs
+          defaultTab="transcript"
+          tabs={[
+            {
+              value: 'transcript',
+              label: t('live.stream.title'),
+              content: (
+                <div className="h-[calc(100vh-210px)] min-h-[24rem]">
+                  <TranscriptPanel />
+                </div>
+              ),
+            },
+            {
+              value: 'assist',
+              label: t('assistPanel.sections.qa'),
+              content: assistPanel,
+            },
+            {
+              value: 'sources',
+              label: t('sourcePanel.title'),
+              content: <SourcePanel />,
+            },
+          ]}
+        />
+      ) : (
+        <div className="h-[calc(100vh-130px)]">
+          <TranscriptPanel />
+        </div>
+      )}
     </AppShell>
   )
 }

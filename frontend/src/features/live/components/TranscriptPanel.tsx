@@ -61,7 +61,7 @@ export function TranscriptPanel() {
 
   return (
     <div className="h-full flex flex-col relative">
-      <div className="p-3 border-b border-border bg-bg-surface flex flex-wrap gap-3 items-center">
+      <div className="flex flex-wrap items-start gap-3 border-b border-border bg-bg-surface p-3">
         <SegmentedControl
           ariaLabel={t('transcriptPanel.languageAria')}
           value={selectedLanguage}
@@ -70,6 +70,7 @@ export function TranscriptPanel() {
             void switchLanguage(mode)
           }}
           options={languageOptions}
+          className="w-full sm:w-auto"
         />
         <SegmentedControl
           ariaLabel={t('transcriptPanel.densityAria')}
@@ -79,8 +80,9 @@ export function TranscriptPanel() {
             { value: 'comfortable', label: t('transcriptPanel.density.comfortable') },
             { value: 'compact', label: t('transcriptPanel.density.compact') },
           ]}
+          className="w-full sm:w-auto"
         />
-        <label className="text-sm text-fg-secondary inline-flex items-center gap-2">
+        <label className="inline-flex min-h-10 items-center gap-2 text-sm text-fg-secondary">
           <input
             type="checkbox"
             checked={autoScroll}
@@ -93,7 +95,7 @@ export function TranscriptPanel() {
         )}
       </div>
 
-      <div ref={panelRef} className="flex-1 overflow-y-auto p-4 space-y-3" onScroll={handleScroll}>
+      <div ref={panelRef} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3" onScroll={handleScroll}>
         {sortedLines.length === 0 ? (
           <div className="card p-4 text-sm text-fg-secondary">{t('transcriptPanel.waiting')}</div>
         ) : (
@@ -162,8 +164,8 @@ export function TranscriptPanel() {
       </div>
 
       {!autoScroll && (
-        <div className="absolute bottom-4 right-4">
-          <button type="button" className="btn btn-primary shadow-lg" onClick={backToCurrent}>
+        <div className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4">
+          <button type="button" className="btn btn-primary px-3 py-2 text-sm shadow-lg" onClick={backToCurrent}>
             {t('transcriptPanel.backToCurrent')}
           </button>
         </div>

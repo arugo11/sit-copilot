@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/common/EmptyState'
+import { useIsMobile } from '@/hooks'
 
 type SourceType = 'audio' | 'slide' | 'board' | 'ocr'
 
@@ -38,6 +39,7 @@ function buildMockRows(locale: 'ja' | 'en'): SourceRow[] {
 
 export function LectureSourcesPage() {
   const { t, i18n } = useTranslation()
+  const isMobile = useIsMobile()
   const locale: 'ja' | 'en' =
     (i18n.resolvedLanguage ?? i18n.language).startsWith('en') ? 'en' : 'ja'
 
@@ -68,9 +70,9 @@ export function LectureSourcesPage() {
         <p className="text-fg-secondary">{t('lectureSources.description')}</p>
       </div>
 
-      <div className="flex flex-wrap gap-4 mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
         <select
-          className="input max-w-56"
+          className="input w-full sm:max-w-56"
           value={typeFilter}
           onChange={(event) => setTypeFilter(event.target.value as 'all' | SourceType)}
         >
@@ -108,8 +110,37 @@ export function LectureSourcesPage() {
           }
         />
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full" role="table">
+        <>
+          {isMobile ? (
+          <div className="space-y-3">
+            {filteredRows.map((source) => (
+              <button
+                key={source.id}
+                type="button"
+                className={`card w-full space-y-3 p-4 text-left ${
+                  selectedRow === source.id ? 'ring-2 ring-accent' : ''
+                }`}
+                onClick={() => setSelectedRow(source.id)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-fg-primary">{source.time}</p>
+                    <span className="badge badge-default mt-2">{typeLabel(source.type)}</span>
+                  </div>
+                  <span className="text-xs text-fg-secondary">
+                    {source.confidence ? `${Math.round(source.confidence * 100)}%` : '-'}
+                  </span>
+                </div>
+                <p className="text-sm text-fg-secondary break-words">{source.text}</p>
+                <span className="btn btn-ghost w-full justify-center">
+                  {t('lectureSources.table.open')}
+                </span>
+              </button>
+            ))}
+          </div>
+          ) : (
+          <div className="card overflow-hidden">
+            <table className="w-full" role="table">
             <caption className="sr-only">{t('lectureSources.table.caption')}</caption>
             <thead className="bg-bg-muted">
               <tr>
@@ -154,8 +185,10 @@ export function LectureSourcesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+          )}
+        </>
       )}
     </div>
   )

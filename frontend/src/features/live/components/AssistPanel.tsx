@@ -335,7 +335,7 @@ export function AssistPanel({
 
       {paidFeatureVisibility.summary && (
         <section className="card p-3 space-y-2">
-        <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">{t('assistPanel.sections.summary')}</h2>
             <ToggleSwitch
@@ -348,7 +348,7 @@ export function AssistPanel({
           </div>
           <button
             type="button"
-            className="btn btn-xs btn-secondary"
+            className="btn btn-secondary w-full sm:w-auto"
             onClick={() => {
               void handleRefreshSummary(true)
             }}
@@ -361,100 +361,100 @@ export function AssistPanel({
           >
             {isRefreshingSummary ? t('assistPanel.updating') : t('assistPanel.refreshNow')}
           </button>
-        </div>
-        {!summaryEnabled ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.off')}</p>
-        ) : summaryPoints.length === 0 ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.summary.waiting')}</p>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {summaryPoints.map((point) => (
-              <li key={point} className="bg-bg-muted rounded px-2 py-1">• {point}</li>
-            ))}
-          </ul>
-        )}
+          </div>
+          {!summaryEnabled ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.summary.off')}</p>
+          ) : summaryPoints.length === 0 ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.summary.waiting')}</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {summaryPoints.map((point) => (
+                <li key={point} className="bg-bg-muted rounded px-2 py-1">• {point}</li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       {paidFeatureVisibility.keyterms && (
         <section className="card p-3 space-y-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
-          <ToggleSwitch
-            checked={keytermsEnabled}
-            onChange={() => {
-              void handleKeytermsToggleChange(!keytermsEnabled)
-            }}
-            label={t('assistPanel.keytermsToggleAria')}
-          />
-        </div>
-        {!keytermsEnabled ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>
-        ) : assistTerms.length === 0 ? (
-          <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.waiting')}</p>
-        ) : (
-          <ul className="space-y-2">
-            {assistTerms.map((term) => (
-              <li key={term.term} className="text-sm">
-                <p className="font-medium text-fg-primary">{term.term} <span className="text-fg-secondary">({term.translation})</span></p>
-                <p className="text-fg-secondary">{term.explanation}</p>
-              </li>
-            ))}
-          </ul>
-        )}
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">{t('assistPanel.sections.keyterms')}</h2>
+            <ToggleSwitch
+              checked={keytermsEnabled}
+              onChange={() => {
+                void handleKeytermsToggleChange(!keytermsEnabled)
+              }}
+              label={t('assistPanel.keytermsToggleAria')}
+            />
+          </div>
+          {!keytermsEnabled ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.off')}</p>
+          ) : assistTerms.length === 0 ? (
+            <p className="text-sm text-fg-secondary">{t('assistPanel.keyterms.waiting')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {assistTerms.map((term) => (
+                <li key={term.term} className="text-sm">
+                  <p className="font-medium text-fg-primary">{term.term} <span className="text-fg-secondary">({term.translation})</span></p>
+                  <p className="text-fg-secondary">{term.explanation}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       {paidFeatureVisibility.qa && (
         <section className="card p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">{t('assistPanel.sections.qa')}</h2>
-          <span
-            className={`badge ${
-              qaStatus === 'streaming'
-                ? 'badge-warning'
-                : qaStatus === 'error'
-                  ? 'badge-danger'
-                  : 'badge-success'
-            }`}
-          >
-            {qaStatusLabel[qaStatus]}
-          </span>
-        </div>
-        <div className="pt-2 border-t border-border">
-          <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
-          <div className="flex gap-2">
-            <input
-              id="mini-qa-input"
-              className="input"
-              value={miniQuestion}
-              onChange={(event) => setMiniQuestion(event.target.value)}
-              placeholder={t('assistPanel.miniQuestionPlaceholder')}
-              disabled={isQaSubmitting}
-            />
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={isQaSubmitting}
-              onClick={() => {
-                const q = miniQuestion.trim()
-                if (!q) return
-                onAskMiniQuestion(q)
-                setMiniQuestion('')
-              }}
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t('assistPanel.sections.qa')}</h2>
+            <span
+              className={`badge ${
+                qaStatus === 'streaming'
+                  ? 'badge-warning'
+                  : qaStatus === 'error'
+                    ? 'badge-danger'
+                    : 'badge-success'
+              }`}
             >
-              {isQaSubmitting ? t('assistPanel.submitting') : t('assistPanel.submit')}
-            </button>
+              {qaStatusLabel[qaStatus]}
+            </span>
           </div>
-        </div>
-        <QAStreamBlocks
-          turns={qaTurns}
-          isBusy={isQaSubmitting}
-          labels={{ resume: t('assistPanel.retry'), regenerate: t('assistPanel.regenerate') }}
-          onCitationSelect={onQaCitationSelect}
-          onRetry={onQaRetry}
-          onRegenerate={onQaRegenerate}
-        />
+          <div className="pt-2 border-t border-border">
+            <label className="block text-xs text-fg-secondary mb-1" htmlFor="mini-qa-input">{t('assistPanel.miniQuestionLabel')}</label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                id="mini-qa-input"
+                className="input"
+                value={miniQuestion}
+                onChange={(event) => setMiniQuestion(event.target.value)}
+                placeholder={t('assistPanel.miniQuestionPlaceholder')}
+                disabled={isQaSubmitting}
+              />
+              <button
+                type="button"
+                className="btn btn-primary w-full sm:w-auto"
+                disabled={isQaSubmitting}
+                onClick={() => {
+                  const q = miniQuestion.trim()
+                  if (!q) return
+                  onAskMiniQuestion(q)
+                  setMiniQuestion('')
+                }}
+              >
+                {isQaSubmitting ? t('assistPanel.submitting') : t('assistPanel.submit')}
+              </button>
+            </div>
+          </div>
+          <QAStreamBlocks
+            turns={qaTurns}
+            isBusy={isQaSubmitting}
+            labels={{ resume: t('assistPanel.retry'), regenerate: t('assistPanel.regenerate') }}
+            onCitationSelect={onQaCitationSelect}
+            onRetry={onQaRetry}
+            onRegenerate={onQaRegenerate}
+          />
         </section>
       )}
     </div>
