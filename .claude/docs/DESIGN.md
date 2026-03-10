@@ -30,6 +30,38 @@ Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Billing Runaway Prevention and Leave-Stop Controls (2026-02-26)
+
+### Decision Summary
+
+- Fixed summary rebuild window baseline to start from the first event timestamp in the target session, not from epoch-aligned global windows.
+- Added rebuild cap setting `LECTURE_SUMMARY_REBUILD_MAX_WINDOWS` (default: `1200`) and enforced capped latest-window rebuild when range is too large.
+- Added no-data fast path in summary window build:
+  - if both speech and visual events are empty for the window, skip LLM call and persist empty summary payload.
+- Added operational repair script:
+  - `scripts/repair_summary_windows.py`
+  - default mode `local` (no Azure LLM), optional `azure` mode with resilient fallback.
+- Updated lecture live page behavior to stop generation-related activity when user leaves active tab context:
+  - on `visibilitychange=hidden` or `pagehide`: stop recording + disconnect SSE,
+  - on `visibilitychange=visible`: reconnect SSE and resume recording only if recording was active before hide.
+- Removed `autoTitleSessionId` route-state handoff from Live -> Lectures navigation to prevent automatic QA/title generation after leaving live session page.
+- Hardened stream reconnection policy:
+  - do not auto-reconnect on non-recoverable SSE connect errors (`401`, `404`).
+
+### Rationale
+
+- Azure billing spike root cause was unbounded session-window reconstruction from epoch baseline.
+- Even after user navigation, background generation triggers (auto-title/stream reconnect loops) can continue unintended calls unless explicitly stopped.
+- Local-first repair avoids additional cost while cleaning already-corrupted summary window data.
+
+### Compatibility Rules
+
+- No public lecture API schema changes.
+- Existing session lifecycle semantics remain:
+  - no auto-finalize on tab hide,
+  - same session can resume after visibility recovery.
+- Auto-title remains available via explicit/manual actions; only leave-triggered auto invocation is removed.
+
 ## Lecture QA Failure Handling and Runtime Simplification (2026-02-24)
 
 ### Decision Summary

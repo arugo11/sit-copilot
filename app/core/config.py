@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     lecture_live_keyterms_enabled: bool = False
     lecture_qa_enabled: bool = False
     lecture_idle_autostop_seconds: int = Field(default=120, ge=30, le=600)
+    lecture_summary_rebuild_max_windows: int = Field(
+        default=1_200,
+        ge=1,
+        le=10_000,
+    )
     azure_openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(

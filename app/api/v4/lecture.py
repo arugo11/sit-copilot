@@ -657,6 +657,7 @@ def get_lecture_summary_service(
     inner_service = SqlAlchemyLectureSummaryService(
         db=db,
         summary_generator=summary_generator,
+        max_rebuild_windows=settings.lecture_summary_rebuild_max_windows,
     )
     return ObservedLectureSummaryService(inner=inner_service, observer=observer)
 

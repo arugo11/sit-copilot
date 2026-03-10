@@ -278,6 +278,171 @@ async def test_rebuild_windows_creates_window_per_30_seconds(
 
 
 @pytest.mark.asyncio
+async def test_rebuild_windows_uses_first_session_event_as_window_start(
+    db_session: AsyncSession,
+    mock_summary_generator: MockLectureSummaryGeneratorService,
+) -> None:
+    """Rebuild should start from session-first event window, not epoch window."""
+    session = LectureSession(
+        id="lec_summary_epoch_guard_001",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="active",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=1_770_000_000_000,
+            end_ms=1_770_000_005_000,
+            text="序盤の説明です。",
+            confidence=0.94,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=1_770_000_070_000,
+            end_ms=1_770_000_095_000,
+            text="終盤の説明です。",
+            confidence=0.92,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    await db_session.flush()
+
+    service = SqlAlchemyLectureSummaryService(
+        db_session,
+        summary_generator=mock_summary_generator,
+        max_rebuild_windows=50,
+    )
+    count = await service.rebuild_windows(
+        session_id=session.id,
+        user_id="demo_user",
+    )
+
+    assert count == 5
+    assert mock_summary_generator.call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_rebuild_windows_caps_window_count_with_configured_limit(
+    db_session: AsyncSession,
+    mock_summary_generator: MockLectureSummaryGeneratorService,
+) -> None:
+    """Rebuild should cap processing to max_rebuild_windows."""
+    session = LectureSession(
+        id="lec_summary_cap_001",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="active",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    base_ms = 1_770_100_000_000
+    for offset in range(201):
+        start_ms = base_ms + (offset * 30_000)
+        db_session.add(
+            SpeechEvent(
+                session_id=session.id,
+                start_ms=start_ms,
+                end_ms=start_ms + 1_000,
+                text=f"イベント {offset}",
+                confidence=0.9,
+                is_final=True,
+                speaker="teacher",
+            )
+        )
+    await db_session.flush()
+
+    service = SqlAlchemyLectureSummaryService(
+        db_session,
+        summary_generator=mock_summary_generator,
+        max_rebuild_windows=20,
+    )
+    count = await service.rebuild_windows(
+        session_id=session.id,
+        user_id="demo_user",
+    )
+
+    assert count == 20
+    assert mock_summary_generator.call_count == 20
+
+
+@pytest.mark.asyncio
+async def test_rebuild_windows_skips_llm_for_empty_windows(
+    db_session: AsyncSession,
+    mock_summary_generator: MockLectureSummaryGeneratorService,
+) -> None:
+    """Rebuild should persist empty windows without invoking LLM."""
+    session = LectureSession(
+        id="lec_summary_sparse_001",
+        user_id="demo_user",
+        course_id=None,
+        course_name="統計学基礎",
+        lang_mode="ja",
+        status="active",
+        camera_enabled=True,
+        slide_roi=[100, 80, 900, 520],
+        board_roi=[80, 560, 920, 980],
+        consent_acknowledged=True,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(session)
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=30_000,
+            end_ms=31_000,
+            text="冒頭イベントです。",
+            confidence=0.9,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    db_session.add(
+        SpeechEvent(
+            session_id=session.id,
+            start_ms=300_000,
+            end_ms=301_000,
+            text="終盤イベントです。",
+            confidence=0.9,
+            is_final=True,
+            speaker="teacher",
+        )
+    )
+    await db_session.flush()
+
+    service = SqlAlchemyLectureSummaryService(
+        db_session,
+        summary_generator=mock_summary_generator,
+    )
+    count = await service.rebuild_windows(
+        session_id=session.id,
+        user_id="demo_user",
+    )
+
+    assert count == 11
+    assert mock_summary_generator.call_count == 5
+
+
+@pytest.mark.asyncio
 async def test_summary_rejects_other_user_session(
     db_session: AsyncSession,
     mock_summary_generator: MockLectureSummaryGeneratorService,
