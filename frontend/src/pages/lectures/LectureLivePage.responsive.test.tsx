@@ -61,10 +61,6 @@ vi.mock('@/features/live/components/AssistPanel', () => ({
   AssistPanel: () => <div data-testid="assist-panel">Assist Panel</div>,
 }))
 
-vi.mock('@/features/live/components/SourcePanel', () => ({
-  SourcePanel: () => <div data-testid="source-panel">Source Panel</div>,
-}))
-
 vi.mock('@/features/review/reviewQaApi', () => ({
   createReviewAnswerId: () => 'answer-1',
   requestReviewQaAnswer: vi.fn(),
@@ -219,12 +215,11 @@ vi.mock('@/features/live/utils/assistSupport', () => ({
 }))
 
 describe('LectureLivePage responsive layout', () => {
-  it('renders mobile tab navigation for transcript, assist, and sources', () => {
+  it('renders mobile tab navigation for transcript and assist', () => {
     render(<LectureLivePage />)
 
     expect(screen.getByRole('tab', { name: 'live.stream.title' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'assistPanel.sections.qa' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'sourcePanel.title' })).toBeInTheDocument()
     expect(screen.getByTestId('transcript-panel')).toBeInTheDocument()
   })
 })

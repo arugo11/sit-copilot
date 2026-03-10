@@ -16,7 +16,6 @@
     "features": {
       "title": "主な機能",
       "captions": "リアルタイム字幕と翻訳",
-      "materials": "資料表示",
       "qa": "講義サポート"
     },
     "audience": {
@@ -134,37 +133,6 @@
       "sessionDeleteFailed": "セッション削除に失敗しました",
       "sessionDeleteFailedAfterSync": "セッション状態の同期後も削除できませんでした。",
       "sessionDeleteApiFailed": "セッション削除APIに失敗しました。"
-    }
-  },
-  "lectureSources": {
-    "title": "ソース一覧",
-    "description": "OCRと文字起こしの元データ",
-    "types": {
-      "audio": "音声",
-      "slide": "投影資料",
-      "board": "板書",
-      "ocr": "OCR"
-    },
-    "filters": {
-      "all": "すべての種別",
-      "audio": "音声",
-      "slide": "投影資料",
-      "board": "板書",
-      "keywordPlaceholder": "キーワードで検索..."
-    },
-    "empty": {
-      "title": "該当するソースがありません",
-      "description": "フィルタまたはキーワードを変更してください。",
-      "clear": "フィルタを解除"
-    },
-    "table": {
-      "caption": "講義ソース一覧",
-      "time": "時刻",
-      "type": "種別",
-      "excerpt": "抜粋",
-      "confidence": "信頼度",
-      "actions": "操作",
-      "open": "開く"
     }
   },
   "live": {
@@ -383,18 +351,6 @@
     "translationFallbackLine": "翻訳フォールバック表示中",
     "translationWaiting": "翻訳生成待機中（原文表示）",
     "backToCurrent": "現在位置に戻る"
-  },
-  "sourcePanel": {
-    "title": "資料",
-    "tabs": {
-      "slide": "投影資料",
-      "board": "板書"
-    },
-    "latest": "{{title}} 最新",
-    "waitingFrames": "{{title}}のフレーム待機中",
-    "ocrHistory": "OCR 更新履歴",
-    "noOcrHistory": "まだOCR更新はありません",
-    "recentHistory": "直近履歴"
   },
   "qaStream": {
     "empty": "質問を入力すると回答ブロックがここに追加されます。",

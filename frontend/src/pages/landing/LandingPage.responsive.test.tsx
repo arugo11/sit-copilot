@@ -34,5 +34,6 @@ describe('LandingPage responsive layout', () => {
 
     expect(screen.getByRole('heading', { name: 'landing.title' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'landing.demo' })).toBeInTheDocument()
+    expect(screen.queryByText('landing.features.materials')).not.toBeInTheDocument()
   })
 })

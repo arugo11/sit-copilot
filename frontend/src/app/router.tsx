@@ -11,7 +11,6 @@ import { useTranslation } from 'react-i18next'
 const LandingPage = lazy(() => import('@/pages/landing/LandingPage').then(m => ({ default: m.LandingPage })))
 const LecturesPage = lazy(() => import('@/pages/lectures/LecturesPage').then(m => ({ default: m.LecturesPage })))
 const LectureLivePage = lazy(() => import('@/pages/lectures/LectureLivePage').then(m => ({ default: m.LectureLivePage })))
-const LectureSourcesPage = lazy(() => import('@/pages/lectures/LectureSourcesPage').then(m => ({ default: m.LectureSourcesPage })))
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
 
 import { Skeleton } from '@/components/common/Skeleton'
@@ -47,7 +46,7 @@ const router = createBrowserRouter([
   },
   {
     path: '/lectures/:id/sources',
-    element: <LectureSourcesPage />,
+    element: <Navigate to="/lectures" replace />,
   },
   {
     path: '/lecture/:session_id/qa',

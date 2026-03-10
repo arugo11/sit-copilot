@@ -11,7 +11,6 @@ import { useToast } from '@/components/common/Toast'
 import { AppShell } from '@/components/common/AppShell'
 import { TranscriptPanel } from '@/features/live/components/TranscriptPanel'
 import { AssistPanel } from '@/features/live/components/AssistPanel'
-import { SourcePanel } from '@/features/live/components/SourcePanel'
 import { Tabs } from '@/components/ui'
 import {
   createReviewAnswerId,
@@ -644,7 +643,7 @@ export function LectureLivePage() {
   )
 
   // 仕様: 入力は常に日本語ASR。表示言語(ja/easy-ja/en)とは独立させる。
-  const speechRecognitionLang = 'ja-JP'
+  const speechRecognitionLang = import.meta.env.VITE_DEFAULT_ASR_LOCALE || 'ja-JP'
 
   const { isSupported: speechSupported, startListening, stopListening } =
     useSpeechRecognition({
@@ -1228,7 +1227,7 @@ export function LectureLivePage() {
           </div>
         </div>
       }
-      rightRail={!isMobile ? <div className="space-y-4">{assistPanel}<SourcePanel /></div> : undefined}
+      rightRail={!isMobile ? <div className="space-y-4">{assistPanel}</div> : undefined}
     >
       {isMobile ? (
         <Tabs
@@ -1247,11 +1246,6 @@ export function LectureLivePage() {
               value: 'assist',
               label: t('assistPanel.sections.qa'),
               content: assistPanel,
-            },
-            {
-              value: 'sources',
-              label: t('sourcePanel.title'),
-              content: <SourcePanel />,
             },
           ]}
         />
