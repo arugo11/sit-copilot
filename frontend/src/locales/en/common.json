@@ -16,7 +16,6 @@
     "features": {
       "title": "Key Features",
       "captions": "Real-time captions and translation",
-      "materials": "Lecture materials",
       "qa": "Quick grounded QA"
     },
     "audience": {
@@ -134,37 +133,6 @@
       "sessionDeleteFailed": "Failed to delete session",
       "sessionDeleteFailedAfterSync": "Failed to delete session even after state sync.",
       "sessionDeleteApiFailed": "Session delete API failed."
-    }
-  },
-  "lectureSources": {
-    "title": "Sources",
-    "description": "Raw OCR and transcription data",
-    "types": {
-      "audio": "Audio",
-      "slide": "Slides",
-      "board": "Board",
-      "ocr": "OCR"
-    },
-    "filters": {
-      "all": "All types",
-      "audio": "Audio",
-      "slide": "Slides",
-      "board": "Board",
-      "keywordPlaceholder": "Search by keyword..."
-    },
-    "empty": {
-      "title": "No matching sources",
-      "description": "Try changing the filter or keyword.",
-      "clear": "Clear Filter"
-    },
-    "table": {
-      "caption": "Lecture source list",
-      "time": "Time",
-      "type": "Type",
-      "excerpt": "Excerpt",
-      "confidence": "Confidence",
-      "actions": "Actions",
-      "open": "Open"
     }
   },
   "live": {
@@ -383,18 +351,6 @@
     "translationFallbackLine": "Showing translation fallback",
     "translationWaiting": "Waiting for translation (showing original)",
     "backToCurrent": "Back to Current"
-  },
-  "sourcePanel": {
-    "title": "Sources",
-    "tabs": {
-      "slide": "Slides",
-      "board": "Board"
-    },
-    "latest": "Latest {{title}}",
-    "waitingFrames": "Waiting for {{title}} frames",
-    "ocrHistory": "OCR Update History",
-    "noOcrHistory": "No OCR updates yet",
-    "recentHistory": "Recent History"
   },
   "qaStream": {
     "empty": "Answer blocks will appear here after you submit a question.",
