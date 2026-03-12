@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { expect, test } from '@playwright/test'
 
@@ -35,8 +36,10 @@ type LectureScript = {
   expected: ScriptExpectations
 }
 
+const currentFilePath = fileURLToPath(import.meta.url)
+const currentDirPath = path.dirname(currentFilePath)
 const SCRIPT_PATH = path.resolve(
-  __dirname,
+  currentDirPath,
   '../../tests/fixtures/lecture_scripts/e2e_fake_lecture_stat_ml_ja.json'
 )
 
