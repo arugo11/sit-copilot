@@ -37,6 +37,7 @@ from app.services.lecture_index_service import (
     AzureLectureIndexService,
     BM25LectureIndexService,
     LectureIndexService,
+    ResilientLectureIndexService,
 )
 from app.services.lecture_live_service import LectureSessionNotFoundError
 from app.services.lecture_qa_service import (
@@ -46,6 +47,7 @@ from app.services.lecture_qa_service import (
 from app.services.lecture_retrieval_service import (
     AzureSearchLectureRetrievalService,
     LectureRetrievalService,
+    ResilientLectureRetrievalService,
     get_shared_lecture_retrieval_service,
 )
 from app.services.lecture_verifier_service import (
@@ -160,8 +162,11 @@ def get_azure_search_service() -> AzureSearchService:
 def get_lecture_retrieval_service() -> LectureRetrievalService:
     """Dependency provider for lecture retrieval service."""
     if _azure_search_available():
-        return AzureSearchLectureRetrievalService(
-            search_service=get_azure_search_service(),
+        return ResilientLectureRetrievalService(
+            primary=AzureSearchLectureRetrievalService(
+                search_service=get_azure_search_service(),
+            ),
+            fallback=get_shared_lecture_retrieval_service(),
         )
     return get_shared_lecture_retrieval_service()
 
@@ -253,16 +258,20 @@ def get_lecture_index_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LectureIndexService:
     """Dependency provider for lecture index service."""
-    if _azure_search_available():
-        return AzureLectureIndexService(
-            db=db,
-            search_service=get_azure_search_service(),
-        )
-
-    return BM25LectureIndexService(
+    bm25_service = BM25LectureIndexService(
         db=db,
         retrieval_service=get_shared_lecture_retrieval_service(),
     )
+
+    if _azure_search_available():
+        return ResilientLectureIndexService(
+            primary=AzureLectureIndexService(
+                db=db,
+                search_service=get_azure_search_service(),
+            ),
+            fallback=bm25_service,
+        )
+    return bm25_service
 
 
 def get_lecture_qa_service(

@@ -35,6 +35,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = ["-v", "--cov=app", "--cov-report=term-missing"]
+markers = [
+    "azure_e2e: marks tests that run against deployed Azure runtime",
+]
 
 [tool.ruff]
 target-version = "py311"

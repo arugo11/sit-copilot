@@ -1,6 +1,7 @@
 """Lecture retrieval service using BM25 and Azure Search."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -13,10 +14,13 @@ __all__ = [
     "LectureRetrievalService",
     "BM25LectureRetrievalService",
     "AzureSearchLectureRetrievalService",
+    "ResilientLectureRetrievalService",
     "BM25TokenCache",
     "LectureRetrievalIndex",
     "get_shared_lecture_retrieval_service",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -457,6 +461,62 @@ class AzureSearchLectureRetrievalService:
                 )
             )
         return expanded_sources
+
+
+class ResilientLectureRetrievalService:
+    """Try Azure retrieval first and fallback to BM25 when Azure returns no hits."""
+
+    def __init__(
+        self,
+        *,
+        primary: LectureRetrievalService,
+        fallback: BM25LectureRetrievalService,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def retrieve(
+        self,
+        session_id: str,
+        query: str,
+        mode: RetrievalMode,
+        top_k: int,
+        context_window: int,
+    ) -> list[LectureSource]:
+        primary_sources = await self._primary.retrieve(
+            session_id=session_id,
+            query=query,
+            mode=mode,
+            top_k=top_k,
+            context_window=context_window,
+        )
+        if primary_sources:
+            return primary_sources
+
+        logger.info(
+            "lecture_retrieval_fallback_to_bm25 session_id=%s query=%r",
+            session_id,
+            query[:80],
+        )
+        return await self._fallback.retrieve(
+            session_id=session_id,
+            query=query,
+            mode=mode,
+            top_k=top_k,
+            context_window=context_window,
+        )
+
+    async def get_index(self, session_id: str) -> LectureRetrievalIndex | None:
+        return await self._fallback.get_index(session_id)
+
+    async def set_index(self, session_id: str, index: LectureRetrievalIndex) -> None:
+        await self._fallback.set_index(session_id, index)
+
+    async def has_index(self, session_id: str) -> bool:
+        return await self._fallback.has_index(session_id)
+
+    async def remove_index(self, session_id: str) -> None:
+        await self._fallback.remove_index(session_id)
 
 
 _shared_lecture_retrieval_service: BM25LectureRetrievalService | None = None

@@ -20,8 +20,8 @@ from app.services.lecture_answerer_service import (
     LectureAnswererError,
 )
 from app.services.lecture_retrieval_service import (
-    AzureSearchLectureRetrievalService,
     BM25LectureRetrievalService,
+    ResilientLectureRetrievalService,
 )
 from app.services.observability.weave_observer_service import NoopWeaveObserverService
 from app.services.observed_lecture_answerer_service import (
@@ -894,7 +894,7 @@ def test_get_lecture_retrieval_service_uses_azure_when_enabled(
     monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
 
     service = lecture_qa_api.get_lecture_retrieval_service()
-    assert isinstance(service, AzureSearchLectureRetrievalService)
+    assert isinstance(service, ResilientLectureRetrievalService)
 
 
 def test_get_lecture_retrieval_service_falls_back_to_bm25_when_disabled(
@@ -1107,12 +1107,12 @@ async def test_post_qa_ask_uses_azure_retrieval_when_enabled(
 
 
 @pytest.mark.asyncio
-async def test_post_qa_index_build_returns_503_when_azure_partial_failure(
+async def test_post_qa_index_build_falls_back_when_azure_partial_failure(
     async_client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Index build should return 503 on partial Azure indexing failure."""
+    """Index build should fallback to BM25 when Azure indexing partially fails."""
     async with session_factory() as session:
         from datetime import UTC, datetime
 
@@ -1181,7 +1181,9 @@ async def test_post_qa_index_build_returns_503_when_azure_partial_failure(
         headers=AUTH_HEADERS,
     )
 
-    assert response.status_code == 503
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
 
 
 @pytest.mark.asyncio

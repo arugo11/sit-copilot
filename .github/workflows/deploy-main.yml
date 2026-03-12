@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: "Force backend/frontend deploy pipeline regardless of changed paths"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-main-production
@@ -17,8 +24,8 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.filter.outputs.backend }}
-      frontend_changed: ${{ steps.filter.outputs.frontend }}
+      backend_changed: ${{ steps.scope.outputs.backend_changed }}
+      frontend_changed: ${{ steps.scope.outputs.frontend_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,6 +42,20 @@ jobs:
               - "Dockerfile"
             frontend:
               - "frontend/**"
+
+      - name: Resolve deployment scope
+        id: scope
+        run: |
+          backend_changed="${{ steps.filter.outputs.backend }}"
+          frontend_changed="${{ steps.filter.outputs.frontend }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_all }}" = "true" ]; then
+            backend_changed="true"
+            frontend_changed="true"
+          fi
+
+          echo "backend_changed=${backend_changed}" >> "${GITHUB_OUTPUT}"
+          echo "frontend_changed=${frontend_changed}" >> "${GITHUB_OUTPUT}"
 
   api_test:
     name: API test
@@ -333,3 +354,59 @@ jobs:
           app_location: ${{ steps.resolve_app_dir.outputs.app_dir }}
           skip_app_build: true
           skip_api_build: true
+
+  prod_web_e2e:
+    name: Production web E2E
+    runs-on: ubuntu-latest
+    needs:
+      - detect_changes
+      - api_deploy
+      - api_smoke
+      - frontend_deploy
+    if: |
+      always() &&
+      (
+        needs.detect_changes.outputs.backend_changed == 'true' ||
+        needs.detect_changes.outputs.frontend_changed == 'true'
+      ) &&
+      (
+        needs.detect_changes.outputs.backend_changed != 'true' ||
+        (
+          needs.api_deploy.result == 'success' &&
+          needs.api_smoke.result == 'success'
+        )
+      ) &&
+      (
+        needs.detect_changes.outputs.frontend_changed != 'true' ||
+        needs.frontend_deploy.result == 'success'
+      )
+    env:
+      PROD_WEB_BASE_URL: ${{ vars.PROD_WEB_BASE_URL }}
+      PROD_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+      E2E_LECTURE_TOKEN: ${{ secrets.VITE_LECTURE_API_TOKEN }}
+      E2E_USER_ID: demo-user
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate production web E2E configuration
+        run: |
+          test -n "${PROD_WEB_BASE_URL}" || { echo "PROD_WEB_BASE_URL is required."; exit 1; }
+          test -n "${PROD_API_BASE_URL}" || { echo "PROD_API_BASE_URL is required."; exit 1; }
+          test -n "${E2E_LECTURE_TOKEN}" || { echo "VITE_LECTURE_API_TOKEN secret is required."; exit 1; }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Playwright Chromium
+        run: npm exec --prefix frontend playwright install --with-deps chromium
+
+      - name: Run production web E2E
+        run: npm run e2e:prod --prefix frontend

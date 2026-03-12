@@ -3,6 +3,46 @@
 > This document tracks design decisions made during conversations.
 > Updated automatically by the `design-tracker` skill.
 
+## Demo Quality Gate and Production E2E Hardening (2026-03-13)
+
+### Decision Summary
+
+- Added a scripted Azure-backed lecture API E2E scenario:
+  - fixture: `tests/fixtures/lecture_scripts/e2e_fake_lecture_stat_ml_ja.json`
+  - test: `tests/api/v4/test_lecture_e2e_azure_script.py`
+  - marker: `pytest -m azure_e2e`.
+- Added production web full-flow E2E via Playwright:
+  - config: `frontend/playwright.config.ts`
+  - scenario: `frontend/e2e/prod-lecture-live-flow.spec.ts`
+  - CI env contract requires `PROD_WEB_BASE_URL`.
+- Added PR quality gate workflow:
+  - `.github/workflows/pr-ci.yml` runs backend tests, scoped lint, frontend test/build.
+- Extended `deploy-main.yml`:
+  - supports `workflow_dispatch` with `force_all`,
+  - runs final production web E2E job after deploy/smoke.
+- Hardened lecture QA index/retrieval path for Azure instability:
+  - Azure index build now falls back to BM25 index build (`ResilientLectureIndexService`),
+  - retrieval uses Azure first and falls back to BM25 when Azure returns no hits (`ResilientLectureRetrievalService`).
+
+### Rationale
+
+- Demo acceptance requires deterministic end-to-end validation, not only unit/integration coverage.
+- Production Azure Search occasionally returns transport/indexing errors; fail-open with grounded BM25 fallback keeps lecture QA usable while preserving fail-closed behavior on hard search exceptions.
+- Making production web E2E a terminal deploy gate prevents “deployed but unusable” outcomes.
+
+### Compatibility Rules
+
+- Public lecture API schema remains unchanged.
+- `azure_e2e` tests must stay opt-in and not be mixed into default pytest runs.
+- `PROD_WEB_BASE_URL` is mandatory for production web E2E in deploy workflow.
+- Azure query exceptions still propagate as backend-unavailable (fail-closed); only zero-hit Azure responses fall back to BM25 retrieval.
+
+### Changelog
+
+- 2026-03-13: Added scripted Azure API E2E and `azure_e2e` marker.
+- 2026-03-13: Added Playwright production web full E2E and deploy final gate.
+- 2026-03-13: Added resilient Azure->BM25 fallback for lecture index build and retrieval.
+
 ## Local Lecture Runtime Recovery (2026-03-13)
 
 ### Decision Summary
