@@ -113,6 +113,11 @@ npm run dev --prefix frontend
   Azure Static Web Apps の runtime 設定ではなく build-time に埋め込みます。
 - token ローテーション時は Container Apps secret 更新後に
   frontend を再ビルドして SWA を再デプロイしてください。
+- 講義ライブの時刻は epoch milliseconds を正式仕様としています。PostgreSQL 本番では
+  `speech_events` / `summary_windows` / `lecture_chunks` / `visual_events` の
+  時刻列が `BIGINT` である必要があります。
+- `speech/chunk` が失敗した場合は、認証だけでなく Container Apps logs 上の
+  DB write path も先に確認してください。
 - 最終確認日: 2026-03-12 (JST)
 
 ## ポスター

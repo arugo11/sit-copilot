@@ -101,6 +101,24 @@ def test_speech_chunk_ingest_request_accepts_valid_payload() -> None:
     assert request.end_ms == payload["end_ms"]
 
 
+def test_speech_chunk_ingest_request_accepts_epoch_milliseconds() -> None:
+    """SpeechChunkIngestRequest should accept epoch-millisecond timestamps."""
+    payload = {
+        "session_id": "lec_20260220_ab12cd",
+        "start_ms": 1_770_000_000_000,
+        "end_ms": 1_770_000_005_000,
+        "text": "講義冒頭の説明です。",
+        "confidence": 0.93,
+        "is_final": True,
+        "speaker": "teacher",
+    }
+
+    request = SpeechChunkIngestRequest.model_validate(payload)
+
+    assert request.start_ms == payload["start_ms"]
+    assert request.end_ms == payload["end_ms"]
+
+
 def test_speech_chunk_ingest_request_rejects_invalid_time_range() -> None:
     """SpeechChunkIngestRequest should reject end_ms earlier than start_ms."""
     payload = {

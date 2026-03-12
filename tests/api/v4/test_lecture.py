@@ -195,6 +195,53 @@ async def test_post_lecture_speech_chunk_returns_200_and_persists(
 
 
 @pytest.mark.asyncio
+async def test_post_lecture_speech_chunk_with_epoch_milliseconds_returns_200(
+    async_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Speech chunk endpoint should accept epoch-millisecond timestamps."""
+    start_response = await async_client.post(
+        "/api/v4/lecture/session/start",
+        json={
+            "course_name": "統計学基礎",
+            "course_id": None,
+            "lang_mode": "ja",
+            "camera_enabled": False,
+            "consent_acknowledged": True,
+        },
+        headers=LEGACY_DEMO_HEADERS,
+    )
+    session_id = start_response.json()["session_id"]
+
+    response = await async_client.post(
+        "/api/v4/lecture/speech/chunk",
+        json={
+            "session_id": session_id,
+            "start_ms": 1_770_000_000_000,
+            "end_ms": 1_770_000_005_000,
+            "text": "講義冒頭の説明です。",
+            "confidence": 0.99,
+            "is_final": True,
+            "speaker": "teacher",
+        },
+        headers=LEGACY_DEMO_HEADERS,
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["accepted"] is True
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(SpeechEvent).where(SpeechEvent.id == body["event_id"])
+        )
+        speech_event = result.scalar_one()
+
+    assert speech_event.start_ms == 1_770_000_000_000
+    assert speech_event.end_ms == 1_770_000_005_000
+
+
+@pytest.mark.asyncio
 async def test_post_lecture_speech_chunk_with_unknown_session_returns_404(
     async_client: AsyncClient,
 ) -> None:

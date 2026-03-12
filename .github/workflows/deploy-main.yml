@@ -161,6 +161,8 @@ jobs:
     if: needs.detect_changes.outputs.backend_changed == 'true'
     env:
       PROD_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+      LECTURE_API_TOKEN: ${{ secrets.VITE_LECTURE_API_TOKEN }}
+      DEMO_USER_ID: demo-user
     steps:
       - name: Verify health endpoint
         run: |
@@ -170,6 +172,68 @@ jobs:
 
           grep -q '"status"' health.json
           grep -q '"version"' health.json
+
+      - name: Verify lecture auth and speech ingest
+        run: |
+          curl --fail --show-error --silent \
+            "${PROD_API_BASE_URL}/api/v4/settings/me" \
+            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
+            -H "X-User-Id: ${DEMO_USER_ID}" \
+            > settings.json
+
+          python - <<'PY'
+          import json
+          with open("settings.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+          assert payload["user_id"] == "demo-user", payload
+          PY
+
+          curl --fail --show-error --silent \
+            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/session/start" \
+            -H "Content-Type: application/json" \
+            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
+            -H "X-User-Id: ${DEMO_USER_ID}" \
+            -d '{"course_name":"CI Smoke","lang_mode":"ja","camera_enabled":false,"consent_acknowledged":true}' \
+            > session.json
+
+          SESSION_ID="$(python - <<'PY'
+          import json
+          with open("session.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+          print(payload["session_id"])
+          PY
+          )"
+
+          curl --fail --show-error --silent \
+            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/speech/chunk" \
+            -H "Content-Type: application/json" \
+            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
+            -H "X-User-Id: ${DEMO_USER_ID}" \
+            -d "{\"session_id\":\"${SESSION_ID}\",\"start_ms\":1770000000000,\"end_ms\":1770000002000,\"text\":\"CI smoke transcript\",\"confidence\":0.99,\"is_final\":true,\"speaker\":\"teacher\"}" \
+            > ingest.json
+
+          python - <<'PY'
+          import json
+          with open("ingest.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+          assert payload["accepted"] is True, payload
+          assert payload["event_id"], payload
+          PY
+
+          curl --fail --show-error --silent \
+            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/session/finalize" \
+            -H "Content-Type: application/json" \
+            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
+            -H "X-User-Id: ${DEMO_USER_ID}" \
+            -d "{\"session_id\":\"${SESSION_ID}\",\"build_qa_index\":false}" \
+            > finalize.json
+
+          python - <<'PY'
+          import json
+          with open("finalize.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+          assert payload["status"] == "finalized", payload
+          PY
 
   frontend_build:
     name: Frontend build

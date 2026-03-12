@@ -56,6 +56,8 @@ npm run build
   runtime ではなく build-time に `VITE_*` として埋め込みます。
 - token をローテーションした場合は backend secret 更新後に
   frontend を再ビルドし、Static Web Apps を再デプロイしてください。
+- 講義ライブの字幕イベント時刻は epoch milliseconds です。backend が
+  PostgreSQL の場合、対応する時刻列は `BIGINT` である必要があります。
 
 ## 実API確認（curl）
 

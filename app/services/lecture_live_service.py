@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
-from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
+from sqlalchemy.exc import DataError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -28,15 +28,15 @@ from app.schemas.lecture import (
     VisualEventIngestResponse,
     VisualEventQuality,
 )
-from app.services.asr_japanese_correction_service import (
-    AzureOpenAIJapaneseASRCorrectionService,
-    JapaneseASRCorrectionService,
-    NoopJapaneseASRCorrectionService,
-)
 from app.services.asr_hallucination_judge_service import (
     AzureOpenAIJapaneseASRHallucinationJudgeService,
     JapaneseASRHallucinationJudgeService,
     NoopJapaneseASRHallucinationJudgeService,
+)
+from app.services.asr_japanese_correction_service import (
+    AzureOpenAIJapaneseASRCorrectionService,
+    JapaneseASRCorrectionService,
+    NoopJapaneseASRCorrectionService,
 )
 from app.services.asr_subtitle_review_service import SubtitleReviewService
 from app.services.vision_ocr_service import (
@@ -268,6 +268,14 @@ class SqlAlchemyLectureLiveService:
                     attempt=attempt,
                 ):
                     raise
+            except DataError:
+                logger.exception(
+                    "ingest_speech_chunk_flush_failed session_id=%s start_ms=%s end_ms=%s",
+                    request.session_id,
+                    request.start_ms,
+                    request.end_ms,
+                )
+                raise
         raise RuntimeError("unreachable")
 
     async def audit_and_apply_speech_chunk(

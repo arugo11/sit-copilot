@@ -40,6 +40,35 @@
 - 2026-03-13: Added deterministic key-term and subtitle-review fallbacks plus capped QA retry waits.
 - 2026-03-13: Hydrated live assist toggles from user settings and restored corrected-transcript SSE compatibility.
 
+## Production ASR PostgreSQL Timestamp Fix (2026-03-13)
+
+### Decision Summary
+
+- Kept lecture runtime timestamps in epoch milliseconds end-to-end.
+- Promoted PostgreSQL-backed timestamp-ms columns from `INTEGER` to `BIGINT` for:
+  - `speech_events.start_ms/end_ms`
+  - `summary_windows.start_ms/end_ms`
+  - `lecture_chunks.start_ms/end_ms`
+  - `visual_events.timestamp_ms`
+- Added startup self-healing migration for PostgreSQL runtimes to coerce legacy `int4` columns to `int8`.
+- Expanded production deploy smoke to verify lecture auth, session start, speech ingest with epoch ms, and finalize.
+
+### Rationale
+
+- Frontend live ingestion already emits `Date.now()`-scale epoch milliseconds.
+- SQLite tolerates these values, but PostgreSQL `INTEGER` does not, causing production ASR ingest failure after auth succeeds.
+- The observed browser-side CORS message was a secondary symptom; the root cause was a DB write-path failure in Container Apps logs.
+
+### Compatibility Rules
+
+- Do not shrink lecture timestamps to relative offsets just to satisfy legacy DB schemas.
+- Any PostgreSQL runtime used for lecture live ingestion must keep timestamp-ms columns as `BIGINT`.
+- Production smoke must verify at least one authenticated `speech/chunk` write with epoch ms.
+
+### Changelog
+
+- 2026-03-13: Added PostgreSQL `BIGINT` self-healing for lecture timestamp columns and production speech-ingest smoke coverage.
+
 ## Student Demo Runtime Hardening (2026-03-12)
 
 ### Decision Summary

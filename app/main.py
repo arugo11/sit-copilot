@@ -37,6 +37,15 @@ from app.services.observability import (
 )
 
 logger = logging.getLogger(__name__)
+POSTGRES_BIGINT_TIMESTAMP_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("speech_events", "start_ms"),
+    ("speech_events", "end_ms"),
+    ("summary_windows", "start_ms"),
+    ("summary_windows", "end_ms"),
+    ("lecture_chunks", "start_ms"),
+    ("lecture_chunks", "end_ms"),
+    ("visual_events", "timestamp_ms"),
+)
 
 
 async def _ensure_sqlite_schema_compatibility(connection) -> None:  # noqa: ANN001
@@ -49,6 +58,69 @@ async def _ensure_sqlite_schema_compatibility(connection) -> None:  # noqa: ANN0
     if "original_text" not in columns:
         await connection.exec_driver_sql(
             "ALTER TABLE speech_events ADD COLUMN original_text TEXT"
+        )
+
+
+async def _get_postgresql_column_udt_name(
+    connection, table_name: str, column_name: str  # noqa: ANN001
+) -> str | None:
+    result = await connection.exec_driver_sql(
+        """
+        SELECT c.udt_name
+        FROM information_schema.columns AS c
+        WHERE c.table_schema = current_schema()
+          AND c.table_name = :table_name
+          AND c.column_name = :column_name
+        """,
+        {"table_name": table_name, "column_name": column_name},
+    )
+    row = result.first()
+    if row is None:
+        return None
+    return str(row[0]).strip().lower() or None
+
+
+async def _ensure_postgresql_bigint_timestamp_columns(connection) -> None:  # noqa: ANN001
+    """Promote PostgreSQL timestamp-ms columns from int4 to int8."""
+    if connection.dialect.name != "postgresql":
+        return
+
+    for table_name, column_name in POSTGRES_BIGINT_TIMESTAMP_COLUMNS:
+        udt_name = await _get_postgresql_column_udt_name(
+            connection,
+            table_name,
+            column_name,
+        )
+        if udt_name is None:
+            logger.info(
+                "postgres_bigint_timestamp_column_missing table=%s column=%s",
+                table_name,
+                column_name,
+            )
+            continue
+        if udt_name == "int8":
+            logger.info(
+                "postgres_bigint_timestamp_column_ok table=%s column=%s",
+                table_name,
+                column_name,
+            )
+            continue
+        if udt_name != "int4":
+            logger.warning(
+                "postgres_bigint_timestamp_column_unexpected_type table=%s column=%s udt_name=%s",
+                table_name,
+                column_name,
+                udt_name,
+            )
+            continue
+
+        await connection.exec_driver_sql(
+            f"ALTER TABLE {table_name} ALTER COLUMN {column_name} TYPE BIGINT"
+        )
+        logger.info(
+            "postgres_bigint_timestamp_column_migrated table=%s column=%s",
+            table_name,
+            column_name,
         )
 
 
@@ -109,6 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await _ensure_sqlite_schema_compatibility(connection)
+        await _ensure_postgresql_bigint_timestamp_columns(connection)
         if settings.database_url.startswith("sqlite"):
             await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             await connection.exec_driver_sql("PRAGMA busy_timeout=30000")
