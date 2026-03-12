@@ -82,3 +82,24 @@ async def test_noop_correction_emits_warning_only_once(caplog: pytest.LogCapture
         if "azure_openai_disabled_request_fallback" in record.getMessage()
     ]
     assert len(warning_records) == 1
+
+
+@pytest.mark.asyncio
+async def test_correct_minimally_applies_local_year_fallback_on_failure() -> None:
+    service = AzureOpenAIJapaneseASRCorrectionService(
+        api_key="dummy",
+        endpoint="https://example.openai.azure.com",
+        model="gpt-4o",
+    )
+    service._validation = ValidationResult(  # type: ignore[assignment]
+        is_valid=True,
+        normalized_endpoint="https://example.openai.azure.com",
+        reason="ok",
+    )
+    service._call_openai = AsyncMock(side_effect=RuntimeError("rate limited"))  # type: ignore[method-assign]
+
+    corrected = await service.correct_minimally(
+        "Transformer は 2017 念に発表されました。"
+    )
+
+    assert corrected == "Transformer は 2017年に発表されました。"

@@ -52,6 +52,11 @@ cd frontend
 npm run build
 ```
 
+- 公開環境の `X-Lecture-Token` / `X-Procedure-Token` / `X-User-Id` は
+  runtime ではなく build-time に `VITE_*` として埋め込みます。
+- token をローテーションした場合は backend secret 更新後に
+  frontend を再ビルドし、Static Web Apps を再デプロイしてください。
+
 ## 実API確認（curl）
 
 ### readiness

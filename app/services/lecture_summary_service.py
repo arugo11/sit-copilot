@@ -8,6 +8,7 @@ import re
 from typing import Literal, Protocol
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -398,7 +399,15 @@ class SqlAlchemyLectureSummaryService:
     ) -> None:
         key_terms_json = [term.model_dump() for term in key_terms]
         evidence_refs = [f"{item.type}:{item.ref_id}" for item in evidence]
-        upsert_stmt = sqlite_insert(SummaryWindow).values(
+        dialect_name = (
+            self._db.bind.dialect.name if self._db.bind is not None else "sqlite"
+        )
+        insert_stmt = (
+            postgresql_insert(SummaryWindow)
+            if dialect_name == "postgresql"
+            else sqlite_insert(SummaryWindow)
+        )
+        upsert_stmt = insert_stmt.values(
             session_id=session_id,
             start_ms=window_start_ms,
             end_ms=window_end_ms,

@@ -87,6 +87,7 @@ from app.services.lecture_index_service import (
 )
 from app.services.lecture_keyterms_service import (
     AzureOpenAILectureKeyTermsService,
+    HeuristicLectureKeyTermsService,
     LectureKeyTermsError,
     LectureKeyTermsService,
     ResilientLectureKeyTermsService,
@@ -415,6 +416,8 @@ async def _stream_lecture_events(
                 "confidence": event.confidence,
                 "sourceRefs": {"audioSegmentId": event.id},
             }
+            if event.original_text:
+                transcript_payload["originalLangText"] = event.original_text
             yield _to_sse_payload(
                 {"type": transcript_event_type, "payload": transcript_payload}
             )
@@ -703,13 +706,10 @@ def get_lecture_finalize_service(
 
 def get_lecture_keyterms_service() -> LectureKeyTermsService:
     """Dependency provider for lecture key terms service."""
-    fallback_service = UnavailableLectureKeyTermsService(
-        reason=(
-            "feature_disabled"
-            if not settings.lecture_live_keyterms_enabled
-            else "azure openai key terms backend is unavailable"
-        )
-    )
+    if not settings.lecture_live_keyterms_enabled:
+        return UnavailableLectureKeyTermsService(reason="feature_disabled")
+
+    fallback_service = HeuristicLectureKeyTermsService()
     if _azure_openai_keyterms_available():
         primary_service = AzureOpenAILectureKeyTermsService(
             api_key=settings.azure_openai_api_key,
@@ -721,8 +721,7 @@ def get_lecture_keyterms_service() -> LectureKeyTermsService:
             primary=primary_service,
             fallback=fallback_service,
         )
-    else:
-        return fallback_service
+    return fallback_service
 
 
 def get_caption_transform_service() -> CaptionTransformService:

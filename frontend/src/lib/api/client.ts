@@ -22,7 +22,7 @@ export const LECTURE_API_TOKEN =
   import.meta.env.VITE_LECTURE_API_TOKEN || 'dev-lecture-token'
 export const PROCEDURE_API_TOKEN =
   import.meta.env.VITE_PROCEDURE_API_TOKEN || 'dev-procedure-token'
-export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo_user'
+export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo-user'
 
 export class ApiError extends Error {
   status: number

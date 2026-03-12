@@ -65,6 +65,7 @@ class AzureAISearchService:
         self._index_name = index_name
         self._index_ready = False
         self._index_lock = asyncio.Lock()
+        self._keywords_field_is_collection: bool = True
 
     async def ensure_lecture_index(self) -> None:
         """Ensure `lecture_index` schema exists."""
@@ -76,6 +77,7 @@ class AzureAISearchService:
                 return
 
             from azure.core.credentials import AzureKeyCredential
+            from azure.core.exceptions import HttpResponseError
             from azure.search.documents.indexes.aio import SearchIndexClient
 
             credential = AzureKeyCredential(self._api_key)
@@ -83,7 +85,23 @@ class AzureAISearchService:
                 endpoint=self._endpoint,
                 credential=credential,
             ) as index_client:
-                await index_client.create_or_update_index(self._build_index_schema())
+                try:
+                    await index_client.create_or_update_index(
+                        self._build_index_schema()
+                    )
+                    self._keywords_field_is_collection = True
+                except HttpResponseError as exc:
+                    message = str(exc)
+                    if (
+                        "CannotChangeExistingField" in message
+                        or "Existing field 'keywords' cannot be changed." in message
+                    ):
+                        self._keywords_field_is_collection = (
+                            await self._detect_keywords_collection_support(index_client)
+                        )
+                        self._index_ready = True
+                        return
+                    raise
 
             self._index_ready = True
 
@@ -106,7 +124,9 @@ class AzureAISearchService:
             index_name=self._index_name,
             credential=credential,
         ) as search_client:
-            results = await search_client.merge_or_upload_documents(documents)
+            results = await search_client.merge_or_upload_documents(
+                self._normalize_documents_for_upload(documents)
+            )
 
         succeeded_chunk_ids: list[str] = []
         for result, document in zip(results, documents, strict=False):
@@ -281,6 +301,45 @@ class AzureAISearchService:
             f"session_id eq '{escaped_session}' and "
             "(chunk_type eq 'speech' or chunk_type eq 'visual' or chunk_type eq 'merged')"
         )
+
+    async def _detect_keywords_collection_support(self, index_client: Any) -> bool:
+        """Detect whether the existing `keywords` field accepts string collections."""
+        index = await index_client.get_index(self._index_name)
+        for field in getattr(index, "fields", []):
+            if getattr(field, "name", "") != "keywords":
+                continue
+            field_type = str(getattr(field, "type", ""))
+            return "Collection" in field_type
+        return False
+
+    def _normalize_documents_for_upload(
+        self,
+        documents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Normalize documents to the active Azure Search schema."""
+        if self._keywords_field_is_collection:
+            return documents
+
+        normalized_documents: list[dict[str, Any]] = []
+        for document in documents:
+            keywords = document.get("keywords", [])
+            normalized_keywords = self._normalize_keywords_for_scalar_field(keywords)
+            normalized_documents.append(
+                {
+                    **document,
+                    "keywords": normalized_keywords,
+                }
+            )
+        return normalized_documents
+
+    @staticmethod
+    def _normalize_keywords_for_scalar_field(keywords: Any) -> str:
+        """Convert keyword arrays into a scalar string for legacy schemas."""
+        if isinstance(keywords, list):
+            return " ".join(str(keyword).strip() for keyword in keywords if str(keyword).strip())
+        if keywords is None:
+            return ""
+        return str(keywords)
 
 
 _shared_azure_search_service: AzureAISearchService | None = None

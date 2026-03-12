@@ -570,6 +570,96 @@ async def test_ask_with_answerer_error_returns_local_grounded_answer_and_persist
 
 
 @pytest.mark.asyncio
+async def test_ask_with_answerer_error_uses_question_aware_grounded_answer(
+    db_session: AsyncSession,
+) -> None:
+    """Question-aware fallback should return the grounded publication year."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_year",
+            type="speech",
+            text="Transformer は 2017 年に Google の研究者たちが発表した。",
+            bm25_score=5.0,
+        ),
+        LectureSource(
+            chunk_id="speech_other",
+            type="speech",
+            text="BERT や GPT は Transformer を基盤として発展した。",
+            bm25_score=4.0,
+        ),
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True, summary="Verified.")
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="Transformerはいつ発表されましたか",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert response.answer == "講義では、Transformer は 2017 年に発表されたと説明されています。"
+    assert [source.chunk_id for source in response.sources] == ["speech_year"]
+    assert response.fallback == response.answer
+
+
+@pytest.mark.asyncio
+async def test_ask_with_answerer_error_fails_closed_for_unsupported_question(
+    db_session: AsyncSession,
+) -> None:
+    """Unsupported questions should fall back to no-source."""
+    await _seed_lecture_session(db_session)
+    sources = [
+        LectureSource(
+            chunk_id="speech_1",
+            type="speech",
+            text="BERT や GPT は Transformer を基盤として発展した。",
+            bm25_score=5.0,
+        )
+    ]
+    retriever = MockRetriever(sources)
+    answerer = ErrorAnswerer()
+    verifier = MockVerifier(passed=True, summary="Verified.")
+    followup = MockFollowup()
+
+    service = SqlAlchemyLectureQAService(
+        db=db_session,
+        retriever=retriever,
+        answerer=answerer,
+        verifier=verifier,
+        followup=followup,
+    )
+
+    response = await service.ask(
+        session_id="session_123",
+        user_id="user_1",
+        question="Transformerの次の後継モデルは何ですか",
+        lang_mode="ja",
+        retrieval_mode="source-only",
+        top_k=5,
+        context_window=1,
+    )
+
+    assert response.answer == "講義資料に該当する情報が見つかりませんでした。"
+    assert response.sources == []
+    assert response.fallback == "講義資料に該当する情報が見つかりませんでした。"
+
+
+@pytest.mark.asyncio
 async def test_ask_with_verifier_error_skips_verification_and_persists(
     db_session: AsyncSession,
 ) -> None:

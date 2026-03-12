@@ -808,6 +808,8 @@ export function LectureLivePage() {
       language: userSettings?.language,
       transcriptDensity: userSettings?.transcriptDensity,
       autoScrollDefault: userSettings?.autoScrollDefault,
+      assistSummaryEnabled: userSettings?.assistSummaryEnabled,
+      assistKeytermsEnabled: userSettings?.assistKeytermsEnabled,
     })
   }, [hydrateFromSettings, userSettings])
 

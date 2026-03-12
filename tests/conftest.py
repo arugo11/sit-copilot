@@ -47,6 +47,7 @@ def enable_live_features_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "lecture_live_summary_enabled", True)
     monkeypatch.setattr(settings, "lecture_live_keyterms_enabled", True)
     monkeypatch.setattr(settings, "lecture_qa_enabled", True)
+    monkeypatch.setattr(settings, "azure_search_enabled", False)
 
 
 @pytest.fixture

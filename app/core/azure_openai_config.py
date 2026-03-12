@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+SUPPORTED_AZURE_OPENAI_HOST_SUFFIXES = (
+    ".openai.azure.com",
+    ".api.cognitive.microsoft.com",
+    ".cognitiveservices.azure.com",
+)
+
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -16,7 +22,7 @@ class ValidationResult:
 
 
 def normalize_openai_endpoint(endpoint: str, account_name: str = "") -> str:
-    """Normalize endpoint to Azure OpenAI host when possible."""
+    """Normalize endpoint while preserving reachable Azure OpenAI hosts."""
     normalized_endpoint = endpoint.strip().rstrip("/")
     if not normalized_endpoint:
         return ""
@@ -26,17 +32,8 @@ def normalize_openai_endpoint(endpoint: str, account_name: str = "") -> str:
     if not host:
         return normalized_endpoint
 
-    if host.endswith(".openai.azure.com"):
+    if host.endswith(SUPPORTED_AZURE_OPENAI_HOST_SUFFIXES):
         return normalized_endpoint
-
-    if host.endswith(".cognitiveservices.azure.com"):
-        resource_name = host.removesuffix(".cognitiveservices.azure.com")
-        if resource_name:
-            return f"https://{resource_name}.openai.azure.com"
-
-    if host.endswith(".api.cognitive.microsoft.com") and account_name.strip():
-        normalized_account = account_name.strip()
-        return f"https://{normalized_account}.openai.azure.com"
 
     return normalized_endpoint
 
@@ -73,7 +70,7 @@ def validate_openai_config(
     normalized_endpoint = normalize_openai_endpoint(endpoint, account_name)
     parsed = urlparse(normalized_endpoint)
     host = parsed.netloc.lower()
-    if not host.endswith(".openai.azure.com"):
+    if not host.endswith(SUPPORTED_AZURE_OPENAI_HOST_SUFFIXES):
         return ValidationResult(
             is_valid=False,
             normalized_endpoint=normalized_endpoint,

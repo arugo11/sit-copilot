@@ -1,7 +1,9 @@
 """Lecture key terms extraction service using Azure OpenAI."""
 
+import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -15,6 +17,7 @@ __all__ = [
     "LectureKeyTermsService",
     "AzureOpenAILectureKeyTermsService",
     "UnavailableLectureKeyTermsService",
+    "HeuristicLectureKeyTermsService",
     "ResilientLectureKeyTermsService",
     "LectureKeyTermsResult",
     "LectureKeyTermsError",
@@ -78,6 +81,106 @@ class UnavailableLectureKeyTermsService:
         )
         del transcript_text, lang_mode
         return LectureKeyTermsResult(key_terms=[], detected_terms=[])
+
+
+class HeuristicLectureKeyTermsService:
+    """Deterministic transcript-based fallback key term extractor."""
+
+    MAX_TERMS = 3
+    _TITLE_PATTERN = re.compile(r"\b[A-Z][A-Za-z0-9-]*(?: [A-Z][A-Za-z0-9-]*){1,6}\b")
+    _PROPER_NOUN_PATTERN = re.compile(r"\b[A-Z][A-Za-z0-9-]{2,}\b")
+    _ACRONYM_PATTERN = re.compile(r"\b[A-Z]{2,8}\b")
+    _TECHNICAL_PHRASE_PATTERN = re.compile(
+        r"\b[a-z]+(?: [a-z]+){0,2} (?:mechanism|architecture|learning|model)\b"
+    )
+
+    async def extract_key_terms(
+        self,
+        transcript_text: str,
+        lang_mode: str,
+    ) -> LectureKeyTermsResult:
+        normalized = transcript_text.strip()
+        if not normalized:
+            return LectureKeyTermsResult(key_terms=[], detected_terms=[])
+
+        candidates = self._collect_candidates(normalized)
+        key_terms = [
+            {
+                "term": term,
+                "explanation": self._build_explanation(
+                    transcript_text=normalized,
+                    term=term,
+                    lang_mode=lang_mode,
+                ),
+                "translation": term,
+            }
+            for term in candidates[: self.MAX_TERMS]
+        ]
+        detected_terms = [item["term"] for item in key_terms]
+        return LectureKeyTermsResult(
+            key_terms=key_terms,
+            detected_terms=detected_terms,
+        )
+
+    def _collect_candidates(self, transcript_text: str) -> list[str]:
+        seen: set[str] = set()
+        candidates: list[str] = []
+        for pattern in (
+            self._TITLE_PATTERN,
+            self._PROPER_NOUN_PATTERN,
+            self._TECHNICAL_PHRASE_PATTERN,
+            self._ACRONYM_PATTERN,
+        ):
+            for match in pattern.finditer(transcript_text):
+                term = match.group(0).strip()
+                if len(term) < 3:
+                    continue
+                if term.lower() in {"google"}:
+                    continue
+                if any(term in existing for existing in candidates if existing != term):
+                    continue
+                if term in seen:
+                    continue
+                seen.add(term)
+                candidates.append(term)
+
+        if candidates:
+            return candidates
+
+        fallback_match = re.search(
+            r"[A-Za-z][A-Za-z0-9-]{2,}(?:[A-Za-z0-9- ]*[A-Za-z0-9-])?",
+            transcript_text,
+        )
+        if fallback_match:
+            return [fallback_match.group(0).strip()]
+        return []
+
+    def _build_explanation(
+        self,
+        *,
+        transcript_text: str,
+        term: str,
+        lang_mode: str,
+    ) -> str:
+        sentence = self._find_sentence(transcript_text=transcript_text, term=term)
+        if sentence:
+            compact = re.sub(r"\s+", " ", sentence).strip()
+            if len(compact) > 90:
+                compact = f"{compact[:87].rstrip()}..."
+            return compact
+        if lang_mode == "en":
+            return "Important lecture term mentioned in the transcript."
+        if lang_mode == "easy-ja":
+            return "講義でだいじなことばとして出てきました。"
+        return "講義で重要語として説明された語句です。"
+
+    @staticmethod
+    def _find_sentence(*, transcript_text: str, term: str) -> str:
+        segments = re.split(r"(?<=[。.!?])|\n", transcript_text)
+        for segment in segments:
+            if term in segment:
+                return segment.strip()
+        return ""
 
 
 class AzureOpenAILectureKeyTermsService:
@@ -209,7 +312,7 @@ JSONのみを出力してください。"""
             LectureKeyTermsError: If the API call fails
         """
         url = self._build_chat_completion_url()
-        payload = {
+        payload: dict[str, object] = {
             "messages": [
                 {
                     "role": "system",
@@ -221,9 +324,10 @@ JSONのみを出力してください。"""
                 {"role": "user", "content": prompt},
             ],
             "max_completion_tokens": self._max_tokens,
-            "reasoning_effort": "minimal",
             "response_format": {"type": "json_object"},
         }
+        if self._model.strip().lower().startswith("gpt-5"):
+            payload["reasoning_effort"] = "minimal"
         body = json.dumps(payload).encode("utf-8")
         request = Request(
             url=url,
@@ -240,8 +344,6 @@ JSONのみを出力してください。"""
                 return response.read().decode("utf-8")
 
         try:
-            import asyncio
-
             raw = await asyncio.to_thread(_run_request)
             result = json.loads(raw)
             self._last_usage = extract_usage(result)
