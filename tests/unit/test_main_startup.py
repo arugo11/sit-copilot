@@ -17,15 +17,19 @@ async def test_ensure_postgresql_bigint_timestamp_columns_alters_int4_columns() 
     result.first.return_value = ("int4",)
     connection = AsyncMock()
     connection.dialect.name = "postgresql"
-    side_effects: list[object] = []
-    for _ in POSTGRES_BIGINT_TIMESTAMP_COLUMNS:
-        side_effects.extend([result, None])
-    connection.exec_driver_sql = AsyncMock(side_effect=side_effects)
+    connection.execute = AsyncMock(
+        side_effect=[result] * len(POSTGRES_BIGINT_TIMESTAMP_COLUMNS)
+    )
+    connection.exec_driver_sql = AsyncMock(
+        side_effect=[None] * len(POSTGRES_BIGINT_TIMESTAMP_COLUMNS)
+    )
 
     await _ensure_postgresql_bigint_timestamp_columns(connection)
 
-    expected_calls = len(POSTGRES_BIGINT_TIMESTAMP_COLUMNS) * 2
-    assert connection.exec_driver_sql.await_count == expected_calls
+    assert connection.execute.await_count == len(POSTGRES_BIGINT_TIMESTAMP_COLUMNS)
+    assert connection.exec_driver_sql.await_count == len(
+        POSTGRES_BIGINT_TIMESTAMP_COLUMNS
+    )
 
 
 @pytest.mark.asyncio
@@ -35,12 +39,14 @@ async def test_ensure_postgresql_bigint_timestamp_columns_is_noop_for_int8() -> 
     result.first.return_value = ("int8",)
     connection = AsyncMock()
     connection.dialect.name = "postgresql"
-    connection.exec_driver_sql = AsyncMock(
+    connection.execute = AsyncMock(
         side_effect=[result] * len(POSTGRES_BIGINT_TIMESTAMP_COLUMNS)
     )
+    connection.exec_driver_sql = AsyncMock()
 
     await _ensure_postgresql_bigint_timestamp_columns(connection)
 
-    assert connection.exec_driver_sql.await_count == len(
+    assert connection.execute.await_count == len(
         POSTGRES_BIGINT_TIMESTAMP_COLUMNS
     )
+    assert connection.exec_driver_sql.await_count == 0

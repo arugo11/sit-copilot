@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api.v4 import auth as auth_api
 from app.api.v4 import health as health_api
@@ -64,14 +65,16 @@ async def _ensure_sqlite_schema_compatibility(connection) -> None:  # noqa: ANN0
 async def _get_postgresql_column_udt_name(
     connection, table_name: str, column_name: str  # noqa: ANN001
 ) -> str | None:
-    result = await connection.exec_driver_sql(
-        """
+    result = await connection.execute(
+        text(
+            """
         SELECT c.udt_name
         FROM information_schema.columns AS c
         WHERE c.table_schema = current_schema()
           AND c.table_name = :table_name
           AND c.column_name = :column_name
-        """,
+        """
+        ),
         {"table_name": table_name, "column_name": column_name},
     )
     row = result.first()
