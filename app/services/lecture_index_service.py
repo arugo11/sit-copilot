@@ -1,6 +1,7 @@
 """Lecture index service for BM25 and Azure Search index builds."""
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -24,7 +25,10 @@ __all__ = [
     "LectureIndexService",
     "BM25LectureIndexService",
     "AzureLectureIndexService",
+    "ResilientLectureIndexService",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class LectureIndexService(Protocol):
@@ -503,3 +507,41 @@ class AzureLectureIndexService:
     def _generate_version() -> str:
         """Generate a unique index version identifier."""
         return str(uuid.uuid4())
+
+
+class ResilientLectureIndexService:
+    """Try Azure indexing first and fallback to BM25 on Azure failures."""
+
+    def __init__(
+        self,
+        *,
+        primary: LectureIndexService,
+        fallback: LectureIndexService,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def build_index(
+        self,
+        session_id: str,
+        user_id: str,
+        rebuild: bool,
+    ) -> LectureIndexBuildResponse:
+        try:
+            return await self._primary.build_index(
+                session_id=session_id,
+                user_id=user_id,
+                rebuild=rebuild,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "lecture_index_fallback_to_bm25 session_id=%s error=%s",
+                session_id,
+                exc.__class__.__name__,
+                exc_info=True,
+            )
+            return await self._fallback.build_index(
+                session_id=session_id,
+                user_id=user_id,
+                rebuild=True,
+            )

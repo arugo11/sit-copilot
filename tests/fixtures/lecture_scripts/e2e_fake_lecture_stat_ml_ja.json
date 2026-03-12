@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "id": "e2e_fake_lecture_stat_ml_ja",
+    "title": "統計的機械学習入門（架空講義）",
+    "lang_mode": "ja"
+  },
+  "session": {
+    "course_name": "E2E講義: 統計的機械学習",
+    "lang_mode": "ja"
+  },
+  "speech_chunks": [
+    {
+      "offset_ms": 0,
+      "duration_ms": 7000,
+      "confidence": 0.97,
+      "speaker": "teacher",
+      "text": "本日の講義では統計的機械学習の基礎として、訓練データと検証データの役割を整理します。"
+    },
+    {
+      "offset_ms": 8000,
+      "duration_ms": 7000,
+      "confidence": 0.96,
+      "speaker": "teacher",
+      "text": "過学習は訓練データに適合しすぎて未知データで性能が落ちる現象です。"
+    },
+    {
+      "offset_ms": 16000,
+      "duration_ms": 7000,
+      "confidence": 0.96,
+      "speaker": "teacher",
+      "text": "過学習を抑える代表的な方法として、L2正則化と交差検証を導入します。"
+    },
+    {
+      "offset_ms": 24000,
+      "duration_ms": 7000,
+      "confidence": 0.95,
+      "speaker": "teacher",
+      "text": "評価指標として精度だけでなく再現率とF1スコアも確認し、モデル選択を行います。"
+    }
+  ],
+  "expected": {
+    "summary_required_terms": [
+      "過学習",
+      "正則化",
+      "交差検証"
+    ],
+    "keyterms_required": [
+      "過学習",
+      "L2正則化",
+      "交差検証",
+      "F1スコア"
+    ],
+    "supported_qa": {
+      "question": "過学習を抑えるために講義で挙げた方法は何ですか？",
+      "required_answer_terms": [
+        "正則化",
+        "交差検証"
+      ],
+      "required_source_terms": [
+        "過学習"
+      ]
+    },
+    "unsupported_qa": {
+      "question": "この講義の期末試験日はいつですか？",
+      "expected_fail_closed_terms": [
+        "見つかりません",
+        "該当",
+        "確認"
+      ],
+      "disallowed_answer_terms": [
+        "4月",
+        "5月",
+        "6月",
+        "7月",
+        "8月"
+      ]
+    }
+  }
+}
