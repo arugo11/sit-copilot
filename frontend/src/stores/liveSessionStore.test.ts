@@ -4,6 +4,12 @@ import { useLiveSessionStore } from './liveSessionStore'
 describe('liveSessionStore hydrateFromSettings', () => {
   beforeEach(() => {
     useLiveSessionStore.getState().resetLiveData()
+    useLiveSessionStore.getState().setPaidFeatureVisibility({
+      translation: true,
+      summary: true,
+      keyterms: true,
+      qa: true,
+    })
   })
 
   it('hydrates assist toggles from user settings', () => {
