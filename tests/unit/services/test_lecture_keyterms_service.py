@@ -6,6 +6,7 @@ import pytest
 
 from app.services.lecture_keyterms_service import (
     AzureOpenAILectureKeyTermsService,
+    HeuristicLectureKeyTermsService,
     UnavailableLectureKeyTermsService,
 )
 
@@ -74,3 +75,28 @@ def test_parse_response_filters_terms_not_in_transcript() -> None:
         "Transformer（トランスフォーマー）"
     ]
     assert result.detected_terms == ["Transformer（トランスフォーマー）"]
+
+
+@pytest.mark.asyncio
+async def test_heuristic_keyterms_service_extracts_terms_from_transcript() -> None:
+    service = HeuristicLectureKeyTermsService()
+
+    result = await service.extract_key_terms(
+        transcript_text=(
+            "Transformer は 2017 年に発表されました。"
+            "代表的な論文名は Attention Is All You Need です。"
+            "その後の BERT や GPT 系モデルにつながりました。"
+        ),
+        lang_mode="ja",
+    )
+
+    assert [item["term"] for item in result.key_terms] == [
+        "Attention Is All You Need",
+        "Transformer",
+        "BERT",
+    ]
+    assert result.detected_terms == [
+        "Attention Is All You Need",
+        "Transformer",
+        "BERT",
+    ]

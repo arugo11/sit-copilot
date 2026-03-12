@@ -100,7 +100,20 @@ npm run dev --prefix frontend
 
 ## デプロイされている URL
 
-- Frontend: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+- Frontend (Azure Static Web Apps / Azure for Students): `https://nice-hill-0533f2700.2.azurestaticapps.net/`
+- Backend API (Azure Container Apps / Azure for Students): `https://sit-copilot-api.grayground-578aed68.japaneast.azurecontainerapps.io/`
+- 確認コマンド:
+  `az staticwebapp show -n sit-copilot-students -g sit-copilot --query defaultHostname -o tsv`
+- 配信確認:
+  `curl -I https://nice-hill-0533f2700.2.azurestaticapps.net/`
+- API 確認:
+  `curl https://sit-copilot-api.grayground-578aed68.japaneast.azurecontainerapps.io/api/v4/health`
+- 現在の状態: 2026-03-12 時点で frontend / backend ともに疎通確認済み
+- 運用メモ: 公開 frontend の lecture/procedure token と `X-User-Id` は
+  Azure Static Web Apps の runtime 設定ではなく build-time に埋め込みます。
+- token ローテーション時は Container Apps secret 更新後に
+  frontend を再ビルドして SWA を再デプロイしてください。
+- 最終確認日: 2026-03-12 (JST)
 
 ## ポスター
 
@@ -108,7 +121,7 @@ npm run dev --prefix frontend
 
 ![SIT Copilot Poster Preview](poster-gen/poster-preview-output.png)
 
-2026-02-23 時点の運用記録に基づいています。更新時は `/.claude/docs/DESIGN.md` を参照してください。
+2026-03-12 時点の運用記録に基づいています。更新時は `/.claude/docs/DESIGN.md` を参照してください。
 
 ## 補足リンク
 

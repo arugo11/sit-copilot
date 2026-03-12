@@ -6,8 +6,8 @@ import asyncio
 import json
 import logging
 import re
-from time import monotonic
 from dataclasses import dataclass
+from time import monotonic
 from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -64,6 +64,7 @@ class AzureOpenAILectureAnswererService:
     DEFAULT_MAX_RETRIES = 4
     DEFAULT_RETRY_DELAY_SECONDS = 1.0
     DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 0.35
+    DEFAULT_MAX_RETRY_AFTER_SECONDS = 2.0
     DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_ACTION_NEXT = "他にご質問があればどうぞ。"
     DEFAULT_ACTION_NEXT_EN = "Feel free to ask another question."
@@ -87,6 +88,7 @@ class AzureOpenAILectureAnswererService:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
         min_request_interval_seconds: float = DEFAULT_MIN_REQUEST_INTERVAL_SECONDS,
+        max_retry_after_seconds: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
         api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize Azure OpenAI answerer.
@@ -108,6 +110,7 @@ class AzureOpenAILectureAnswererService:
         self._max_retries = max(0, max_retries)
         self._retry_delay_seconds = max(0.0, retry_delay_seconds)
         self._min_request_interval_seconds = max(0.0, min_request_interval_seconds)
+        self._max_retry_after_seconds = max(0.0, max_retry_after_seconds)
         self._request_lock = asyncio.Lock()
         self._last_request_started_at = 0.0
         self._api_version = api_version
@@ -361,7 +364,7 @@ Answer requirements:
     def _compute_retry_delay(self, exc: HTTPError, attempt: int) -> float:
         retry_after = self._retry_after_seconds(exc)
         if retry_after is not None:
-            return retry_after
+            return min(retry_after, self._max_retry_after_seconds)
         return self._retry_delay_seconds * (2**attempt)
 
     @staticmethod

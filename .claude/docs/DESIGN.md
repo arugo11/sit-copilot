@@ -3,6 +3,81 @@
 > This document tracks design decisions made during conversations.
 > Updated automatically by the `design-tracker` skill.
 
+## Local Lecture Runtime Recovery (2026-03-13)
+
+### Decision Summary
+
+- Preserved reachable Azure OpenAI regional endpoints such as
+  `https://japaneast.api.cognitive.microsoft.com/` instead of rewriting them to
+  `*.openai.azure.com`.
+- Added deterministic local fallbacks for lecture assist features when Azure runtime is rate-limited or partially incompatible:
+  - heuristic key-term extraction from transcript text,
+  - minimal ASR year-typo correction fallback,
+  - safe subtitle-review apply fallback for obvious local corrections when judge fails,
+  - capped QA `Retry-After` wait to avoid 30-second stalls per question.
+- Hydrated live assist toggles from persisted user settings so localhost live UI reflects
+  `assistSummaryEnabled` / `assistKeytermsEnabled` immediately.
+- Restored SSE snapshot payload compatibility by emitting `originalLangText` when a speech chunk was corrected in-place.
+- Test isolation now defaults `azure_search_enabled=False` unless a test explicitly opts into Azure Search.
+
+### Rationale
+
+- Student-local runtime can resolve and call the regional cognitive endpoint, while the rewritten `resource.openai.azure.com` host is not reachable in this environment.
+- Poster-promised localhost features must keep working even under Azure OpenAI `429` or payload incompatibilities; fail-closed or deterministic local fallback is preferable to silently disabling features.
+- The live page already persisted assist preferences, but without hydration the UI misleadingly showed summary/key-term support as OFF after reload.
+- Existing tests should not depend on operator-local `.env.azure.generated` Azure Search settings.
+
+### Compatibility Rules
+
+- Do not normalize regional Azure OpenAI endpoints away from a host that is already reachable.
+- Heuristic fallbacks must remain transcript-grounded and avoid inventing unseen terms or unsupported answers.
+- Live SSE payloads may include both `sourceLangText` (current corrected text) and `originalLangText` (pre-correction text) when available.
+- Tests that require Azure Search must enable it explicitly via monkeypatch or dependency override.
+
+### Changelog
+
+- 2026-03-13: Preserved regional Azure OpenAI endpoints for localhost/student runtime.
+- 2026-03-13: Added deterministic key-term and subtitle-review fallbacks plus capped QA retry waits.
+- 2026-03-13: Hydrated live assist toggles from user settings and restored corrected-transcript SSE compatibility.
+
+## Student Demo Runtime Hardening (2026-03-12)
+
+### Decision Summary
+
+- Standardized public student demo auth on build-time injected frontend headers:
+  - `VITE_LECTURE_API_TOKEN`
+  - `VITE_DEMO_USER_ID=demo-user`
+- Rotated `sit-copilot-api` runtime `LECTURE_API_TOKEN` secret and redeployed frontend/backend together to avoid public `401 Unauthorized` drift.
+- Added Azure Search legacy schema compatibility:
+  - detect whether `keywords` field is `Collection(String)` or scalar,
+  - normalize uploaded documents to scalar string when the existing index keeps legacy scalar schema.
+- Added lecture QA fail-closed heuristics for answerer failures:
+  - grounded deterministic answers for `year`, `attention`, `RNN/CNN`, `BERT/GPT` questions,
+  - explicit `no_source` fallback for unsupported questions such as successor/exam claims.
+- Kept summary recovery compatible with PostgreSQL by using dialect-specific upsert instead of SQLite-only insert helpers.
+
+### Rationale
+
+- Public frontend auth values are compiled into the bundle, so backend secret rotation without frontend rebuild causes immediate auth mismatch.
+- Student Azure Search index already existed with a legacy `keywords` field shape; schema migration in-place was not allowed, so upload-time compatibility was safer than destructive index recreation.
+- Azure OpenAI answer generation can fail transiently in student runtime. Deterministic grounded fallback is required to keep demo QA usable and to avoid hallucinated unsupported answers.
+- Production student runtime uses PostgreSQL, so SQLite-specific summary persistence logic was not portable.
+
+### Compatibility Rules
+
+- Token rotation for public student demo must remain:
+  1. update Container Apps secret,
+  2. rebuild frontend with the same token/user id,
+  3. redeploy both before validation.
+- `demo-user` is the canonical public demo user id. `demo_user` should not be reintroduced in frontend defaults.
+- Do not recreate the Azure Search index only to change `keywords` type in student environments unless a migration window is explicitly planned.
+- When answerer fails, unsupported questions must prefer `no_source` over loosely related grounded snippets.
+
+### Changelog
+
+- 2026-03-12: Synchronized student demo token via build-time frontend injection and Container Apps secret rotation.
+- 2026-03-12: Added Azure Search legacy `keywords` upload compatibility and QA fail-closed heuristics.
+
 ## Overview
 
 Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200K context) is the orchestrator, with Codex CLI for planning/design/complex code, Gemini CLI (1M context) for codebase analysis, research, and multimodal reading, and subagents (Opus) for code implementation and Codex delegation.

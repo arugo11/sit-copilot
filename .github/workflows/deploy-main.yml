@@ -118,22 +118,23 @@ jobs:
             --resource-group "${RESOURCE_GROUP}" \
             --image "${{ steps.build_image.outputs.image_uri }}"
 
-      - name: Enforce safe runtime flags
+      - name: Enforce lecture runtime flags
         run: |
           az containerapp update \
             --name "${CONTAINER_APP_NAME}" \
             --resource-group "${RESOURCE_GROUP}" \
             --set-env-vars \
               WEAVE_ENABLED=false \
-              AZURE_OPENAI_ENABLED=false \
-              LECTURE_LIVE_ASR_REVIEW_ENABLED=false \
-              LECTURE_LIVE_TRANSLATION_ENABLED=false \
-              LECTURE_LIVE_SUMMARY_ENABLED=false \
-              LECTURE_LIVE_KEYTERMS_ENABLED=false \
-              LECTURE_QA_ENABLED=false \
+              AZURE_OPENAI_ENABLED=true \
+              AZURE_SEARCH_ENABLED=true \
+              LECTURE_LIVE_ASR_REVIEW_ENABLED=true \
+              LECTURE_LIVE_TRANSLATION_ENABLED=true \
+              LECTURE_LIVE_SUMMARY_ENABLED=true \
+              LECTURE_LIVE_KEYTERMS_ENABLED=true \
+              LECTURE_QA_ENABLED=true \
               LECTURE_IDLE_AUTOSTOP_SECONDS=120
 
-      - name: Verify safe runtime flags
+      - name: Verify lecture runtime flags
         run: |
           ENV_DUMP="$(az containerapp show \
             --name "${CONTAINER_APP_NAME}" \
@@ -142,12 +143,13 @@ jobs:
             -o tsv)"
 
           echo "${ENV_DUMP}" | grep -F "WEAVE_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "AZURE_OPENAI_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_ASR_REVIEW_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_TRANSLATION_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_SUMMARY_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_KEYTERMS_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_QA_ENABLED	false"
+          echo "${ENV_DUMP}" | grep -F "AZURE_OPENAI_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "AZURE_SEARCH_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_ASR_REVIEW_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_TRANSLATION_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_SUMMARY_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_KEYTERMS_ENABLED	true"
+          echo "${ENV_DUMP}" | grep -F "LECTURE_QA_ENABLED	true"
           echo "${ENV_DUMP}" | grep -F "LECTURE_IDLE_AUTOSTOP_SECONDS	120"
 
   api_smoke:
@@ -176,10 +178,13 @@ jobs:
     if: needs.detect_changes.outputs.frontend_changed == 'true'
     env:
       VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
-      VITE_LECTURE_LIVE_TRANSLATION_ENABLED: "false"
-      VITE_LECTURE_LIVE_SUMMARY_ENABLED: "false"
-      VITE_LECTURE_LIVE_KEYTERMS_ENABLED: "false"
-      VITE_LECTURE_QA_ENABLED: "false"
+      VITE_LECTURE_API_TOKEN: ${{ secrets.VITE_LECTURE_API_TOKEN }}
+      VITE_PROCEDURE_API_TOKEN: ${{ secrets.VITE_PROCEDURE_API_TOKEN }}
+      VITE_DEMO_USER_ID: "demo-user"
+      VITE_LECTURE_LIVE_TRANSLATION_ENABLED: "true"
+      VITE_LECTURE_LIVE_SUMMARY_ENABLED: "true"
+      VITE_LECTURE_LIVE_KEYTERMS_ENABLED: "true"
+      VITE_LECTURE_QA_ENABLED: "true"
       VITE_LECTURE_IDLE_AUTOSTOP_SECONDS: "120"
     steps:
       - name: Checkout

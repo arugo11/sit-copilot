@@ -663,8 +663,8 @@ def test_build_chat_completion_url_with_trailing_slash():
     assert "///" not in result
 
 
-def test_build_chat_completion_url_normalizes_cognitive_endpoint():
-    """Cognitive endpoint should be normalized when account name is provided."""
+def test_build_chat_completion_url_keeps_reachable_cognitive_endpoint():
+    """Regional cognitive endpoint should remain unchanged."""
     service = SqlAlchemyLectureFollowupService(
         db=AsyncMock(),
         openai_api_key=TEST_AZURE_OPENAI_KEY,
@@ -676,6 +676,6 @@ def test_build_chat_completion_url_normalizes_cognitive_endpoint():
     result = service._build_chat_completion_url()  # noqa: SLF001 - testing private method
 
     assert (
-        "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        "https://japaneast.api.cognitive.microsoft.com/openai/deployments/gpt-4o/chat/completions"
         in result
     )

@@ -122,6 +122,8 @@ interface LiveSessionStore extends LiveUiState {
     language?: 'ja' | 'en'
     transcriptDensity?: TranscriptDensity
     autoScrollDefault?: boolean
+    assistSummaryEnabled?: boolean
+    assistKeytermsEnabled?: boolean
   }) => void
   resetLiveData: () => void
 }
@@ -468,6 +470,14 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         langMode: userHasSwitched ? state.langMode : hydratedLang,
         transcriptDensity: settings.transcriptDensity ?? state.transcriptDensity,
         autoScroll: settings.autoScrollDefault ?? state.autoScroll,
+        summaryEnabled:
+          settings.assistSummaryEnabled === undefined
+            ? state.summaryEnabled
+            : state.paidFeatureVisibility.summary && settings.assistSummaryEnabled,
+        keytermsEnabled:
+          settings.assistKeytermsEnabled === undefined
+            ? state.keytermsEnabled
+            : state.paidFeatureVisibility.keyterms && settings.assistKeytermsEnabled,
       }
     }),
 

@@ -1,5 +1,7 @@
 """Unit tests for lecture answerer Azure OpenAI behavior."""
 
+from urllib.error import HTTPError
+
 from app.schemas.lecture_qa import LectureSource
 from app.services.lecture_answerer_service import AzureOpenAILectureAnswererService
 
@@ -13,7 +15,7 @@ def test_is_azure_openai_ready_with_missing_deployment() -> None:
     assert service._is_azure_openai_ready() is False  # noqa: SLF001
 
 
-def test_build_chat_completion_url_normalizes_cognitive_endpoint() -> None:
+def test_build_chat_completion_url_keeps_reachable_cognitive_endpoint() -> None:
     service = AzureOpenAILectureAnswererService(
         api_key="test-key",
         endpoint="https://japaneast.api.cognitive.microsoft.com/",
@@ -23,7 +25,7 @@ def test_build_chat_completion_url_normalizes_cognitive_endpoint() -> None:
 
     result = service._build_chat_completion_url()  # noqa: SLF001
     assert (
-        "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        "https://japaneast.api.cognitive.microsoft.com/openai/deployments/gpt-4o/chat/completions"
         in result
     )
 
@@ -80,3 +82,23 @@ def test_build_prompt_uses_easy_japanese_when_lang_mode_is_easy_ja() -> None:
     )
 
     assert "回答言語: やさしい日本語" in prompt
+
+
+def test_compute_retry_delay_caps_retry_after_header() -> None:
+    service = AzureOpenAILectureAnswererService(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        model="gpt-4o",
+        max_retry_after_seconds=2.0,
+    )
+    error = HTTPError(
+        url="https://example.invalid",
+        code=429,
+        msg="Too Many Requests",
+        hdrs={"Retry-After": "30"},
+        fp=None,
+    )
+
+    delay = service._compute_retry_delay(error, attempt=0)  # noqa: SLF001
+
+    assert delay == 2.0

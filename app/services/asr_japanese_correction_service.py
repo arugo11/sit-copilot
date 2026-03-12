@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -52,6 +53,9 @@ class AzureOpenAIJapaneseASRCorrectionService:
     DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_TIMEOUT_SECONDS = 20
     SECOND_PASS_MIN_LENGTH = 40
+    _SAFE_REGEX_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+        (re.compile(r"([0-9０-９]{2,4})\s*念"), r"\1年"),
+    )
 
     def __init__(
         self,
@@ -82,13 +86,13 @@ class AzureOpenAIJapaneseASRCorrectionService:
         if not normalized:
             return ""
         if not self._validation.is_valid:
-            return normalized
+            return self._apply_local_minimal_fallback(normalized)
 
         try:
             corrected = await self._call_openai(self._build_prompt(normalized))
             cleaned = corrected.strip()
             if not cleaned:
-                return normalized
+                return self._apply_local_minimal_fallback(normalized)
 
             if (
                 cleaned == normalized
@@ -101,10 +105,10 @@ class AzureOpenAIJapaneseASRCorrectionService:
                 if second_cleaned:
                     return second_cleaned
 
-            return cleaned
+            return self._apply_local_minimal_fallback(cleaned)
         except Exception:  # noqa: BLE001
             logger.warning("asr_minimal_correction_failed", exc_info=True)
-            return normalized
+            return self._apply_local_minimal_fallback(normalized)
 
     def _build_prompt(self, text: str) -> str:
         return (
@@ -228,3 +232,9 @@ class AzureOpenAIJapaneseASRCorrectionService:
                 return "\n".join(text_parts)
 
         raise ValueError("missing content")
+
+    def _apply_local_minimal_fallback(self, text: str) -> str:
+        corrected = text.strip()
+        for pattern, replacement in self._SAFE_REGEX_REPLACEMENTS:
+            corrected = pattern.sub(replacement, corrected)
+        return corrected
