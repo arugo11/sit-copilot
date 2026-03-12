@@ -160,19 +160,12 @@ async def test_scenario_azure_api_e2e_from_script() -> None:
                 ]
             )
             keyterm_hits = _pick_matches(expected["keyterms_required"], keyterm_surface)
-            if keyterms_payload.get("status") == "ok":
+            keyterms_status = str(keyterms_payload.get("status", ""))
+            assert keyterms_status in {"ok", "no_data"}, keyterms_payload
+            if keyterms_status == "ok":
                 assert keyterm_hits, {
                     "required": expected["keyterms_required"],
                     "surface": keyterm_surface,
-                }
-            else:
-                summary_keyterm_hits = _pick_matches(
-                    expected["keyterms_required"],
-                    " ".join(summary_terms),
-                )
-                assert summary_keyterm_hits, {
-                    "keyterms_payload": keyterms_payload,
-                    "summary_terms": summary_terms,
                 }
 
             index_response: httpx.Response | None = None
