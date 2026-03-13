@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -197,6 +197,7 @@ function renderPage() {
 
 describe('LectureLivePage', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     visibilityState = 'visible'
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -242,5 +243,42 @@ describe('LectureLivePage', () => {
       expect(mocks.finalizeDemoSession).toHaveBeenCalledWith('session-123')
       expect(mocks.streamDisconnect).toHaveBeenCalled()
     })
+  })
+
+  it('does not auto-finalize when subtitle timeout passes but user interaction is recent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-13T00:00:00Z'))
+
+    renderPage()
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'live.stream.startRecording' })
+      )
+      await Promise.resolve()
+    })
+    expect(mocks.startRecording).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(110_000)
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event('pointerdown'))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(15_000)
+    })
+
+    expect(mocks.finalizeDemoSession).not.toHaveBeenCalled()
+
+    await act(async () => {
+      vi.advanceTimersByTime(120_000)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.finalizeDemoSession).toHaveBeenCalledWith('session-123')
+
+    vi.useRealTimers()
   })
 })

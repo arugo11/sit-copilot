@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { demoApi } from '@/lib/api/client'
+import { ApiError, demoApi } from '@/lib/api/client'
 import {
   LIVE_FEATURE_FLAGS,
   sanitizeSelectableLanguage,
@@ -230,6 +230,17 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         lang_mode: nextLangMode,
       })
     } catch (error) {
+      const status = error instanceof ApiError ? error.status : undefined
+      if (status === 404 || status === 409) {
+        console.info('Skipping lang_mode persistence because session is no longer active.', {
+          sessionId,
+          selectedLanguage,
+          requestedLangMode: nextLangMode,
+          status,
+        })
+        return
+      }
+
       // 表示言語の切替はローカル機能として維持し、
       // サーバー側の lang_mode 更新だけを元に戻す。
       set({ langMode: previousLangMode })

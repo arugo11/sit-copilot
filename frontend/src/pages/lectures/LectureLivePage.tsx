@@ -980,16 +980,14 @@ export function LectureLivePage() {
 
     const checkIdleTimeout = () => {
       const now = Date.now()
-      if (now - lastInteractionAtRef.current >= IDLE_AUTOSTOP_MS) {
+      const userIdleMs = now - lastInteractionAtRef.current
+      const subtitleIdleMs = now - lastSubtitleAtRef.current
+      if (
+        userIdleMs >= IDLE_AUTOSTOP_MS &&
+        subtitleIdleMs >= IDLE_AUTOSTOP_MS
+      ) {
         void finalizeLiveSession({
-          reason: 'inactive_user',
-          suppressErrorToast: true,
-        })
-        return
-      }
-      if (now - lastSubtitleAtRef.current >= IDLE_AUTOSTOP_MS) {
-        void finalizeLiveSession({
-          reason: 'inactive_subtitle',
+          reason: subtitleIdleMs >= userIdleMs ? 'inactive_subtitle' : 'inactive_user',
           suppressErrorToast: true,
         })
       }
