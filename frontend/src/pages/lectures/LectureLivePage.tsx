@@ -42,6 +42,7 @@ import {
 const ERROR_TOAST_THROTTLE_MS = 5000
 const QA_INDEX_REFRESH_INTERVAL_MS = 30000
 const IDLE_AUTOSTOP_MS = LIVE_FEATURE_FLAGS.idleAutostopSeconds * 1000
+const BULK_TRANSLATION_INTERVAL_MS = 250
 
 type SubtitleTransformResult = {
   text: string
@@ -1059,18 +1060,28 @@ export function LectureLivePage() {
       return
     }
 
-    lines.forEach((line) => {
-      if (
-        line.translatedLangMode === selectedLanguage &&
-        line.translationStatus !== 'fallback'
-      ) {
-        return
-      }
-      void (async () => {
+    let cancelled = false
+
+    const translateInSequence = async () => {
+      for (const line of lines) {
+        if (cancelled) {
+          return
+        }
+        if (
+          line.translatedLangMode === selectedLanguage &&
+          line.translationStatus !== 'fallback'
+        ) {
+          continue
+        }
+
         const transformed = await transformSubtitleForMode(
           line.sourceLangText,
           selectedLanguage
         )
+        if (cancelled) {
+          return
+        }
+
         applyTranslationFinal(
           line.id,
           transformed.text,
@@ -1081,8 +1092,20 @@ export function LectureLivePage() {
           setTranslationFallbackActive(true)
           notifyTranslationFallback(selectedLanguage, transformed.fallbackReason)
         }
-      })()
-    })
+
+        if (BULK_TRANSLATION_INTERVAL_MS > 0) {
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, BULK_TRANSLATION_INTERVAL_MS)
+          )
+        }
+      }
+    }
+
+    void translateInSequence()
+
+    return () => {
+      cancelled = true
+    }
   }, [
     applyTranslationFinal,
     liveState,

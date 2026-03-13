@@ -60,4 +60,17 @@ describe('liveSessionStore hydrateFromSettings', () => {
     expect(state.selectedLanguage).toBe('easy-ja')
     expect(state.langMode).toBe('easy-ja')
   })
+
+  it('treats status-bearing non-ApiError objects as recoverable session drift', async () => {
+    useLiveSessionStore.getState().setSessionId('session-123')
+    mocks.updateLangMode.mockRejectedValueOnce({ status: 409, message: 'conflict' })
+
+    await expect(
+      useLiveSessionStore.getState().switchLanguage('en')
+    ).resolves.toBeUndefined()
+
+    const state = useLiveSessionStore.getState()
+    expect(state.selectedLanguage).toBe('en')
+    expect(state.langMode).toBe('en')
+  })
 })

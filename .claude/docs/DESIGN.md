@@ -3,6 +3,36 @@
 > This document tracks design decisions made during conversations.
 > Updated automatically by the `design-tracker` skill.
 
+## Live Subtitle 429 Mitigation (2026-03-13)
+
+### Decision Summary
+
+- Added retry logic to `AzureOpenAILiveCaptionTransformService` for transient caption-transform failures:
+  - retries up to `2` times on `llm_rate_limited` / `llm_network_error` / `llm_http_error`,
+  - honors capped `Retry-After` when present,
+  - keeps deterministic local fallback if retries are exhausted.
+- Updated frontend bulk translation behavior in `LectureLivePage`:
+  - existing subtitle backfill translation is now processed sequentially with interval pacing (`250ms`) instead of unbounded parallel requests.
+- Hardened frontend lang-mode error handling in `liveSessionStore`:
+  - `404/409` recovery now relies on structural `status` extraction (not `instanceof ApiError`), avoiding HMR-class-identity mismatch.
+
+### Rationale
+
+- Logs showed repeated `HTTP 429 Too Many Requests` during subtitle translation calls, which directly triggered fallback states.
+- Parallel backfill translation bursts amplified request spikes and increased rate-limit probability.
+- Runtime class identity differences can make `instanceof ApiError` unreliable in hot-reload scenarios, re-exposing `409` as unhandled errors.
+
+### Compatibility Rules
+
+- API response schema remains unchanged for subtitle transform endpoints.
+- Fallback behavior remains fail-safe; only retry/burst-control strategy is adjusted.
+- Frontend language switching should keep local UX responsive even when session persistence returns `404/409`.
+
+### Changelog
+
+- 2026-03-13: Added caption-transform transient retry handling with capped `Retry-After`.
+- 2026-03-13: Serialized bulk subtitle retranslation requests and removed `instanceof` dependency for lang-mode recoverable errors.
+
 ## Live Lang-Mode Switch 409 Recovery (2026-03-13)
 
 ### Decision Summary
