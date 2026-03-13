@@ -31,6 +31,17 @@ function normalizeAssistTermKey(term: string): string {
   return term.replace(/[\s\u3000]+/g, '').trim().toLowerCase()
 }
 
+function extractApiStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined
+  }
+  if (!('status' in error)) {
+    return undefined
+  }
+  const status = (error as { status?: unknown }).status
+  return typeof status === 'number' ? status : undefined
+}
+
 function areStringArraysEqual(
   left: readonly string[],
   right: readonly string[]
@@ -230,6 +241,17 @@ export const useLiveSessionStore = create<LiveSessionStore>((set, get) => ({
         lang_mode: nextLangMode,
       })
     } catch (error) {
+      const status = extractApiStatus(error)
+      if (status === 404 || status === 409) {
+        console.info('Skipping lang_mode persistence because session is no longer active.', {
+          sessionId,
+          selectedLanguage,
+          requestedLangMode: nextLangMode,
+          status,
+        })
+        return
+      }
+
       // 表示言語の切替はローカル機能として維持し、
       // サーバー側の lang_mode 更新だけを元に戻す。
       set({ langMode: previousLangMode })

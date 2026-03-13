@@ -7,6 +7,7 @@ import pytest
 from app.core.azure_openai_config import ValidationResult
 from app.services.live_caption_transform_service import (
     AzureOpenAILiveCaptionTransformService,
+    CaptionTransformLLMError,
 )
 
 
@@ -124,3 +125,80 @@ def test_build_chat_completion_payload_adds_reasoning_effort_for_gpt5() -> None:
     payload = service._build_chat_completion_payload(prompt)
 
     assert payload["reasoning_effort"] == "minimal"
+
+
+@pytest.mark.asyncio
+async def test_transform_retries_rate_limit_error_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AzureOpenAILiveCaptionTransformService(
+        api_key="dummy",
+        endpoint="https://example.openai.azure.com",
+        model="gpt-5-nano",
+    )
+    service._validation = ValidationResult(  # type: ignore[assignment]
+        is_valid=True,
+        normalized_endpoint="https://example.openai.azure.com",
+        reason="ok",
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.live_caption_transform_service.asyncio.sleep",
+        sleep_mock,
+    )
+    service._call_openai = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            CaptionTransformLLMError(
+                reason="llm_rate_limited",
+                message="rate limit",
+                retry_after_seconds=0.1,
+            ),
+            "translated output",
+        ]
+    )
+
+    transformed = await service.transform("機械学習は未知データで性能を確認します。", "en")
+
+    assert transformed.status == "translated"
+    assert transformed.text == "translated output"
+    assert transformed.fallback_reason is None
+    service._call_openai.assert_awaited()
+    assert service._call_openai.await_count == 2
+    sleep_mock.assert_awaited_once_with(0.1)
+
+
+@pytest.mark.asyncio
+async def test_transform_does_not_retry_non_retriable_llm_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AzureOpenAILiveCaptionTransformService(
+        api_key="dummy",
+        endpoint="https://example.openai.azure.com",
+        model="gpt-5-nano",
+    )
+    service._validation = ValidationResult(  # type: ignore[assignment]
+        is_valid=True,
+        normalized_endpoint="https://example.openai.azure.com",
+        reason="ok",
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.live_caption_transform_service.asyncio.sleep",
+        sleep_mock,
+    )
+    service._call_openai = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            CaptionTransformLLMError(
+                reason="llm_parse_error",
+                message="parse failed",
+            )
+        ]
+    )
+
+    transformed = await service.transform("検証データで過学習を確認します。", "en")
+
+    assert transformed.status == "fallback"
+    assert transformed.fallback_reason == "llm_parse_error"
+    assert "validation data" in transformed.text
+    assert service._call_openai.await_count == 1
+    sleep_mock.assert_not_awaited()

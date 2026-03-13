@@ -40,9 +40,16 @@ class CaptionTransformResult:
 class CaptionTransformLLMError(RuntimeError):
     """Raised when Azure OpenAI transform request fails."""
 
-    def __init__(self, *, reason: str, message: str) -> None:
+    def __init__(
+        self,
+        *,
+        reason: str,
+        message: str,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.reason = reason
+        self.retry_after_seconds = retry_after_seconds
 
 
 class CaptionTransformService(Protocol):
@@ -90,6 +97,10 @@ class AzureOpenAILiveCaptionTransformService:
     DEFAULT_MODEL = "gpt-5-nano"
     DEFAULT_API_VERSION = "2024-05-01-preview"
     DEFAULT_TIMEOUT_SECONDS = 20
+    MAX_RETRY_ATTEMPTS = 2
+    RETRY_BASE_DELAY_SECONDS = 0.5
+    RETRY_MAX_DELAY_SECONDS = 3.0
+    RETRYABLE_ERROR_REASONS = {"llm_rate_limited", "llm_network_error", "llm_http_error"}
 
     _EN_GLOSSARY: list[tuple[str, str]] = [
         ("機械学習", "machine learning"),
@@ -175,7 +186,7 @@ class AzureOpenAILiveCaptionTransformService:
             else self._build_easy_ja_prompt(normalized_text)
         )
         try:
-            transformed = await self._call_openai(prompt)
+            transformed = await self._call_openai_with_retry(prompt)
             cleaned = transformed.strip()
             if cleaned:
                 return CaptionTransformResult(
@@ -272,9 +283,11 @@ class AzureOpenAILiveCaptionTransformService:
             self._last_usage = extract_usage(response_json)
             return self._extract_content(response_json)
         except HTTPError as exc:
+            reason = "llm_rate_limited" if exc.code == 429 else "llm_http_error"
             raise CaptionTransformLLMError(
-                reason="llm_http_error",
+                reason=reason,
                 message="caption transform http error",
+                retry_after_seconds=self._parse_retry_after_seconds(exc),
             ) from exc
         except URLError as exc:
             raise CaptionTransformLLMError(
@@ -286,6 +299,60 @@ class AzureOpenAILiveCaptionTransformService:
                 reason="llm_parse_error",
                 message="caption transform parse error",
             ) from exc
+
+    @staticmethod
+    def _parse_retry_after_seconds(exc: HTTPError) -> float | None:
+        header_value: str | None = None
+        if exc.headers is not None:
+            header_value = exc.headers.get("Retry-After")
+        if not header_value:
+            return None
+        try:
+            parsed = float(header_value.strip())
+        except ValueError:
+            return None
+        if parsed <= 0:
+            return None
+        return parsed
+
+    async def _call_openai_with_retry(self, prompt: _PromptSpec) -> str:
+        attempts = self.MAX_RETRY_ATTEMPTS + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._call_openai(prompt)
+            except CaptionTransformLLMError as exc:
+                if (
+                    exc.reason not in self.RETRYABLE_ERROR_REASONS
+                    or attempt >= attempts
+                ):
+                    raise
+                delay_seconds = self._compute_retry_delay_seconds(
+                    exc=exc,
+                    attempt=attempt,
+                )
+                logger.info(
+                    "caption_transform_retrying reason=%s attempt=%d/%d delay=%.2fs",
+                    exc.reason,
+                    attempt,
+                    attempts,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+        raise RuntimeError("unreachable")
+
+    def _compute_retry_delay_seconds(
+        self,
+        *,
+        exc: CaptionTransformLLMError,
+        attempt: int,
+    ) -> float:
+        if (
+            exc.retry_after_seconds is not None
+            and exc.retry_after_seconds > 0
+        ):
+            return min(exc.retry_after_seconds, self.RETRY_MAX_DELAY_SECONDS)
+        exponential = self.RETRY_BASE_DELAY_SECONDS * (2 ** max(0, attempt - 1))
+        return min(exponential, self.RETRY_MAX_DELAY_SECONDS)
 
     def _build_chat_completion_payload(
         self, prompt: _PromptSpec

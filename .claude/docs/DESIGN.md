@@ -3,6 +3,68 @@
 > This document tracks design decisions made during conversations.
 > Updated automatically by the `design-tracker` skill.
 
+## Live Subtitle 429 Mitigation (2026-03-13)
+
+### Decision Summary
+
+- Added retry logic to `AzureOpenAILiveCaptionTransformService` for transient caption-transform failures:
+  - retries up to `2` times on `llm_rate_limited` / `llm_network_error` / `llm_http_error`,
+  - honors capped `Retry-After` when present,
+  - keeps deterministic local fallback if retries are exhausted.
+- Updated frontend bulk translation behavior in `LectureLivePage`:
+  - existing subtitle backfill translation is now processed sequentially with interval pacing (`250ms`) instead of unbounded parallel requests.
+- Hardened frontend lang-mode error handling in `liveSessionStore`:
+  - `404/409` recovery now relies on structural `status` extraction (not `instanceof ApiError`), avoiding HMR-class-identity mismatch.
+
+### Rationale
+
+- Logs showed repeated `HTTP 429 Too Many Requests` during subtitle translation calls, which directly triggered fallback states.
+- Parallel backfill translation bursts amplified request spikes and increased rate-limit probability.
+- Runtime class identity differences can make `instanceof ApiError` unreliable in hot-reload scenarios, re-exposing `409` as unhandled errors.
+
+### Compatibility Rules
+
+- API response schema remains unchanged for subtitle transform endpoints.
+- Fallback behavior remains fail-safe; only retry/burst-control strategy is adjusted.
+- Frontend language switching should keep local UX responsive even when session persistence returns `404/409`.
+
+### Changelog
+
+- 2026-03-13: Added caption-transform transient retry handling with capped `Retry-After`.
+- 2026-03-13: Serialized bulk subtitle retranslation requests and removed `instanceof` dependency for lang-mode recoverable errors.
+
+## Live Lang-Mode Switch 409 Recovery (2026-03-13)
+
+### Decision Summary
+
+- Updated live idle auto-stop gating in `LectureLivePage`:
+  - session finalize now requires **both** conditions to exceed timeout:
+    - no user interaction,
+    - no subtitle updates.
+- Updated frontend `switchLanguage` persistence behavior in `liveSessionStore`:
+  - `PATCH /api/v4/lecture/session/lang-mode` `404/409` is treated as non-fatal,
+  - local display language and local `langMode` are kept without throwing.
+- Added regression tests:
+  - `frontend/src/pages/lectures/LectureLivePage.test.tsx`
+  - `frontend/src/stores/liveSessionStore.test.ts`
+
+### Rationale
+
+- The previous idle logic could finalize a session while users were actively interacting with QA/language controls, if subtitles had paused for longer than the timeout.
+- Once finalized, `lang-mode` persistence returned `409`, causing repeated switch failures and uncaught promise noise in UI paths.
+- The new behavior preserves active user workflow while keeping auto-stop as a safety mechanism for truly inactive sessions.
+
+### Compatibility Rules
+
+- Backend API contract stays unchanged (`PATCH /api/v4/lecture/session/lang-mode` still returns `409` for inactive sessions).
+- Frontend must treat `404/409` from lang-mode persistence as recoverable state drift, not as user-blocking failure.
+- Idle auto-stop continues to run, but should trigger only when both interaction and subtitle activity are stale.
+
+### Changelog
+
+- 2026-03-13: Changed idle finalize gate to require both interaction-idle and subtitle-idle.
+- 2026-03-13: Made frontend lang-mode persistence tolerant to inactive session (`404/409`) and added regression tests.
+
 ## Demo Quality Gate and Production E2E Hardening (2026-03-13)
 
 ### Decision Summary
