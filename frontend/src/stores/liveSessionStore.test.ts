@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/lib/api/client'
+import { sanitizeSelectableLanguage } from '@/lib/featureFlags'
 import { useLiveSessionStore } from './liveSessionStore'
 
 const mocks = vi.hoisted(() => ({
@@ -49,28 +50,32 @@ describe('liveSessionStore hydrateFromSettings', () => {
   })
 
   it('keeps local language and does not reject when session is already finalized', async () => {
+    const requestedMode = 'easy-ja' as const
+    const expectedMode = sanitizeSelectableLanguage(requestedMode)
     useLiveSessionStore.getState().setSessionId('session-123')
     mocks.updateLangMode.mockRejectedValueOnce(new ApiError(409, 'conflict'))
 
     await expect(
-      useLiveSessionStore.getState().switchLanguage('easy-ja')
+      useLiveSessionStore.getState().switchLanguage(requestedMode)
     ).resolves.toBeUndefined()
 
     const state = useLiveSessionStore.getState()
-    expect(state.selectedLanguage).toBe('easy-ja')
-    expect(state.langMode).toBe('easy-ja')
+    expect(state.selectedLanguage).toBe(expectedMode)
+    expect(state.langMode).toBe(expectedMode)
   })
 
   it('treats status-bearing non-ApiError objects as recoverable session drift', async () => {
+    const requestedMode = 'en' as const
+    const expectedMode = sanitizeSelectableLanguage(requestedMode)
     useLiveSessionStore.getState().setSessionId('session-123')
     mocks.updateLangMode.mockRejectedValueOnce({ status: 409, message: 'conflict' })
 
     await expect(
-      useLiveSessionStore.getState().switchLanguage('en')
+      useLiveSessionStore.getState().switchLanguage(requestedMode)
     ).resolves.toBeUndefined()
 
     const state = useLiveSessionStore.getState()
-    expect(state.selectedLanguage).toBe('en')
-    expect(state.langMode).toBe('en')
+    expect(state.selectedLanguage).toBe(expectedMode)
+    expect(state.langMode).toBe(expectedMode)
   })
 })
