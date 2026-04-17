@@ -258,8 +258,7 @@ class AzureAISearchService:
                 SearchableField(name="summary_text", type=string_type),
                 SearchableField(
                     name="keywords",
-                    type=collection_string,
-                    filterable=True,
+                    type=string_type,
                 ),
                 SimpleField(
                     name="lang",

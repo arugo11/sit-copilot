@@ -8,8 +8,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_lecture_token, require_user_id
+from app.core.auth import (
+    AuthContext,
+    require_lecture_token,
+    require_user_id,
+    resolve_auth_context,
+    resolve_rate_limit_user_id,
+)
 from app.core.config import settings
+from app.core.rate_limit import (
+    RateLimitPolicy,
+    SlidingWindowRateLimiter,
+    enforce_rate_limit,
+)
 from app.db.session import get_db
 from app.schemas.lecture_qa import (
     LectureAskRequest,
@@ -45,6 +56,7 @@ from app.services.lecture_qa_service import (
 )
 from app.services.lecture_retrieval_service import (
     AzureSearchLectureRetrievalService,
+    HybridLectureRetrievalService,
     LectureRetrievalService,
     get_shared_lecture_retrieval_service,
 )
@@ -66,6 +78,7 @@ router = APIRouter(
     tags=["lecture-qa"],
     dependencies=[Depends(require_lecture_token)],
 )
+_lecture_qa_rate_limiter = SlidingWindowRateLimiter()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AUTO_TITLE_DEBUG_LOG_DIR = PROJECT_ROOT / ".log"
@@ -73,7 +86,7 @@ AUTO_TITLE_DEBUG_LOG_PATH = AUTO_TITLE_DEBUG_LOG_DIR / "auto-title-debug.log"
 AUTO_TITLE_DEBUG_LOG_RELATIVE_PATH = ".log/auto-title-debug.log"
 _shared_lecture_answerer_service: AzureOpenAILectureAnswererService | None = None
 _shared_lecture_answerer_service_key: (
-    tuple[str, str, str, str, int, float, float, str] | None
+    tuple[str, str, str, str, int, float, float, int, int, str] | None
 ) = None
 QA_DISABLED_ANSWER = "この環境では講義 QA は無効です。"
 QA_DISABLED_ACTION_NEXT = "管理者が QA を有効化するまでお待ちください。"
@@ -160,13 +173,16 @@ def get_azure_search_service() -> AzureSearchService:
 def get_lecture_retrieval_service() -> LectureRetrievalService:
     """Dependency provider for lecture retrieval service."""
     if _azure_search_available():
-        return AzureSearchLectureRetrievalService(
-            search_service=get_azure_search_service(),
+        return HybridLectureRetrievalService(
+            primary=AzureSearchLectureRetrievalService(
+                search_service=get_azure_search_service(),
+            ),
+            fallback=get_shared_lecture_retrieval_service(tokenizer_mode="hybrid"),
         )
-    return get_shared_lecture_retrieval_service()
+    return get_shared_lecture_retrieval_service(tokenizer_mode="hybrid")
 
 
-def _lecture_answerer_config_key() -> tuple[str, str, str, str, int, float, float, str]:
+def _lecture_answerer_config_key() -> tuple[str, str, str, str, int, float, float, int, int, str]:
     return (
         settings.azure_openai_api_key,
         settings.azure_openai_endpoint,
@@ -175,6 +191,8 @@ def _lecture_answerer_config_key() -> tuple[str, str, str, str, int, float, floa
         settings.lecture_qa_answer_max_retries,
         settings.lecture_qa_answer_retry_delay_seconds,
         settings.lecture_qa_answer_min_request_interval_seconds,
+        settings.lecture_qa_answer_max_tokens_fact,
+        settings.lecture_qa_answer_max_tokens_explanation,
         settings.azure_openai_api_version,
     )
 
@@ -194,6 +212,8 @@ def get_shared_lecture_answerer_service() -> AzureOpenAILectureAnswererService:
             endpoint=settings.azure_openai_endpoint,
             account_name=settings.azure_openai_account_name,
             model=settings.azure_openai_model,
+            fact_max_tokens=settings.lecture_qa_answer_max_tokens_fact,
+            explanation_max_tokens=settings.lecture_qa_answer_max_tokens_explanation,
             max_retries=settings.lecture_qa_answer_max_retries,
             retry_delay_seconds=settings.lecture_qa_answer_retry_delay_seconds,
             min_request_interval_seconds=settings.lecture_qa_answer_min_request_interval_seconds,
@@ -230,7 +250,11 @@ def get_lecture_verifier_service() -> LectureVerifierService:
         api_key=settings.azure_openai_api_key,
         endpoint=settings.azure_openai_endpoint,
         account_name=settings.azure_openai_account_name,
-        model=settings.azure_openai_model,
+        model=settings.lecture_qa_verifier_model or settings.azure_openai_model,
+        repair_model=settings.lecture_qa_repair_model or settings.lecture_qa_verifier_model or settings.azure_openai_model,
+        max_tokens=settings.lecture_qa_verify_max_tokens,
+        timeout_seconds=settings.lecture_qa_verify_timeout_seconds,
+        repair_timeout_seconds=settings.lecture_qa_repair_timeout_seconds,
         api_version=settings.azure_openai_api_version,
     )
 
@@ -257,11 +281,17 @@ def get_lecture_index_service(
         return AzureLectureIndexService(
             db=db,
             search_service=get_azure_search_service(),
+            local_retrieval_service=get_shared_lecture_retrieval_service(
+                tokenizer_mode="hybrid"
+            ),
         )
 
     return BM25LectureIndexService(
         db=db,
-        retrieval_service=get_shared_lecture_retrieval_service(),
+        retrieval_service=get_shared_lecture_retrieval_service(
+            tokenizer_mode="hybrid"
+        ),
+        tokenizer_mode="hybrid",
     )
 
 
@@ -287,6 +317,7 @@ def get_lecture_qa_service(
         followup=followup,
         retrieval_limit=settings.lecture_qa_retrieval_limit,
         citation_limit=settings.lecture_qa_citation_limit,
+        repair_mode=settings.lecture_qa_repair_mode,
     )
 
     # Wrap with observed service if Weave is enabled
@@ -302,11 +333,22 @@ def get_lecture_qa_service(
     response_model=LectureIndexBuildResponse,
 )
 async def build_qa_index(
+    http_request: Request,
     request: LectureIndexBuildRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     service: Annotated[LectureIndexService, Depends(get_lecture_index_service)],
 ) -> LectureIndexBuildResponse:
     """Build lecture QA index for the session (Azure or BM25 backend)."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_qa_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-qa-index-build",
+            max_requests=settings.public_demo_rate_limit_qa_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         return await service.build_index(
             session_id=request.session_id,
@@ -331,11 +373,22 @@ async def build_qa_index(
     response_model=LectureAskResponse,
 )
 async def ask_question(
+    http_request: Request,
     request: LectureAskRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureAskResponse:
     """Answer a lecture question using configured retrieval + Azure OpenAI."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_qa_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-qa-ask",
+            max_requests=settings.public_demo_rate_limit_qa_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     if not _lecture_qa_available():
         return _build_qa_disabled_response()
 
@@ -391,11 +444,22 @@ async def log_autotitle_debug(
     response_model=LectureFollowupResponse,
 )
 async def ask_followup(
+    http_request: Request,
     request: LectureFollowupRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     service: Annotated[LectureQAService, Depends(get_lecture_qa_service)],
 ) -> LectureFollowupResponse:
     """Answer a follow-up question with conversation context."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_qa_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-qa-followup",
+            max_requests=settings.public_demo_rate_limit_qa_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     if not _lecture_qa_available():
         return _build_followup_disabled_response(request.question)
 

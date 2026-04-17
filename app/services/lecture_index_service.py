@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from rank_bm25 import BM25Okapi
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,9 @@ from app.services.lecture_retrieval_service import (
     BM25LectureRetrievalService,
     BM25TokenCache,
     LectureRetrievalIndex,
+    TokenizerMode,
+    tokenize_hybrid_japanese_text,
+    tokenize_whitespace_text,
 )
 
 __all__ = [
@@ -52,6 +56,7 @@ class BM25LectureIndexService:
         retrieval_service: BM25LectureRetrievalService,
         k1: float = DEFAULT_K1,
         b: float = DEFAULT_B,
+        tokenizer_mode: TokenizerMode = "whitespace",
     ) -> None:
         """Initialize the index service.
 
@@ -65,6 +70,7 @@ class BM25LectureIndexService:
         self._retrieval_service = retrieval_service
         self._k1 = k1
         self._b = b
+        self._tokenizer_mode = tokenizer_mode
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
@@ -251,14 +257,11 @@ class BM25LectureIndexService:
             b=self._b,
         )
 
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        """Tokenize text for BM25 indexing.
-
-        Uses simple whitespace tokenization with lowercasing.
-        For production, consider integrating SudachiPy for Japanese.
-        """
-        return text.lower().split()
+    def _tokenize(self, text: str) -> list[str]:
+        """Tokenize text for BM25 indexing."""
+        if self._tokenizer_mode == "hybrid":
+            return tokenize_hybrid_japanese_text(text)
+        return tokenize_whitespace_text(text)
 
     @staticmethod
     def _format_timestamp(start_ms: int) -> str:
@@ -303,9 +306,13 @@ class AzureLectureIndexService:
         self,
         db: AsyncSession,
         search_service: AzureSearchService,
+        local_retrieval_service: BM25LectureRetrievalService | None = None,
+        tokenizer_mode: TokenizerMode = "hybrid",
     ) -> None:
         self._db = db
         self._search_service = search_service
+        self._local_retrieval_service = local_retrieval_service
+        self._tokenizer_mode = tokenizer_mode
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
@@ -364,6 +371,11 @@ class AzureLectureIndexService:
         await self._sync_indexed_flags(
             session_id=session.id,
             persistable_chunk_ids=persistable_chunk_ids,
+            succeeded_chunk_ids=succeeded_chunk_ids,
+        )
+        await self._sync_local_index(
+            session=session,
+            documents=documents,
             succeeded_chunk_ids=succeeded_chunk_ids,
         )
 
@@ -461,6 +473,11 @@ class AzureLectureIndexService:
         chunk: LectureChunk,
     ) -> dict[str, Any]:
         started_at = session.started_at.date().isoformat() if session.started_at else ""
+        keywords = [
+            str(keyword).strip()
+            for keyword in (chunk.keywords_json or [])
+            if str(keyword).strip()
+        ]
         return {
             "chunk_id": chunk.id,
             "session_id": chunk.session_id,
@@ -472,7 +489,7 @@ class AzureLectureIndexService:
             "speech_text": chunk.speech_text or "",
             "visual_text": chunk.visual_text or "",
             "summary_text": chunk.summary_text or "",
-            "keywords": chunk.keywords_json or [],
+            "keywords": " ".join(keywords),
             "lang": session.lang_mode,
             "speaker": "",
         }
@@ -494,7 +511,7 @@ class AzureLectureIndexService:
             "speech_text": event.text,
             "visual_text": "",
             "summary_text": "",
-            "keywords": [],
+            "keywords": "",
             "lang": session.lang_mode,
             "speaker": event.speaker,
         }
@@ -503,3 +520,78 @@ class AzureLectureIndexService:
     def _generate_version() -> str:
         """Generate a unique index version identifier."""
         return str(uuid.uuid4())
+
+    async def _sync_local_index(
+        self,
+        *,
+        session: LectureSession,
+        documents: list[dict[str, Any]],
+        succeeded_chunk_ids: list[str],
+    ) -> None:
+        if self._local_retrieval_service is None:
+            return
+
+        succeeded_ids = set(succeeded_chunk_ids)
+        chunks = [
+            self._document_to_bm25_chunk(document)
+            for document in documents
+            if str(document.get("chunk_id", "")) in succeeded_ids
+        ]
+        tokenized_corpus = [self._tokenize(chunk["text"]) for chunk in chunks]
+        chunk_ids = [chunk["id"] for chunk in chunks]
+
+        index = LectureRetrievalIndex(
+            bm25=BM25Okapi(tokenized_corpus),
+            cache=BM25TokenCache(
+                tokenized_corpus=tokenized_corpus,
+                chunk_ids=chunk_ids,
+                chunks=chunks,
+            ),
+            k1=BM25LectureIndexService.DEFAULT_K1,
+            b=BM25LectureIndexService.DEFAULT_B,
+        )
+        await self._local_retrieval_service.set_index(session.id, index)
+
+    def _document_to_bm25_chunk(self, document: dict[str, Any]) -> dict[str, Any]:
+        text = ""
+        for field in ("speech_text", "visual_text", "summary_text"):
+            value = document.get(field)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                break
+
+        return {
+            "id": str(document.get("chunk_id", "")).strip(),
+            "type": "visual"
+            if str(document.get("chunk_type", "")).strip().lower() == "visual"
+            else "speech",
+            "text": text,
+            "timestamp": self._format_timestamp(document.get("start_ms")),
+            "start_ms": self._to_optional_int(document.get("start_ms")),
+            "end_ms": self._to_optional_int(document.get("end_ms")),
+            "speaker": str(document.get("speaker", "")).strip() or None,
+        }
+
+    def _tokenize(self, text: str) -> list[str]:
+        if self._tokenizer_mode == "hybrid":
+            return tokenize_hybrid_japanese_text(text)
+        return tokenize_whitespace_text(text)
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _format_timestamp(cls, start_ms: Any) -> str | None:
+        normalized = cls._to_optional_int(start_ms)
+        if normalized is None:
+            return None
+        total_seconds = normalized // 1000
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"

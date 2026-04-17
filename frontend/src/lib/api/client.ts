@@ -18,11 +18,24 @@ function resolveApiBaseUrl(): string {
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()
-export const LECTURE_API_TOKEN =
-  import.meta.env.VITE_LECTURE_API_TOKEN || 'dev-lecture-token'
-export const PROCEDURE_API_TOKEN =
-  import.meta.env.VITE_PROCEDURE_API_TOKEN || 'dev-procedure-token'
-export const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || 'demo_user'
+const DEMO_SESSION_STORAGE_KEY = 'sit-copilot-demo-session'
+
+export interface DemoSessionBootstrapResponse {
+  lecture_token: string
+  procedure_token: string
+  user_id: string
+  expires_at: string
+}
+
+export interface DemoSessionState {
+  lectureToken: string
+  procedureToken: string
+  userId: string
+  expiresAt: string
+}
+
+let demoSessionState: DemoSessionState | null = null
+let demoSessionPromise: Promise<DemoSessionState> | null = null
 
 export class ApiError extends Error {
   status: number
@@ -34,6 +47,121 @@ export class ApiError extends Error {
     this.status = status
     this.details = details
   }
+}
+
+function loadDemoSessionFromStorage(): DemoSessionState | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  const raw = window.localStorage.getItem(DEMO_SESSION_STORAGE_KEY)
+  if (!raw) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(raw) as DemoSessionState
+    if (
+      typeof parsed.lectureToken !== 'string' ||
+      typeof parsed.procedureToken !== 'string' ||
+      typeof parsed.userId !== 'string' ||
+      typeof parsed.expiresAt !== 'string'
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function saveDemoSessionToStorage(state: DemoSessionState): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(DEMO_SESSION_STORAGE_KEY, JSON.stringify(state))
+}
+
+function clearDemoSession(): void {
+  demoSessionState = null
+  demoSessionPromise = null
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(DEMO_SESSION_STORAGE_KEY)
+  }
+}
+
+function normalizeDemoSession(payload: DemoSessionBootstrapResponse): DemoSessionState {
+  return {
+    lectureToken: payload.lecture_token,
+    procedureToken: payload.procedure_token,
+    userId: payload.user_id,
+    expiresAt: payload.expires_at,
+  }
+}
+
+function isDemoSessionValid(session: DemoSessionState | null): session is DemoSessionState {
+  if (!session) {
+    return false
+  }
+  const expiresAt = Date.parse(session.expiresAt)
+  if (Number.isNaN(expiresAt)) {
+    return false
+  }
+  return expiresAt > Date.now() + 30_000
+}
+
+async function bootstrapDemoSession(): Promise<DemoSessionState> {
+  const response = await fetch(`${API_BASE_URL}/api/v4/auth/demo-session`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+  if (!response.ok) {
+    let message = 'Failed to bootstrap demo session'
+    try {
+      const errorPayload = await response.json() as { detail?: string; message?: string }
+      message = errorPayload.detail || errorPayload.message || message
+    } catch {
+      message = response.statusText || message
+    }
+    throw new ApiError(response.status, message)
+  }
+
+  const payload = await response.json() as DemoSessionBootstrapResponse
+  const normalized = normalizeDemoSession(payload)
+  demoSessionState = normalized
+  saveDemoSessionToStorage(normalized)
+  return normalized
+}
+
+export async function ensureDemoSession(): Promise<DemoSessionState> {
+  if (isDemoSessionValid(demoSessionState)) {
+    return demoSessionState
+  }
+
+  const stored = loadDemoSessionFromStorage()
+  if (isDemoSessionValid(stored)) {
+    demoSessionState = stored
+    return stored
+  }
+
+  if (!demoSessionPromise) {
+    demoSessionPromise = bootstrapDemoSession().finally(() => {
+      demoSessionPromise = null
+    })
+  }
+  return demoSessionPromise
+}
+
+export function getCurrentDemoSession(): DemoSessionState | null {
+  if (isDemoSessionValid(demoSessionState)) {
+    return demoSessionState
+  }
+  const stored = loadDemoSessionFromStorage()
+  if (isDemoSessionValid(stored)) {
+    demoSessionState = stored
+    return stored
+  }
+  return null
 }
 
 export interface UserSettings {
@@ -299,12 +427,12 @@ function isEnglishUi(): boolean {
 export function getUnauthorizedMessage(scope: 'lecture' | 'procedure'): string {
   if (scope === 'procedure') {
     return isEnglishUi()
-      ? 'Unauthorized. Check token settings (X-Procedure-Token).'
-      : 'Unauthorized. トークン設定を確認してください (X-Procedure-Token)。'
+      ? 'Unauthorized. Demo session expired; refresh the page.'
+      : '認証に失敗しました。デモセッションの有効期限が切れた可能性があります。ページを再読み込みしてください。'
   }
   return isEnglishUi()
-    ? 'Unauthorized. Check token settings (X-Lecture-Token / X-User-Id).'
-    : 'Unauthorized. トークン設定を確認してください (X-Lecture-Token / X-User-Id)。'
+    ? 'Unauthorized. Demo session expired; refresh the page.'
+    : '認証に失敗しました。デモセッションの有効期限が切れた可能性があります。ページを再読み込みしてください。'
 }
 
 function normalizeUserSettings(value: unknown): UserSettings {
@@ -342,14 +470,20 @@ function normalizeUserSettings(value: unknown): UserSettings {
   return normalized
 }
 
-function applyAuthHeaders(headers: Headers, authScope: AuthScope): void {
+function applyAuthHeaders(
+  headers: Headers,
+  authScope: AuthScope,
+  session: DemoSessionState | null
+): void {
+  if (!session) {
+    return
+  }
   if (authScope === 'lecture') {
-    headers.set('X-Lecture-Token', LECTURE_API_TOKEN)
-    headers.set('X-User-Id', DEMO_USER_ID)
+    headers.set('X-Lecture-Token', session.lectureToken)
   }
 
   if (authScope === 'procedure') {
-    headers.set('X-Procedure-Token', PROCEDURE_API_TOKEN)
+    headers.set('X-Procedure-Token', session.procedureToken)
   }
 }
 
@@ -384,10 +518,11 @@ class ApiClient {
   ): Promise<T> {
     const { authScope = 'lecture', ...fetchOptions } = options
     const url = `${this.baseUrl}${endpoint}`
+    const demoSession = authScope === 'none' ? null : await ensureDemoSession()
 
     const headers = new Headers(fetchOptions.headers ?? {})
     headers.set('Content-Type', 'application/json')
-    applyAuthHeaders(headers, authScope)
+    applyAuthHeaders(headers, authScope, demoSession)
 
     const config: RequestInit = {
       ...fetchOptions,
@@ -409,6 +544,7 @@ class ApiClient {
           message = response.statusText || message
         }
         if (response.status === 401) {
+          clearDemoSession()
           message = getUnauthorizedMessage(
             authScope === 'procedure' ? 'procedure' : 'lecture'
           )
@@ -514,7 +650,7 @@ export const demoApi = {
   finalizeDemoSessionKeepalive(sessionId: string): void {
     const headers = new Headers()
     headers.set('Content-Type', 'application/json')
-    applyAuthHeaders(headers, 'lecture')
+    applyAuthHeaders(headers, 'lecture', getCurrentDemoSession())
     const endpoint = `${API_BASE_URL}/api/v4/lecture/session/finalize`
     void fetch(endpoint || '/api/v4/lecture/session/finalize', {
       method: 'POST',

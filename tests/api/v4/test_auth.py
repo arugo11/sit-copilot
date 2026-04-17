@@ -4,7 +4,10 @@ import pytest
 from httpx import AsyncClient
 
 from app.api.v4 import auth as auth_api
-from app.core.auth import LECTURE_TOKEN_HEADER
+from app.core.auth import (
+    LECTURE_TOKEN_HEADER,
+    build_demo_session_token,
+)
 from app.core.config import settings
 from app.main import app
 from app.services import speech_token_service as speech_token_service_module
@@ -28,8 +31,7 @@ class _FailureSpeechTokenService:
 
 
 class _AlwaysBlockedRateLimiter:
-    async def allow(self, key: str) -> bool:
-        _ = key
+    async def allow(self, **_: object) -> bool:
         return False
 
 
@@ -55,6 +57,22 @@ async def test_get_speech_token_returns_200(async_client: AsyncClient) -> None:
         "region": "japaneast",
         "expires_in_sec": 540,
     }
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_demo_session_returns_tokens(
+    async_client: AsyncClient,
+) -> None:
+    """Public demo bootstrap should issue lecture/procedure tokens."""
+    response = await async_client.post("/api/v4/auth/demo-session")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert isinstance(body["lecture_token"], str)
+    assert isinstance(body["procedure_token"], str)
+    assert body["lecture_token"] == body["procedure_token"]
+    assert body["user_id"].startswith("demo_")
+    assert "expires_at" in body
 
 
 @pytest.mark.asyncio
@@ -87,6 +105,27 @@ async def test_get_speech_token_returns_503_on_provider_failure(
 
     assert response.status_code == 503
     assert body["error"]["code"] == "http_error"
+
+
+@pytest.mark.asyncio
+async def test_get_speech_token_accepts_demo_session_token(
+    async_client: AsyncClient,
+) -> None:
+    """Speech token endpoint should accept public demo lecture token."""
+    token, _ = build_demo_session_token(user_id="demo_test_user")
+    app.dependency_overrides[auth_api.get_speech_token_service] = lambda: (
+        _SuccessSpeechTokenService()
+    )
+
+    try:
+        response = await async_client.get(
+            "/api/v4/auth/speech-token",
+            headers={LECTURE_TOKEN_HEADER: token},
+        )
+    finally:
+        app.dependency_overrides.pop(auth_api.get_speech_token_service, None)
+
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

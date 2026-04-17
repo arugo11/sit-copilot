@@ -4,8 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -37,6 +36,11 @@ class QATurn(Base):
         JSON,
         nullable=False,
         default=list,
+    )
+    metrics_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=dict,
     )
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     verifier_supported: Mapped[bool] = mapped_column(

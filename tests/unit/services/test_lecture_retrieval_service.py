@@ -1,8 +1,16 @@
 """Unit tests for lecture retrieval service implementations."""
 
 import pytest
+from rank_bm25 import BM25Okapi
 
-from app.services.lecture_retrieval_service import AzureSearchLectureRetrievalService
+from app.services.lecture_retrieval_service import (
+    AzureSearchLectureRetrievalService,
+    BM25LectureRetrievalService,
+    BM25TokenCache,
+    HybridLectureRetrievalService,
+    LectureRetrievalIndex,
+    tokenize_hybrid_japanese_text,
+)
 
 
 class FakeAzureSearchService:
@@ -201,3 +209,113 @@ async def test_azure_retrieval_reports_no_local_index() -> None:
     # No-op methods should not raise
     await service.set_index("session-3", index=None)  # type: ignore[arg-type]
     await service.remove_index("session-3")
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retrieval_falls_back_to_local_bm25_when_azure_returns_empty() -> None:
+    """Hybrid retrieval should use local fallback when Azure returns no sources."""
+    primary = AzureSearchLectureRetrievalService(
+        search_service=FakeAzureSearchService(documents=[])
+    )
+    fallback = BM25LectureRetrievalService(tokenizer_mode="hybrid")
+    chunk = {
+        "id": "chunk-1",
+        "type": "speech",
+        "text": "基底はベクトル空間を張る一次独立な集合です。",
+        "timestamp": "00:00",
+        "start_ms": 0,
+        "end_ms": 1000,
+        "speaker": "teacher",
+    }
+    tokenized_chunk = tokenize_hybrid_japanese_text(str(chunk["text"]))
+    index = LectureRetrievalIndex(
+        bm25=BM25Okapi([tokenized_chunk]),
+        cache=BM25TokenCache(
+            tokenized_corpus=[tokenized_chunk],
+            chunk_ids=["chunk-1"],
+            chunks=[chunk],
+        ),
+        k1=1.2,
+        b=0.5,
+    )
+    await fallback.set_index("session-fallback", index)
+    service = HybridLectureRetrievalService(primary=primary, fallback=fallback)
+
+    sources = await service.retrieve(
+        session_id="session-fallback",
+        query="基底とは何ですか",
+        mode="source-only",
+        top_k=3,
+        context_window=1,
+    )
+
+    assert len(sources) == 1
+    assert sources[0].chunk_id == "chunk-1"
+
+
+@pytest.mark.asyncio
+async def test_bm25_retrieval_filters_zero_score_results() -> None:
+    """BM25 retrieval should not return arbitrary zero-score chunks."""
+    service = BM25LectureRetrievalService(tokenizer_mode="whitespace")
+    index = LectureRetrievalIndex(
+        bm25=BM25Okapi([["alpha"], ["beta"]]),
+        cache=BM25TokenCache(
+            tokenized_corpus=[["alpha"], ["beta"]],
+            chunk_ids=["chunk-a", "chunk-b"],
+            chunks=[
+                {"id": "chunk-a", "type": "speech", "text": "alpha"},
+                {"id": "chunk-b", "type": "speech", "text": "beta"},
+            ],
+        ),
+        k1=1.2,
+        b=0.5,
+    )
+    await service.set_index("session-zero", index)
+
+    sources = await service.retrieve(
+        session_id="session-zero",
+        query="gamma",
+        mode="source-only",
+        top_k=3,
+        context_window=0,
+    )
+
+    assert sources == []
+
+
+@pytest.mark.asyncio
+async def test_bm25_retrieval_uses_overlap_fallback_on_single_document_corpus() -> None:
+    """Single-document corpora should still retrieve when query and source overlap."""
+    service = BM25LectureRetrievalService(tokenizer_mode="hybrid")
+    chunk_text = "機械学習は人工知能の一分野です"
+    tokenized_chunk = tokenize_hybrid_japanese_text(chunk_text)
+    index = LectureRetrievalIndex(
+        bm25=BM25Okapi([tokenized_chunk]),
+        cache=BM25TokenCache(
+            tokenized_corpus=[tokenized_chunk],
+            chunk_ids=["chunk-1"],
+            chunks=[
+                {
+                    "id": "chunk-1",
+                    "type": "speech",
+                    "text": chunk_text,
+                    "timestamp": "00:00",
+                }
+            ],
+        ),
+        k1=1.2,
+        b=0.5,
+    )
+    await service.set_index("session-single", index)
+
+    sources = await service.retrieve(
+        session_id="session-single",
+        query="機械学習とは何ですか",
+        mode="source-only",
+        top_k=3,
+        context_window=0,
+    )
+
+    assert len(sources) == 1
+    assert sources[0].chunk_id == "chunk-1"
+    assert sources[0].bm25_score > 0.0

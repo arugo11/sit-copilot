@@ -25,8 +25,19 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_lecture_token, require_user_id
+from app.core.auth import (
+    AuthContext,
+    require_lecture_token,
+    require_user_id,
+    resolve_auth_context,
+    resolve_rate_limit_user_id,
+)
 from app.core.config import settings
+from app.core.rate_limit import (
+    RateLimitPolicy,
+    SlidingWindowRateLimiter,
+    enforce_rate_limit,
+)
 from app.core.session_lock import session_write_lock
 from app.core.user_id import get_user_id_candidates
 from app.db.session import get_db
@@ -139,6 +150,7 @@ router = APIRouter(
     tags=["lecture"],
     dependencies=[Depends(require_lecture_token)],
 )
+_lecture_rate_limiter = SlidingWindowRateLimiter()
 
 SSE_POLL_INTERVAL_SECONDS = 1.0
 SSE_BATCH_LIMIT = 20
@@ -670,11 +682,17 @@ def get_lecture_index_service(
         return AzureLectureIndexService(
             db=db,
             search_service=get_azure_search_service(),
+            local_retrieval_service=get_shared_lecture_retrieval_service(
+                tokenizer_mode="hybrid"
+            ),
         )
 
     return BM25LectureIndexService(
         db=db,
-        retrieval_service=get_lecture_retrieval_service(),
+        retrieval_service=get_shared_lecture_retrieval_service(
+            tokenizer_mode="hybrid"
+        ),
+        tokenizer_mode="hybrid",
     )
 
 
@@ -746,10 +764,21 @@ def get_caption_transform_service() -> CaptionTransformService:
     response_model=LectureSessionStartResponse,
 )
 async def start_lecture_session(
+    http_request: Request,
     request: LectureSessionStartRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
 ) -> LectureSessionStartResponse:
     """Start a new active lecture session."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-session-start",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     return await service.start_session(request)
 
 
@@ -759,7 +788,9 @@ async def start_lecture_session(
     response_model=LectureSessionLangModeUpdateResponse,
 )
 async def update_lecture_session_lang_mode(
+    http_request: Request,
     request: LectureSessionLangModeUpdateRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
 ) -> LectureSessionLangModeUpdateResponse:
     """Update language mode for an active lecture session.
@@ -768,6 +799,15 @@ async def update_lecture_session_lang_mode(
     Existing summaries are NOT regenerated.
     New summaries will use the updated lang_mode.
     """
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-lang-mode",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         result = await service.update_lang_mode(
             session_id=request.session_id,
@@ -796,10 +836,21 @@ async def update_lecture_session_lang_mode(
     response_model=SpeechChunkIngestResponse,
 )
 async def ingest_speech_chunk(
+    http_request: Request,
     request: SpeechChunkIngestRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
 ) -> SpeechChunkIngestResponse:
     """Persist a finalized subtitle chunk."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-speech-chunk",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         return await service.ingest_speech_chunk(request)
     except LectureSessionNotFoundError as exc:
@@ -820,10 +871,21 @@ async def ingest_speech_chunk(
     response_model=SpeechChunkAuditApplyResponse,
 )
 async def audit_and_apply_speech_chunk(
+    http_request: Request,
     request: SpeechChunkAuditApplyRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
 ) -> SpeechChunkAuditApplyResponse:
     """Audit displayed speech chunk and replace persisted subtitle text."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-audit-apply",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         return await service.audit_and_apply_speech_chunk(
             session_id=request.session_id,
@@ -852,7 +914,9 @@ async def audit_and_apply_speech_chunk(
     response_model=SubtitleTransformResponse,
 )
 async def transform_subtitle_for_display(
+    http_request: Request,
     request: SubtitleTransformRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     transform_service: Annotated[
@@ -861,6 +925,15 @@ async def transform_subtitle_for_display(
     ],
 ) -> SubtitleTransformResponse:
     """Transform subtitle text for selected live subtitle language."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-subtitle-transform",
+            max_requests=settings.public_demo_rate_limit_lecture_read_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     await _ensure_stream_session_access(
         db=db,
         session_id=request.session_id,
@@ -885,7 +958,9 @@ async def transform_subtitle_for_display(
     response_model=SubtitleAuditResponse,
 )
 async def audit_subtitle_text(
+    http_request: Request,
     request: SubtitleAuditRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     review_service: Annotated[
@@ -894,6 +969,15 @@ async def audit_subtitle_text(
     ],
 ) -> SubtitleAuditResponse:
     """Run immediate subtitle audit/correction for displayed text."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-subtitle-audit",
+            max_requests=settings.public_demo_rate_limit_lecture_read_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     await _ensure_stream_session_access(
         db=db,
         session_id=request.session_id,
@@ -918,14 +1002,25 @@ async def audit_subtitle_text(
     response_model=VisualEventIngestResponse,
 )
 async def ingest_visual_event(
+    http_request: Request,
     session_id: Annotated[str, Form(...)],
     timestamp_ms: Annotated[int, Form(...)],
     source: Annotated[LectureVisualSource, Form(...)],
     change_score: Annotated[float, Form(...)],
     image: Annotated[UploadFile, File(...)],
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[LectureLiveService, Depends(get_lecture_live_service)],
 ) -> VisualEventIngestResponse:
     """Persist an OCR visual event."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-visual-event",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     max_image_bytes = min(
         settings.lecture_visual_max_image_bytes,
         MAX_VISUAL_IMAGE_BYTES,
@@ -1025,16 +1120,27 @@ async def stream_lecture_events(
     response_model=LectureSummaryLatestResponse,
 )
 async def get_latest_summary(
+    http_request: Request,
     session_id: Annotated[
         str,
         Query(..., min_length=1, max_length=64),
     ],
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     service: Annotated[LectureSummaryService, Depends(get_lecture_summary_service)],
     force_rebuild: Annotated[bool, Query()] = False,
 ) -> LectureSummaryLatestResponse:
     """Return latest 30-second summary for the lecture session."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-summary-latest",
+            max_requests=settings.public_demo_rate_limit_lecture_read_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     normalized_session_id = session_id.strip()
     if not normalized_session_id:
         raise HTTPException(
@@ -1117,13 +1223,24 @@ async def get_latest_summary(
     response_model=LectureSessionFinalizeResponse,
 )
 async def finalize_lecture_session(
+    http_request: Request,
     request: LectureSessionFinalizeRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[
         LectureFinalizeService,
         Depends(get_lecture_finalize_service),
     ],
 ) -> LectureSessionFinalizeResponse:
     """Finalize a lecture session and generate summary/chunk artifacts."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-session-finalize",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         return await service.finalize(
             session_id=request.session_id,
@@ -1152,13 +1269,24 @@ async def finalize_lecture_session(
     response_model=LectureSessionDeleteResponse,
 )
 async def delete_lecture_session(
+    http_request: Request,
     session_id: str,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[
         LectureFinalizeService,
         Depends(get_lecture_finalize_service),
     ],
 ) -> LectureSessionDeleteResponse:
     """Auto-finalize (if needed) and delete a lecture session."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-session-delete",
+            max_requests=settings.public_demo_rate_limit_lecture_write_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     try:
         return await service.delete_session(session_id=session_id)
     except LectureSessionNotFoundError as exc:
@@ -1184,12 +1312,23 @@ async def delete_lecture_session(
     response_model=TranscriptKeyTermsResponse,
 )
 async def analyze_transcript_keyterms(
+    http_request: Request,
     request: TranscriptKeyTermsRequest,
     service: Annotated[LectureKeyTermsService, Depends(get_lecture_keyterms_service)],
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     user_id: Annotated[str, Depends(require_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TranscriptKeyTermsResponse:
     """Analyze transcript for key terms and generate explanations."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_lecture_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="lecture-keyterms",
+            max_requests=settings.public_demo_rate_limit_lecture_read_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     # Verify session exists and belongs to user
     session = await _get_owned_session(
         db,

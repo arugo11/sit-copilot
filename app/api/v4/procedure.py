@@ -2,11 +2,21 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_procedure_token
+from app.core.auth import (
+    AuthContext,
+    require_procedure_token,
+    resolve_auth_context,
+    resolve_rate_limit_user_id,
+)
 from app.core.config import settings
+from app.core.rate_limit import (
+    RateLimitPolicy,
+    SlidingWindowRateLimiter,
+    enforce_rate_limit,
+)
 from app.db.session import get_db
 from app.schemas.procedure import ProcedureAskRequest, ProcedureAskResponse
 from app.services.procedure_answerer_service import (
@@ -34,6 +44,7 @@ router = APIRouter(
     tags=["procedure"],
     dependencies=[Depends(require_procedure_token)],
 )
+_procedure_rate_limiter = SlidingWindowRateLimiter()
 
 
 def _azure_search_available() -> bool:
@@ -115,8 +126,19 @@ def get_procedure_qa_service(
     response_model=ProcedureAskResponse,
 )
 async def ask_procedure(
+    http_request: Request,
     request: ProcedureAskRequest,
+    auth: Annotated[AuthContext, Depends(resolve_auth_context)],
     service: Annotated[ProcedureQAService, Depends(get_procedure_qa_service)],
 ) -> ProcedureAskResponse:
     """Answer procedure question using evidence-first policy."""
+    await enforce_rate_limit(
+        http_request,
+        limiter=_procedure_rate_limiter,
+        policy=RateLimitPolicy(
+            bucket="procedure-ask",
+            max_requests=settings.public_demo_rate_limit_procedure_per_minute,
+        ),
+        user_id=resolve_rate_limit_user_id(http_request, auth),
+    )
     return await service.ask(request)

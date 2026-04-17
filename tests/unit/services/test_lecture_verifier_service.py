@@ -688,7 +688,7 @@ def test_is_azure_openai_ready_with_missing_deployment() -> None:
 
 
 def test_build_chat_completion_url_normalizes_cognitive_endpoint() -> None:
-    """Cognitive endpoint should normalize to OpenAI host with account name."""
+    """Verifier should keep the validated cognitive endpoint."""
     service = AzureOpenAILectureVerifierService(
         api_key=TEST_AZURE_OPENAI_KEY,
         endpoint="https://japaneast.api.cognitive.microsoft.com/",
@@ -696,10 +696,10 @@ def test_build_chat_completion_url_normalizes_cognitive_endpoint() -> None:
         model="gpt-4o",
     )
 
-    result = service._build_chat_completion_url()  # noqa: SLF001
+    result = service._build_chat_completion_url("gpt-4o")  # noqa: SLF001
 
     assert (
-        "https://aoai-test.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        "https://japaneast.api.cognitive.microsoft.com/openai/deployments/gpt-4o/chat/completions"
         in result
     )
 

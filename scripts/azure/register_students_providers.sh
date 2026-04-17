@@ -11,8 +11,11 @@ providers=(
   Microsoft.App
   Microsoft.Web
   Microsoft.ContainerRegistry
+  Microsoft.CognitiveServices
   Microsoft.ManagedIdentity
+  Microsoft.Search
   Microsoft.Insights
+  Microsoft.DBforPostgreSQL
   Microsoft.OperationalInsights
 )
 

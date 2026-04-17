@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import logging
 import re
 from time import perf_counter
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +47,26 @@ DEFAULT_BACKEND_FAILURE_FALLBACK = (
     "回答生成中にエラーが発生しました。講義資料を直接確認してください。"
 )
 MAX_FAILURE_REASON_CHARS = 160
+
+
+@dataclass
+class QAPipelineMetrics:
+    """Structured per-request lecture QA metrics."""
+
+    question_type: str = "explanation"
+    retrieval_ms: int = 0
+    answer_ms: int = 0
+    verify_ms: int = 0
+    repair_ms: int = 0
+    total_llm_calls: int = 0
+    verification_triggered: bool = False
+    repair_triggered: bool = False
+    answer_prompt_tokens: int | None = None
+    answer_completion_tokens: int | None = None
+    verify_prompt_tokens: int | None = None
+    verify_completion_tokens: int | None = None
+    repair_prompt_tokens: int | None = None
+    repair_completion_tokens: int | None = None
 
 
 class LectureQAService(Protocol):
@@ -94,6 +115,7 @@ class SqlAlchemyLectureQAService:
         no_source_fallback: str = DEFAULT_NO_SOURCE_FALLBACK,
         no_source_action_next: str = DEFAULT_NO_SOURCE_ACTION_NEXT,
         backend_failure_fallback: str = DEFAULT_BACKEND_FAILURE_FALLBACK,
+        repair_mode: Literal["always", "conditional", "off"] = "conditional",
     ) -> None:
         self._db = db
         self._retriever = retriever
@@ -105,6 +127,8 @@ class SqlAlchemyLectureQAService:
         self._no_source_fallback = no_source_fallback
         self._no_source_action_next = no_source_action_next
         self._backend_failure_fallback = backend_failure_fallback
+        self._repair_mode = repair_mode
+        self._last_pipeline_metrics: dict[str, Any] | None = None
 
     async def ask(
         self,
@@ -125,8 +149,10 @@ class SqlAlchemyLectureQAService:
         )
         normalized_top_k = min(max(1, top_k), self._retrieval_limit)
         normalized_context_window = max(0, context_window)
+        metrics = QAPipelineMetrics(question_type=self._classify_question(question))
 
         # Retrieve relevant sources
+        retrieval_started = perf_counter()
         sources = await self._retriever.retrieve(
             session_id=session_id,
             query=question,
@@ -134,6 +160,7 @@ class SqlAlchemyLectureQAService:
             top_k=normalized_top_k,
             context_window=normalized_context_window,
         )
+        metrics.retrieval_ms = self._elapsed_ms(retrieval_started)
         sources = self._select_citations(
             question=question,
             sources=sources,
@@ -155,17 +182,26 @@ class SqlAlchemyLectureQAService:
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
                 outcome_reason="no_source",
+                metrics=metrics,
             )
             return response
 
         # Generate answer with error handling
         try:
+            answer_started = perf_counter()
             draft = await self._answerer.answer(
                 question=question,
                 lang_mode=effective_lang_mode,
                 sources=sources,
                 history="",
             )
+            metrics.answer_ms = self._elapsed_ms(answer_started)
+            self._capture_usage_metrics(
+                metrics,
+                usage=getattr(self._answerer, "_last_usage", None),
+                phase="answer",
+            )
+            metrics.total_llm_calls += 1
         except LectureAnswererError as exc:
             logger.warning(
                 "lecture_qa_answer_generation_failed session_id=%s user_id=%s lang_mode=%s question=%r sources=%s error=%s",
@@ -189,25 +225,47 @@ class SqlAlchemyLectureQAService:
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
                 outcome_reason=outcome_reason,
+                metrics=metrics,
             )
             return response
 
         # Verify answer with error handling
         repaired = False
+        metrics.verification_triggered = True
+        verify_started = perf_counter()
         verification = await self._safe_verify(
             question=question,
             answer=draft.answer,
             sources=sources,
         )
+        metrics.verify_ms += self._elapsed_ms(verify_started)
+        self._capture_usage_metrics(
+            metrics,
+            usage=getattr(self._verifier, "_last_usage", None),
+            phase="verify",
+        )
+        metrics.total_llm_calls += 1
 
         # Handle verification failure
-        if not verification.passed:
+        if not verification.passed and self._should_attempt_repair(
+            question=question,
+            verification=verification,
+        ):
+            metrics.repair_triggered = True
+            repair_started = perf_counter()
             repaired_answer = await self._safe_repair(
                 question=question,
                 answer=draft.answer,
                 sources=sources,
                 unsupported_claims=verification.unsupported_claims,
             )
+            metrics.repair_ms += self._elapsed_ms(repair_started)
+            self._capture_usage_metrics(
+                metrics,
+                usage=getattr(self._verifier, "_last_repair_usage", None),
+                phase="repair",
+            )
+            metrics.total_llm_calls += 1
             if repaired_answer:
                 draft = LectureAnswerDraft(
                     answer=repaired_answer,
@@ -215,11 +273,19 @@ class SqlAlchemyLectureQAService:
                     action_next=draft.action_next,
                 )
                 repaired = True
+                verify_started = perf_counter()
                 verification = await self._safe_verify(
                     question=question,
                     answer=repaired_answer,
                     sources=sources,
                 )
+                metrics.verify_ms += self._elapsed_ms(verify_started)
+                self._capture_usage_metrics(
+                    metrics,
+                    usage=getattr(self._verifier, "_last_usage", None),
+                    phase="verify",
+                )
+                metrics.total_llm_calls += 1
 
         # Build response
         response = self._build_response(
@@ -238,6 +304,7 @@ class SqlAlchemyLectureQAService:
                 passed=verification.passed,
                 repaired=repaired,
             ),
+            metrics=metrics,
         )
 
         return response
@@ -260,6 +327,7 @@ class SqlAlchemyLectureQAService:
             lang_mode=lang_mode,
             question=question,
         )
+        metrics = QAPipelineMetrics(question_type=self._classify_question(question))
 
         # Resolve follow-up to standalone query
         resolution = await self._followup.resolve_query(
@@ -272,6 +340,7 @@ class SqlAlchemyLectureQAService:
         normalized_context_window = max(0, context_window)
 
         # Retrieve using resolved query
+        retrieval_started = perf_counter()
         sources = await self._retriever.retrieve(
             session_id=session_id,
             query=resolution.standalone_query,
@@ -279,6 +348,7 @@ class SqlAlchemyLectureQAService:
             top_k=normalized_top_k,
             context_window=normalized_context_window,
         )
+        metrics.retrieval_ms = self._elapsed_ms(retrieval_started)
         sources = self._select_citations(
             question=resolution.standalone_query,
             sources=sources,
@@ -301,17 +371,26 @@ class SqlAlchemyLectureQAService:
                 response=response,
                 latency_ms=self._to_latency_ms(started_at),
                 outcome_reason="no_source",
+                metrics=metrics,
             )
             return response
 
         # Generate answer with history context and error handling
         try:
+            answer_started = perf_counter()
             draft = await self._answerer.answer(
                 question=resolution.standalone_query,
                 lang_mode=effective_lang_mode,
                 sources=sources,
                 history=resolution.history_context,
             )
+            metrics.answer_ms = self._elapsed_ms(answer_started)
+            self._capture_usage_metrics(
+                metrics,
+                usage=getattr(self._answerer, "_last_usage", None),
+                phase="answer",
+            )
+            metrics.total_llm_calls += 1
         except LectureAnswererError as exc:
             logger.warning(
                 "lecture_qa_followup_answer_generation_failed session_id=%s user_id=%s lang_mode=%s standalone_query=%r sources=%s error=%s",
@@ -335,6 +414,7 @@ class SqlAlchemyLectureQAService:
                 response=base_response,
                 latency_ms=self._to_latency_ms(started_at),
                 outcome_reason=outcome_reason,
+                metrics=metrics,
             )
             return LectureFollowupResponse(
                 answer=base_response.answer,
@@ -348,20 +428,41 @@ class SqlAlchemyLectureQAService:
 
         # Verify answer with error handling
         repaired = False
+        metrics.verification_triggered = True
+        verify_started = perf_counter()
         verification = await self._safe_verify(
             question=resolution.standalone_query,
             answer=draft.answer,
             sources=sources,
         )
+        metrics.verify_ms += self._elapsed_ms(verify_started)
+        self._capture_usage_metrics(
+            metrics,
+            usage=getattr(self._verifier, "_last_usage", None),
+            phase="verify",
+        )
+        metrics.total_llm_calls += 1
 
         # Handle verification failure
-        if not verification.passed:
+        if not verification.passed and self._should_attempt_repair(
+            question=resolution.standalone_query,
+            verification=verification,
+        ):
+            metrics.repair_triggered = True
+            repair_started = perf_counter()
             repaired_answer = await self._safe_repair(
                 question=resolution.standalone_query,
                 answer=draft.answer,
                 sources=sources,
                 unsupported_claims=verification.unsupported_claims,
             )
+            metrics.repair_ms += self._elapsed_ms(repair_started)
+            self._capture_usage_metrics(
+                metrics,
+                usage=getattr(self._verifier, "_last_repair_usage", None),
+                phase="repair",
+            )
+            metrics.total_llm_calls += 1
             if repaired_answer:
                 draft = LectureAnswerDraft(
                     answer=repaired_answer,
@@ -369,11 +470,19 @@ class SqlAlchemyLectureQAService:
                     action_next=draft.action_next,
                 )
                 repaired = True
+                verify_started = perf_counter()
                 verification = await self._safe_verify(
                     question=resolution.standalone_query,
                     answer=repaired_answer,
                     sources=sources,
                 )
+                metrics.verify_ms += self._elapsed_ms(verify_started)
+                self._capture_usage_metrics(
+                    metrics,
+                    usage=getattr(self._verifier, "_last_usage", None),
+                    phase="verify",
+                )
+                metrics.total_llm_calls += 1
 
         # Build response
         response = self._build_response(
@@ -392,6 +501,7 @@ class SqlAlchemyLectureQAService:
                 passed=verification.passed,
                 repaired=repaired,
             ),
+            metrics=metrics,
         )
 
         # Return followup response with resolved query
@@ -549,7 +659,7 @@ class SqlAlchemyLectureQAService:
         """Build response from draft and verification."""
         return LectureAskResponse(
             answer=draft.answer,
-            confidence=draft.confidence,
+            confidence=draft.confidence if verification.passed else "low",
             sources=sources,
             verification_summary=verification.summary,
             action_next=draft.action_next,
@@ -645,10 +755,13 @@ class SqlAlchemyLectureQAService:
         response: LectureAskResponse | LectureFollowupResponse,
         latency_ms: int,
         outcome_reason: str,
+        metrics: QAPipelineMetrics,
     ) -> None:
         """Persist QA turn to database."""
         citations = [source.model_dump() for source in response.sources]
         source_ids = [source.chunk_id for source in response.sources]
+        metrics_payload = asdict(metrics)
+        self._last_pipeline_metrics = metrics_payload
 
         qa_turn = QATurn(
             session_id=session_id,
@@ -658,6 +771,7 @@ class SqlAlchemyLectureQAService:
             confidence=response.confidence,
             citations_json=citations,
             retrieved_chunk_ids_json=source_ids,
+            metrics_json=metrics_payload,
             latency_ms=latency_ms,
             verifier_supported=True,  # Verifier is always used in lecture QA
             outcome_reason=outcome_reason,
@@ -690,3 +804,73 @@ class SqlAlchemyLectureQAService:
         if repaired:
             return "repaired_verified"
         return "verified"
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return max(0, int((perf_counter() - started_at) * 1000))
+
+    def _should_attempt_repair(
+        self,
+        *,
+        question: str,
+        verification: LectureVerificationResult,
+    ) -> bool:
+        if verification.passed or not verification.unsupported_claims:
+            return False
+        if self._repair_mode == "off":
+            return False
+        if self._repair_mode == "always":
+            return True
+        return self._is_high_risk_question(question)
+
+    @staticmethod
+    def _classify_question(question: str) -> str:
+        if SqlAlchemyLectureQAService._is_high_risk_question(question):
+            return "factoid"
+        return "explanation"
+
+    @staticmethod
+    def _is_high_risk_question(question: str) -> bool:
+        normalized = question.strip().lower()
+        patterns = (
+            r"いつ",
+            r"誰",
+            r"何年",
+            r"何月",
+            r"何日",
+            r"何時",
+            r"何分",
+            r"何人",
+            r"いくつ",
+            r"どれくらい",
+            r"\bwhen\b",
+            r"\bwho\b",
+            r"\bhow many\b",
+            r"\bhow much\b",
+            r"\bwhat year\b",
+            r"\bwhat date\b",
+        )
+        return any(re.search(pattern, normalized) for pattern in patterns) or bool(
+            re.search(r"\d{1,4}", normalized)
+        )
+
+    @staticmethod
+    def _capture_usage_metrics(
+        metrics: QAPipelineMetrics,
+        *,
+        usage: Any,
+        phase: Literal["answer", "verify", "repair"],
+    ) -> None:
+        if usage is None:
+            return
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        if phase == "answer":
+            metrics.answer_prompt_tokens = prompt_tokens
+            metrics.answer_completion_tokens = completion_tokens
+        elif phase == "verify":
+            metrics.verify_prompt_tokens = prompt_tokens
+            metrics.verify_completion_tokens = completion_tokens
+        else:
+            metrics.repair_prompt_tokens = prompt_tokens
+            metrics.repair_completion_tokens = completion_tokens

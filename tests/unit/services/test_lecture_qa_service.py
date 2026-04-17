@@ -282,7 +282,7 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
     response = await service.ask(
         session_id="session_123",
         user_id="user_1",
-        question="What is this?",
+        question="When was it announced?",
         lang_mode="ja",
         retrieval_mode="source-only",
         top_k=5,
@@ -309,13 +309,15 @@ async def test_ask_with_sources_returns_answer_and_persists_turn(
     )
     qa_turn = result.scalar_one_or_none()
     assert qa_turn is not None
-    assert qa_turn.question == "What is this?"
+    assert qa_turn.question == "When was it announced?"
     assert qa_turn.answer == "Test answer."
     assert qa_turn.confidence == "high"
     assert qa_turn.verifier_supported is True
     assert qa_turn.latency_ms >= 0
     assert qa_turn.citations_json == [sources[0].model_dump()]
     assert qa_turn.retrieved_chunk_ids_json == ["speech_1"]
+    assert qa_turn.metrics_json is not None
+    assert qa_turn.metrics_json["verification_triggered"] is True
     assert qa_turn.outcome_reason == "verified"
 
 
@@ -414,7 +416,7 @@ async def test_ask_with_verification_failure_triggers_repair(
     response = await service.ask(
         session_id="session_123",
         user_id="user_1",
-        question="What is this?",
+        question="When was it announced?",
         lang_mode="ja",
         retrieval_mode="source-only",
         top_k=5,
@@ -431,7 +433,7 @@ async def test_ask_with_verification_failure_triggers_repair(
     result = await db_session.execute(
         select(QATurn).where(
             QATurn.session_id == "session_123",
-            QATurn.question == "What is this?",
+            QATurn.question == "When was it announced?",
         )
     )
     qa_turn = result.scalar_one_or_none()
@@ -481,7 +483,7 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
     response = await service.ask(
         session_id="session_123",
         user_id="user_1",
-        question="What is this?",
+        question="When was it announced?",
         lang_mode="ja",
         retrieval_mode="source-only",
         top_k=5,
@@ -492,6 +494,7 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
     assert response.answer == original_answer
     assert response.fallback == original_answer
     assert response.verification_summary == "Claims not supported."
+    assert response.confidence == "low"
     assert len(verifier.verify_calls) == 1
     assert len(verifier.repair_calls) == 1
 
@@ -499,7 +502,7 @@ async def test_ask_with_verification_failure_no_repair_returns_fallback(
     result = await db_session.execute(
         select(QATurn).where(
             QATurn.session_id == "session_123",
-            QATurn.question == "What is this?",
+            QATurn.question == "When was it announced?",
         )
     )
     qa_turn = result.scalar_one_or_none()
@@ -614,7 +617,7 @@ async def test_ask_with_verifier_error_skips_verification_and_persists(
 
     # Should return generated answer even though verification failed
     assert response.answer == "Generated answer."
-    assert response.confidence == "high"
+    assert response.confidence == "low"
     assert response.sources == sources
     assert len(verifier.verify_calls) == 1
 
@@ -931,7 +934,7 @@ async def test_followup_with_verifier_error_skips_verification(
 
     # Should return generated answer even though verification failed
     assert response.answer == "Followup answer."
-    assert response.confidence == "high"
+    assert response.confidence == "low"
     assert response.sources == sources
     assert len(verifier.verify_calls) == 1
 
@@ -1434,7 +1437,7 @@ async def test_ask_with_verification_failure_and_repair_error_safely_continues(
     response = await service.ask(
         session_id="session_123",
         user_id="user_1",
-        question="What is this?",
+        question="When was it announced?",
         lang_mode="ja",
         retrieval_mode="source-only",
         top_k=5,
@@ -1444,6 +1447,7 @@ async def test_ask_with_verification_failure_and_repair_error_safely_continues(
     # Should return original answer with fallback
     assert response.answer == "Original answer."
     assert response.fallback == "Original answer."
+    assert response.confidence == "low"
     assert len(verifier.verify_calls) == 1
     assert len(verifier.repair_calls) == 1
 
@@ -1495,5 +1499,6 @@ async def test_followup_with_verifier_repair_error_continues_safely(
 
     # Should return answer despite verification/repair errors
     assert response.answer == "Followup answer."
-    assert response.confidence == "high"
+    assert response.confidence == "low"
     assert len(verifier.verify_calls) == 1
+    assert len(verifier.repair_calls) == 0

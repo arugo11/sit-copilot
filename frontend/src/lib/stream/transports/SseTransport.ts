@@ -1,8 +1,7 @@
 import i18n from '@/lib/i18n'
 import {
   API_BASE_URL,
-  DEMO_USER_ID,
-  LECTURE_API_TOKEN,
+  ensureDemoSession,
   getUnauthorizedMessage,
 } from '@/lib/api/client'
 import type { StreamTransport, WsEvent } from '../types'
@@ -66,12 +65,12 @@ export class SseTransport implements StreamTransport {
 
     const controller = new AbortController()
     this.controller = controller
+    const demoSession = await ensureDemoSession()
 
     const response = await fetch(buildStreamUrl(sessionId), {
       method: 'GET',
       headers: {
-        'X-Lecture-Token': LECTURE_API_TOKEN,
-        'X-User-Id': DEMO_USER_ID,
+        'X-Lecture-Token': demoSession.lectureToken,
       },
       cache: 'no-store',
       signal: controller.signal,

@@ -31,6 +31,10 @@ def _as_bool(value: object, *, default: bool = False) -> bool:
     return default
 
 
+def _default_enabled_for_public_demo() -> bool:
+    return settings.public_demo_enabled
+
+
 async def resolve_assist_generation_settings(
     db: AsyncSession,
     *,
@@ -57,17 +61,24 @@ async def resolve_assist_generation_settings(
 
     if not isinstance(user_settings, dict):
         return AssistGenerationSettings(
-            summary_enabled=False,
-            keyterms_enabled=False,
+            summary_enabled=summary_available and _default_enabled_for_public_demo(),
+            keyterms_enabled=keyterms_available
+            and _default_enabled_for_public_demo(),
             summary_available=summary_available,
             keyterms_available=keyterms_available,
         )
 
     return AssistGenerationSettings(
         summary_enabled=summary_available
-        and _as_bool(user_settings.get(ASSIST_SUMMARY_ENABLED_KEY), default=False),
+        and _as_bool(
+            user_settings.get(ASSIST_SUMMARY_ENABLED_KEY),
+            default=_default_enabled_for_public_demo(),
+        ),
         keyterms_enabled=keyterms_available
-        and _as_bool(user_settings.get(ASSIST_KEYTERMS_ENABLED_KEY), default=False),
+        and _as_bool(
+            user_settings.get(ASSIST_KEYTERMS_ENABLED_KEY),
+            default=_default_enabled_for_public_demo(),
+        ),
         summary_available=summary_available,
         keyterms_available=keyterms_available,
     )

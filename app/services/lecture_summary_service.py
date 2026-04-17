@@ -8,7 +8,6 @@ import re
 from typing import Literal, Protocol
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -398,25 +397,32 @@ class SqlAlchemyLectureSummaryService:
     ) -> None:
         key_terms_json = [term.model_dump() for term in key_terms]
         evidence_refs = [f"{item.type}:{item.ref_id}" for item in evidence]
-        upsert_stmt = sqlite_insert(SummaryWindow).values(
-            session_id=session_id,
-            start_ms=window_start_ms,
-            end_ms=window_end_ms,
-            summary_text=summary_text,
-            key_terms_json=key_terms_json,
-            evidence_event_ids_json=evidence_refs,
+        result = await self._db.execute(
+            select(SummaryWindow).where(
+                SummaryWindow.session_id == session_id,
+                SummaryWindow.start_ms == window_start_ms,
+                SummaryWindow.end_ms == window_end_ms,
+            )
         )
-        upsert_stmt = upsert_stmt.on_conflict_do_update(
-            index_elements=["session_id", "start_ms", "end_ms"],
-            set_={
-                "summary_text": summary_text,
-                "key_terms_json": key_terms_json,
-                "evidence_event_ids_json": evidence_refs,
-            },
-        )
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            self._db.add(
+                SummaryWindow(
+                    session_id=session_id,
+                    start_ms=window_start_ms,
+                    end_ms=window_end_ms,
+                    summary_text=summary_text,
+                    key_terms_json=key_terms_json,
+                    evidence_event_ids_json=evidence_refs,
+                )
+            )
+        else:
+            existing.summary_text = summary_text
+            existing.key_terms_json = key_terms_json
+            existing.evidence_event_ids_json = evidence_refs
+
         for attempt in range(WRITE_RETRY_ATTEMPTS):
             try:
-                await self._db.execute(upsert_stmt)
                 await self._db.flush()
                 return
             except OperationalError as exc:

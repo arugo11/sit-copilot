@@ -11,7 +11,6 @@ import { useToast } from '@/components/common/Toast'
 import {
   ApiError,
   API_BASE_URL,
-  DEMO_USER_ID,
   demoApi,
   getApiErrorMessage,
   lectureQaApi,
@@ -117,7 +116,7 @@ interface DemoLectureSession {
 
 function buildDemoSessionsStorageKey(): string {
   const apiScope = API_BASE_URL || 'same-origin'
-  return `${DEMO_SESSIONS_STORAGE_KEY_PREFIX}:${apiScope}:${DEMO_USER_ID}`
+  return `${DEMO_SESSIONS_STORAGE_KEY_PREFIX}:${apiScope}:public-demo`
 }
 
 function normalizeSessionStatus(value: unknown): SessionStatus | null {

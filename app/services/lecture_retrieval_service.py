@@ -1,8 +1,10 @@
 """Lecture retrieval service using BM25 and Azure Search."""
 
 import asyncio
+import logging
+import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from rank_bm25 import BM25Okapi
 
@@ -15,8 +17,51 @@ __all__ = [
     "AzureSearchLectureRetrievalService",
     "BM25TokenCache",
     "LectureRetrievalIndex",
+    "HybridLectureRetrievalService",
+    "TokenizerMode",
+    "tokenize_hybrid_japanese_text",
+    "tokenize_whitespace_text",
     "get_shared_lecture_retrieval_service",
 ]
+
+logger = logging.getLogger(__name__)
+TokenizerMode = Literal["whitespace", "hybrid"]
+
+
+def tokenize_whitespace_text(text: str) -> list[str]:
+    """Tokenize text using legacy whitespace splitting."""
+    return text.lower().split()
+
+
+def tokenize_hybrid_japanese_text(text: str) -> list[str]:
+    """Tokenize text for mixed Japanese/ASCII retrieval.
+
+    Japanese text is expanded into character bi-grams while ASCII segments keep
+    word-level tokens so keyword retrieval remains meaningful without a heavy
+    morphological dependency.
+    """
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    if not normalized:
+        return []
+
+    tokens: list[str] = []
+    ascii_tokens = re.findall(r"[a-z0-9]+", normalized)
+    tokens.extend(ascii_tokens)
+
+    japanese_segments = re.findall(r"[ぁ-んァ-ン一-龥ー]+", normalized)
+    for segment in japanese_segments:
+        if len(segment) == 1:
+            tokens.append(segment)
+            continue
+        tokens.extend(segment[index : index + 2] for index in range(len(segment) - 1))
+
+    return tokens or [normalized]
+
+
+def _resolve_tokenizer(mode: TokenizerMode) -> Callable[[str], list[str]]:
+    if mode == "hybrid":
+        return tokenize_hybrid_japanese_text
+    return tokenize_whitespace_text
 
 
 @dataclass(frozen=True)
@@ -87,6 +132,7 @@ class BM25LectureRetrievalService:
         self,
         k1: float = DEFAULT_K1,
         b: float = DEFAULT_B,
+        tokenizer_mode: TokenizerMode = "whitespace",
     ) -> None:
         """Initialize the BM25 retrieval service.
 
@@ -96,6 +142,8 @@ class BM25LectureRetrievalService:
         """
         self._k1 = k1
         self._b = b
+        self._tokenizer_mode = tokenizer_mode
+        self._tokenizer = _resolve_tokenizer(tokenizer_mode)
         self._indexes: dict[str, LectureRetrievalIndex] = {}
 
     async def retrieve(
@@ -123,11 +171,22 @@ class BM25LectureRetrievalService:
             return []
 
         # Tokenize query and run BM25 search in thread pool
-        query_tokens = self._tokenize(query)
+        query_tokens = self._tokenizer(query)
         scores = await asyncio.to_thread(index.get_scores, query_tokens)
 
         # Get top-k indices by score
         top_indices = self._get_top_k_indices(scores, top_k)
+        if not top_indices and query_tokens:
+            top_indices = self._get_overlap_top_k_indices(
+                index=index,
+                query_tokens=query_tokens,
+                k=top_k,
+            )
+            if top_indices:
+                scores = self._build_overlap_scores(
+                    index=index,
+                    query_tokens=query_tokens,
+                )
 
         # Build sources from indices
         sources = self._build_sources(
@@ -164,15 +223,6 @@ class BM25LectureRetrievalService:
         """Remove the index for a session."""
         self._indexes.pop(session_id, None)
 
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        """Tokenize text for BM25 indexing.
-
-        Uses simple whitespace tokenization with lowercasing.
-        For production, consider integrating SudachiPy for Japanese.
-        """
-        return text.lower().split()
-
     def _get_top_k_indices(self, scores: list[float], k: int) -> list[int]:
         """Get indices of top-k scores.
 
@@ -183,9 +233,48 @@ class BM25LectureRetrievalService:
         Returns:
             List of indices sorted by score (descending)
         """
-        indexed_scores = list(enumerate(scores))
+        indexed_scores = [
+            (idx, score)
+            for idx, score in enumerate(scores)
+            if float(score) > 0.0
+        ]
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
         return [idx for idx, _ in indexed_scores[:k]]
+
+    def _get_overlap_top_k_indices(
+        self,
+        *,
+        index: LectureRetrievalIndex,
+        query_tokens: list[str],
+        k: int,
+    ) -> list[int]:
+        """Fallback ranking when BM25 collapses to zero scores on tiny corpora."""
+        query_set = set(token for token in query_tokens if token)
+        if not query_set:
+            return []
+
+        overlap_scores: list[tuple[int, int]] = []
+        for idx, document_tokens in enumerate(index.cache.tokenized_corpus):
+            overlap = len(query_set & set(document_tokens))
+            if overlap > 0:
+                overlap_scores.append((idx, overlap))
+
+        overlap_scores.sort(key=lambda item: item[1], reverse=True)
+        return [idx for idx, _ in overlap_scores[:k]]
+
+    def _build_overlap_scores(
+        self,
+        *,
+        index: LectureRetrievalIndex,
+        query_tokens: list[str],
+    ) -> list[float]:
+        """Produce deterministic pseudo-scores for overlap fallback."""
+        query_set = set(token for token in query_tokens if token)
+        scores: list[float] = []
+        for document_tokens in index.cache.tokenized_corpus:
+            overlap = len(query_set & set(document_tokens))
+            scores.append(float(overlap))
+        return scores
 
     def _build_sources(
         self,
@@ -459,12 +548,87 @@ class AzureSearchLectureRetrievalService:
         return expanded_sources
 
 
-_shared_lecture_retrieval_service: BM25LectureRetrievalService | None = None
+class HybridLectureRetrievalService:
+    """Primary Azure Search retrieval with local BM25 fallback."""
+
+    def __init__(
+        self,
+        primary: AzureSearchLectureRetrievalService,
+        fallback: BM25LectureRetrievalService,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def retrieve(
+        self,
+        session_id: str,
+        query: str,
+        mode: RetrievalMode,
+        top_k: int,
+        context_window: int,
+    ) -> list[LectureSource]:
+        try:
+            primary_sources = await self._primary.retrieve(
+                session_id=session_id,
+                query=query,
+                mode=mode,
+                top_k=top_k,
+                context_window=context_window,
+            )
+        except Exception:
+            logger.warning(
+                "lecture_retrieval_primary_failed backend=azure_search session_id=%s",
+                session_id,
+                exc_info=True,
+            )
+            primary_sources = []
+
+        if primary_sources:
+            logger.info(
+                "lecture_retrieval_selected backend=azure_search fallback_used=false session_id=%s hits=%s",
+                session_id,
+                len(primary_sources),
+            )
+            return primary_sources
+
+        fallback_sources = await self._fallback.retrieve(
+            session_id=session_id,
+            query=query,
+            mode=mode,
+            top_k=top_k,
+            context_window=context_window,
+        )
+        logger.info(
+            "lecture_retrieval_selected backend=%s fallback_used=%s session_id=%s hits=%s",
+            "bm25_local" if fallback_sources else "none",
+            "true",
+            session_id,
+            len(fallback_sources),
+        )
+        return fallback_sources
+
+    async def get_index(self, session_id: str) -> LectureRetrievalIndex | None:
+        return await self._fallback.get_index(session_id)
+
+    async def set_index(self, session_id: str, index: LectureRetrievalIndex) -> None:
+        await self._fallback.set_index(session_id, index)
+
+    async def has_index(self, session_id: str) -> bool:
+        return await self._fallback.has_index(session_id)
+
+    async def remove_index(self, session_id: str) -> None:
+        await self._fallback.remove_index(session_id)
 
 
-def get_shared_lecture_retrieval_service() -> BM25LectureRetrievalService:
+_shared_lecture_retrieval_services: dict[TokenizerMode, BM25LectureRetrievalService] = {}
+
+
+def get_shared_lecture_retrieval_service(
+    tokenizer_mode: TokenizerMode = "whitespace",
+) -> BM25LectureRetrievalService:
     """Return a process-wide shared lecture retrieval service instance."""
-    global _shared_lecture_retrieval_service
-    if _shared_lecture_retrieval_service is None:
-        _shared_lecture_retrieval_service = BM25LectureRetrievalService()
-    return _shared_lecture_retrieval_service
+    service = _shared_lecture_retrieval_services.get(tokenizer_mode)
+    if service is None:
+        service = BM25LectureRetrievalService(tokenizer_mode=tokenizer_mode)
+        _shared_lecture_retrieval_services[tokenizer_mode] = service
+    return service

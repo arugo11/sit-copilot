@@ -55,3 +55,16 @@ def test_settings_accepts_legacy_azure_openai_enable_env_alias() -> None:
     )
 
     assert configured.azure_openai_enabled is True
+
+
+def test_settings_default_model_stack_matches_demo_baseline() -> None:
+    """Settings should expose the intended default LLM/ASR/TTS baseline."""
+    configured = Settings(_env_file=None)
+
+    assert configured.azure_openai_model == "gpt-5-mini"
+    assert configured.lecture_qa_verifier_model == "gpt-5-nano"
+    assert configured.lecture_qa_repair_model == "gpt-5-mini"
+    assert configured.azure_openai_keyterms_model == "gpt-5-nano"
+    assert configured.azure_openai_judge_model == "gpt-5-nano"
+    assert configured.azure_speech_recognition_locale == "ja-JP"
+    assert configured.azure_speech_tts_voice == "ja-JP-NanamiNeural"

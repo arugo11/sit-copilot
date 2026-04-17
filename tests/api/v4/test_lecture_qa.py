@@ -22,6 +22,7 @@ from app.services.lecture_answerer_service import (
 from app.services.lecture_retrieval_service import (
     AzureSearchLectureRetrievalService,
     BM25LectureRetrievalService,
+    HybridLectureRetrievalService,
 )
 from app.services.observability.weave_observer_service import NoopWeaveObserverService
 from app.services.observed_lecture_answerer_service import (
@@ -894,7 +895,7 @@ def test_get_lecture_retrieval_service_uses_azure_when_enabled(
     monkeypatch.setattr(settings, "azure_search_api_key", "dummy-key")
 
     service = lecture_qa_api.get_lecture_retrieval_service()
-    assert isinstance(service, AzureSearchLectureRetrievalService)
+    assert isinstance(service, HybridLectureRetrievalService)
 
 
 def test_get_lecture_retrieval_service_falls_back_to_bm25_when_disabled(
@@ -1185,12 +1186,12 @@ async def test_post_qa_index_build_returns_503_when_azure_partial_failure(
 
 
 @pytest.mark.asyncio
-async def test_post_qa_ask_returns_503_when_azure_search_fails(
+async def test_post_qa_ask_returns_no_source_when_azure_search_fails_and_fallback_is_empty(
     async_client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ask endpoint should return 503 when Azure search query fails."""
+    """Ask endpoint should degrade to deterministic no-source fallback."""
     async with session_factory() as session:
         from datetime import UTC, datetime
 
@@ -1232,7 +1233,12 @@ async def test_post_qa_ask_returns_503_when_azure_search_fails(
         headers=AUTH_HEADERS,
     )
 
-    assert response.status_code == 503
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["confidence"] == "low"
+    assert body["sources"] == []
+    assert body["fallback"] is not None
 
 
 # ============================================================================

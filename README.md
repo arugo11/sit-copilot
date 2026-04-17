@@ -100,7 +100,22 @@ npm run dev --prefix frontend
 
 ## デプロイされている URL
 
-- Frontend: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+- Current Frontend: `https://nice-hill-0533f2700.2.azurestaticapps.net/`
+- Current API: `https://sit-copilot-api.grayground-578aed68.japaneast.azurecontainerapps.io`
+- Legacy Frontend: `https://proud-sand-00bb37700.1.azurestaticapps.net/`
+  - 2026-03-10 時点では `404` を返し、現在は無効です。
+
+## デフォルトモデル構成
+
+- LLM primary: `gpt-5-mini`
+- LLM verifier / judge / keyterms: `gpt-5-nano`
+- LLM repair: `gpt-5-mini`
+- ASR input locale default: `ja-JP`
+- TTS default voice: `ja-JP-NanamiNeural`
+
+補足:
+- 現在の live 字幕 ASR はブラウザ `SpeechRecognition` を使うため, 「ASRモデル」の既定値として実際に効くのは `ja-JP` locale です。
+- TTS は現行 runtime では未使用ですが, 将来の Azure Speech 既定 voice として `ja-JP-NanamiNeural` を予約しています。
 
 ## ポスター
 

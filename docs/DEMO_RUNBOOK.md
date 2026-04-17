@@ -129,7 +129,7 @@
 
 1. API起動確認（ヘルスチェック）
 2. フロント起動確認
-3. `.env` のデモトークン確認（`X-Lecture-Token`, `X-Procedure-Token`, `X-User-Id`）
+3. `POST /api/v4/auth/demo-session` が 200 を返し, 短命 demo token を発行できることを確認
 4. `/lectures` でセッションを1件事前作成
 5. 不要セッションが残っている場合はゴミ箱で事前削除
 6. QAで使う質問を2つ準備（根拠あり1件, 根拠なし1件）

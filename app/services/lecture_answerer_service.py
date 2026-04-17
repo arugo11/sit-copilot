@@ -74,6 +74,8 @@ class AzureOpenAILectureAnswererService:
     LOCAL_FALLBACK_PREFIX = "講義資料では"
     LOCAL_FALLBACK_PREFIX_EN = "The lecture materials explain that"
     LOCAL_SNIPPET_MAX_CHARS = 120
+    SOURCE_PROMPT_LIMIT = 2
+    SOURCE_EXCERPT_RADIUS = 90
 
     def __init__(
         self,
@@ -82,6 +84,8 @@ class AzureOpenAILectureAnswererService:
         account_name: str = "",
         model: str = DEFAULT_MODEL,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        fact_max_tokens: int | None = None,
+        explanation_max_tokens: int | None = None,
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -103,6 +107,11 @@ class AzureOpenAILectureAnswererService:
         self._endpoint = endpoint
         self._model = model
         self._max_tokens = max_tokens
+        self._fact_max_tokens = max(32, fact_max_tokens or min(max_tokens, 220))
+        self._explanation_max_tokens = max(
+            self._fact_max_tokens,
+            explanation_max_tokens or max_tokens,
+        )
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
         self._max_retries = max(0, max_retries)
@@ -149,6 +158,7 @@ class AzureOpenAILectureAnswererService:
                 action_next=self._no_source_action(target_language),
             )
 
+        question_type = self._classify_question(question)
         prompt = self._build_prompt(question, target_language, sources, history)
         confidence = self._calculate_confidence(sources)
 
@@ -159,7 +169,11 @@ class AzureOpenAILectureAnswererService:
                 action_next=self._default_action_next(target_language),
             )
 
-        answer = await self._call_openai(prompt, target_language)
+        answer = await self._call_openai(
+            prompt,
+            target_language,
+            max_tokens=self._max_tokens_for_question(question_type),
+        )
         if not answer.strip():
             logger.warning(
                 "azure_openai_answer_empty_response model=%s lang=%s sources=%s",
@@ -188,7 +202,11 @@ class AzureOpenAILectureAnswererService:
             lang_mode=lang_mode,
         )
         if target_language == "en":
-            sources_text = self._format_sources(sources, heading="Lecture sources:")
+            sources_text = self._format_sources(
+                question,
+                sources,
+                heading="Lecture sources:",
+            )
             history_section = (
                 f"\n\nConversation history:\n{history}" if history else ""
             )
@@ -210,7 +228,7 @@ Answer requirements:
 - Response language: English only
 """
 
-        sources_text = self._format_sources(sources)
+        sources_text = self._format_sources(question, sources)
         language_instruction = self._language_instruction(target_language)
         history_section = f"\n\n会話履歴:\n{history}" if history else ""
 
@@ -263,21 +281,25 @@ Answer requirements:
 
     def _format_sources(
         self,
+        question: str,
         sources: list[LectureSource],
         *,
         heading: str = "講義資料:",
     ) -> str:
         """Format sources for prompt."""
         lines = [heading]
-        for i, source in enumerate(sources, 1):
+        for i, source in enumerate(sources[: self.SOURCE_PROMPT_LIMIT], 1):
             ts = source.timestamp or "??:??"
-            lines.append(f"{i}. [{ts}] {source.text}")
+            excerpt = self._source_excerpt(question, source.text)
+            lines.append(f"{i}. [{ts}] {excerpt}")
         return "\n".join(lines)
 
     async def _call_openai(
         self,
         prompt: str,
         target_language: Literal["ja", "easy-ja", "en"],
+        *,
+        max_tokens: int,
     ) -> str:
         """Call Azure OpenAI chat completion endpoint.
 
@@ -293,7 +315,7 @@ Answer requirements:
                 },
                 {"role": "user", "content": prompt},
             ],
-            "max_completion_tokens": self._max_tokens,
+            "max_completion_tokens": max_tokens,
         }
         body = json.dumps(payload).encode("utf-8")
         request = Request(
@@ -484,6 +506,72 @@ Answer requirements:
             f"{self.LOCAL_FALLBACK_PREFIX}「{snippets[0]}」および「{snippets[1]}」"
             "の内容が関連しています。"
         )
+
+    def _max_tokens_for_question(self, question_type: Literal["factoid", "explanation"]) -> int:
+        if question_type == "factoid":
+            return self._fact_max_tokens
+        return self._explanation_max_tokens
+
+    def _classify_question(self, question: str) -> Literal["factoid", "explanation"]:
+        normalized = question.strip().lower()
+        factoid_patterns = (
+            r"いつ",
+            r"誰",
+            r"何年",
+            r"何月",
+            r"何日",
+            r"何時",
+            r"何分",
+            r"何人",
+            r"いくつ",
+            r"どれくらい",
+        )
+        if any(re.search(pattern, normalized) for pattern in factoid_patterns):
+            return "factoid"
+        if re.search(r"\d{1,4}", normalized):
+            return "factoid"
+        return "explanation"
+
+    def _source_excerpt(self, question: str, source_text: str) -> str:
+        compact = source_text.strip().replace("\n", " ")
+        if not compact:
+            return compact
+        snippet = self._extract_overlap_snippet(question, compact)
+        if len(snippet) <= self.LOCAL_SNIPPET_MAX_CHARS:
+            return snippet
+        return f"{snippet[: self.LOCAL_SNIPPET_MAX_CHARS]}..."
+
+    def _extract_overlap_snippet(self, question: str, source_text: str) -> str:
+        question_tokens = self._question_terms(question)
+        if not question_tokens:
+            return source_text
+        best_start = 0
+        best_score = -1
+        window = min(len(source_text), self.SOURCE_EXCERPT_RADIUS * 2)
+        if len(source_text) <= window:
+            return source_text
+        for token in question_tokens:
+            position = source_text.lower().find(token)
+            if position < 0:
+                continue
+            start = max(0, position - self.SOURCE_EXCERPT_RADIUS)
+            end = min(len(source_text), start + window)
+            candidate = source_text[start:end]
+            score = sum(1 for term in question_tokens if term in candidate.lower())
+            if score > best_score:
+                best_score = score
+                best_start = start
+        excerpt = source_text[best_start : best_start + window]
+        return excerpt.strip()
+
+    @staticmethod
+    def _question_terms(question: str) -> list[str]:
+        terms = re.findall(r"[A-Za-z0-9]+|[ぁ-んァ-ン一-龥]{2,}", question.lower())
+        deduped: list[str] = []
+        for term in terms:
+            if term not in deduped:
+                deduped.append(term)
+        return deduped[:6]
 
     def _default_action_next(
         self,

@@ -52,6 +52,31 @@ async def _ensure_sqlite_schema_compatibility(connection) -> None:  # noqa: ANN0
         )
 
 
+async def _ensure_qa_turn_schema_compatibility(connection) -> None:  # noqa: ANN001
+    """Add lightweight QA turn columns used by demo runtime metrics."""
+    if settings.database_url.startswith("sqlite"):
+        result = await connection.exec_driver_sql("PRAGMA table_info(qa_turns)")
+        columns = {str(row[1]) for row in result.fetchall()}
+        if "metrics_json" not in columns:
+            await connection.exec_driver_sql(
+                "ALTER TABLE qa_turns ADD COLUMN metrics_json JSON"
+            )
+        return
+
+    result = await connection.exec_driver_sql(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'qa_turns'
+        """
+    )
+    columns = {str(row[0]) for row in result.fetchall()}
+    if "metrics_json" not in columns:
+        await connection.exec_driver_sql(
+            "ALTER TABLE qa_turns ADD COLUMN metrics_json JSON"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create database tables at app startup for demo single-replica usage.
@@ -109,6 +134,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await _ensure_sqlite_schema_compatibility(connection)
+        await _ensure_qa_turn_schema_compatibility(connection)
         if settings.database_url.startswith("sqlite"):
             await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             await connection.exec_driver_sql("PRAGMA busy_timeout=30000")

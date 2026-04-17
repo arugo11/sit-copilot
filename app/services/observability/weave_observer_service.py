@@ -39,6 +39,7 @@ class WeaveObserverService(Protocol):
         latency_ms: int,
         verifier_supported: bool,
         outcome_reason: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Track a QA turn interaction.
 
@@ -53,6 +54,7 @@ class WeaveObserverService(Protocol):
             latency_ms: Generation latency in milliseconds
             verifier_supported: Whether verifier was used
             outcome_reason: Outcome reason or status
+            metadata: Optional structured QA metrics
         """
         ...
 
@@ -186,8 +188,10 @@ class NoopWeaveObserverService:
         latency_ms: int,
         verifier_supported: bool,
         outcome_reason: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """No-op QA turn tracking."""
+        _ = metadata
 
     async def track_llm_call(
         self,
@@ -302,6 +306,7 @@ class WandBWeaveObserverService:
         latency_ms: int,
         verifier_supported: bool,
         outcome_reason: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Track QA turn via dispatcher queue."""
 
@@ -321,6 +326,9 @@ class WandBWeaveObserverService:
                 "verifier_supported": verifier_supported,
                 "outcome_reason": outcome_reason,
             }
+            if metadata:
+                data["metadata"] = metadata
+            return data
 
         try:
             await self._dispatcher.dispatch(_track)

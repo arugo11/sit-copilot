@@ -82,9 +82,11 @@ class AzureOpenAILectureVerifierService:
         endpoint: str,
         account_name: str = "",
         model: str = DEFAULT_MODEL,
+        repair_model: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        repair_timeout_seconds: int | None = None,
         api_version: str = DEFAULT_API_VERSION,
     ) -> None:
         """Initialize Azure OpenAI verifier.
@@ -100,11 +102,14 @@ class AzureOpenAILectureVerifierService:
         self._api_key = api_key
         self._endpoint = endpoint
         self._model = model
+        self._repair_model = repair_model or model
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._timeout_seconds = timeout_seconds
+        self._repair_timeout_seconds = repair_timeout_seconds or timeout_seconds
         self._api_version = api_version
         self._last_usage: LLMUsage | None = None
+        self._last_repair_usage: LLMUsage | None = None
         self._validation = self._validate_configuration(account_name=account_name)
         if not self._validation.is_valid:
             logger.warning(
@@ -135,7 +140,8 @@ class AzureOpenAILectureVerifierService:
                 unsupported_claims=[answer],
             )
 
-        prompt = self._build_prompt(question, answer, sources)
+        claims = self._extract_claims(question=question, answer=answer)
+        prompt = self._build_prompt(question, answer, sources, claims)
         if not self._is_azure_openai_ready():
             return self._local_verify(answer=answer, sources=sources)
 
@@ -147,9 +153,11 @@ class AzureOpenAILectureVerifierService:
         question: str,
         answer: str,
         sources: list[LectureSource],
+        claims: list[str],
     ) -> str:
         """Build citation verification prompt."""
         sources_text = self._format_sources(sources)
+        claims_text = "\n".join(f"- {claim}" for claim in claims) or "- 回答全体"
 
         return f"""あなたは回答の正確性を検証する検証者です。
 
@@ -164,11 +172,13 @@ class AzureOpenAILectureVerifierService:
 【回答】
 {answer}
 
+【検証対象の主張】
+{claims_text}
+
 タスク:
-1. 回答の主張を一つ一つ特定してください
-2. 各主張が講義資料で支持されているか確認してください
-3. サポートされていない主張があればリストアップしてください
-4. 検証結果をJSON形式で出力してください:
+1. 上記の主張ごとに講義資料で支持されているか確認してください
+2. サポートされていない主張があればリストアップしてください
+3. 検証結果をJSON形式で出力してください:
 
 出力形式:
 {{
@@ -186,9 +196,9 @@ class AzureOpenAILectureVerifierService:
     def _format_sources(self, sources: list[LectureSource]) -> str:
         """Format sources for verification prompt."""
         lines = []
-        for source in sources:
+        for source in sources[:2]:
             ts = source.timestamp or "??:??"
-            lines.append(f"[{ts}] {source.text}")
+            lines.append(f"[{ts}] {self._clip_source_text(source.text)}")
         return "\n".join(lines)
 
     async def _call_openai_verification(self, prompt: str) -> str:
@@ -197,7 +207,7 @@ class AzureOpenAILectureVerifierService:
         Raises:
             LectureVerifierError: If remote call fails.
         """
-        url = self._build_chat_completion_url()
+        url = self._build_chat_completion_url(self._model)
         payload = {
             "messages": [
                 {
@@ -381,7 +391,7 @@ If repair is impossible, output only: UNREPAIRABLE
 
     async def _call_openai_repair(self, prompt: str) -> str | None:
         """Call Azure OpenAI API for answer repair."""
-        url = self._build_chat_completion_url()
+        url = self._build_chat_completion_url(self._repair_model)
         payload = {
             "messages": [
                 {
@@ -407,13 +417,13 @@ If repair is impossible, output only: UNREPAIRABLE
         )
 
         def _run_request() -> str:
-            with urlopen(request, timeout=self._timeout_seconds) as response:
+            with urlopen(request, timeout=self._repair_timeout_seconds) as response:
                 return response.read().decode("utf-8")
 
         try:
             raw = await asyncio.to_thread(_run_request)
             response_json = json.loads(raw)
-            self._last_usage = extract_usage(response_json)
+            self._last_repair_usage = extract_usage(response_json)
             repaired = self._extract_content(response_json).strip()
             normalized = repaired.strip().lower()
             if not repaired or normalized in {
@@ -544,13 +554,44 @@ If repair is impossible, output only: UNREPAIRABLE
     def _is_azure_openai_ready(self) -> bool:
         return self._validation.is_valid
 
-    def _build_chat_completion_url(self) -> str:
+    def _build_chat_completion_url(self, deployment_name: str) -> str:
         endpoint = self._validation.normalized_endpoint.rstrip("/")
-        deployment = quote(self._model.strip(), safe="")
+        deployment = quote(deployment_name.strip(), safe="")
         return (
             f"{endpoint}/openai/deployments/{deployment}/chat/completions"
             f"?api-version={self._api_version}"
         )
+
+    def _extract_claims(self, *, question: str, answer: str) -> list[str]:
+        normalized_answer = answer.strip()
+        if not normalized_answer:
+            return []
+        claims: list[str] = []
+        for pattern in (
+            r"\d{4}年\d{1,2}月\d{1,2}日[^。]*",
+            r"\d{4}年[^。]*",
+            r"[A-Z][A-Za-z0-9 .-]{1,40}",
+            r"[^。]+です",
+            r"[^。]+ため[^。]+",
+        ):
+            claims.extend(match.group(0).strip() for match in re.finditer(pattern, normalized_answer))
+
+        if "誰" in question:
+            claims.extend(re.findall(r"[A-Z][A-Za-z0-9 .-]{1,40}|[一-龥ぁ-んァ-ン]+の研究者", normalized_answer))
+
+        deduped: list[str] = []
+        for claim in claims:
+            compact = re.sub(r"\s+", " ", claim).strip(" 。")
+            if compact and compact not in deduped:
+                deduped.append(compact)
+        return deduped[:6] or [normalized_answer]
+
+    @staticmethod
+    def _clip_source_text(text: str, max_chars: int = 180) -> str:
+        compact = text.strip().replace("\n", " ")
+        if len(compact) <= max_chars:
+            return compact
+        return f"{compact[:max_chars]}..."
 
     def _validate_configuration(self, *, account_name: str) -> ValidationResult:
         return validate_openai_config(

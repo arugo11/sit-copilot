@@ -44,8 +44,12 @@ class Settings(BaseSettings):
     version: str = "0.1.0"
     debug: bool = False
     database_url: str = "sqlite+aiosqlite:///./sit_copilot.db"
+    azure_subscription_id: str = "4c170a0d-3e6d-42a0-b941-533e4f44e729"
     procedure_api_token: str = "dev-procedure-token"
     lecture_api_token: str = "dev-lecture-token"
+    demo_session_secret: str = "local-demo-session-secret"
+    demo_session_ttl_seconds: int = Field(default=43_200, ge=300, le=604_800)
+    public_demo_enabled: bool = True
     lecture_visual_max_image_bytes: int = 2_000_000
     lecture_qa_retrieval_limit: int = 5
     lecture_qa_citation_limit: int = Field(default=2, ge=1, le=5)
@@ -57,7 +61,15 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
     )
-    lecture_qa_answer_max_retries: int = Field(default=4, ge=0, le=8)
+    lecture_qa_repair_mode: Literal["always", "conditional", "off"] = "conditional"
+    lecture_qa_answer_max_tokens_fact: int = Field(default=220, ge=32, le=1_024)
+    lecture_qa_answer_max_tokens_explanation: int = Field(
+        default=420,
+        ge=64,
+        le=1_024,
+    )
+    lecture_qa_verify_max_tokens: int = Field(default=220, ge=32, le=1_024)
+    lecture_qa_answer_max_retries: int = Field(default=1, ge=0, le=8)
     lecture_qa_answer_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=10.0)
     lecture_qa_answer_min_request_interval_seconds: float = Field(
         default=0.35,
@@ -85,15 +97,22 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""
     azure_openai_account_name: str = ""
-    azure_openai_model: str = "gpt-5-nano"
+    azure_openai_model: str = "gpt-5-mini"
+    lecture_qa_verifier_model: str = "gpt-5-nano"
+    lecture_qa_repair_model: str = "gpt-5-mini"
     azure_openai_api_version: str = "2024-05-01-preview"
-    azure_openai_keyterms_model: str = ""
-    azure_openai_judge_model: str = ""
+    lecture_qa_verify_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    lecture_qa_repair_timeout_seconds: int = Field(default=20, ge=1, le=60)
+    azure_openai_keyterms_model: str = "gpt-5-nano"
+    azure_openai_judge_model: str = "gpt-5-nano"
     asr_hallucination_obvious_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     asr_audit_retry_max: int = Field(default=1, ge=0, le=2)
     asr_judge_timeout_seconds: int = Field(default=20, ge=1, le=60)
     azure_speech_key: str = ""
     azure_speech_region: str = ""
+    azure_speech_recognition_locale: str = "ja-JP"
+    azure_speech_tts_locale: str = "ja-JP"
+    azure_speech_tts_voice: str = "ja-JP-NanamiNeural"
     azure_speech_token_expires_in_sec: int = Field(default=540, ge=1, le=600)
     azure_speech_sts_timeout_seconds: int = Field(default=5, ge=1, le=30)
     azure_vision_enabled: bool = False
@@ -126,6 +145,36 @@ class Settings(BaseSettings):
     readiness_default_disclaimer: str = (
         "この結果は履修準備の目安です. 履修可否を判定するものではありません."
     )
+    public_demo_rate_limit_bootstrap_per_minute: int = Field(
+        default=10,
+        ge=1,
+        le=600,
+    )
+    public_demo_rate_limit_lecture_write_per_minute: int = Field(
+        default=240,
+        ge=1,
+        le=2_000,
+    )
+    public_demo_rate_limit_lecture_read_per_minute: int = Field(
+        default=120,
+        ge=1,
+        le=2_000,
+    )
+    public_demo_rate_limit_qa_per_minute: int = Field(
+        default=30,
+        ge=1,
+        le=600,
+    )
+    public_demo_rate_limit_procedure_per_minute: int = Field(
+        default=20,
+        ge=1,
+        le=600,
+    )
+    public_demo_rate_limit_settings_per_minute: int = Field(
+        default=60,
+        ge=1,
+        le=600,
+    )
     weave: WeaveSettings = Field(default_factory=WeaveSettings)
 
     @field_validator("azure_speech_region")
@@ -138,6 +187,14 @@ class Settings(BaseSettings):
         if not re.fullmatch(r"[a-z0-9-]+", normalized):
             raise ValueError("azure_speech_region must contain only a-z, 0-9, '-'.")
         return normalized
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def validate_debug_flag(cls, value: object) -> object:
+        """Treat common non-boolean release labels as disabled debug."""
+        if isinstance(value, str) and value.strip().lower() == "release":
+            return False
+        return value
 
     model_config = {
         "env_file": (".env", ".env.azure.generated"),

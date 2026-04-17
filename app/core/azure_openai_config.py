@@ -34,9 +34,8 @@ def normalize_openai_endpoint(endpoint: str, account_name: str = "") -> str:
         if resource_name:
             return f"https://{resource_name}.openai.azure.com"
 
-    if host.endswith(".api.cognitive.microsoft.com") and account_name.strip():
-        normalized_account = account_name.strip()
-        return f"https://{normalized_account}.openai.azure.com"
+    if host.endswith(".api.cognitive.microsoft.com"):
+        return normalized_endpoint
 
     return normalized_endpoint
 
@@ -73,7 +72,11 @@ def validate_openai_config(
     normalized_endpoint = normalize_openai_endpoint(endpoint, account_name)
     parsed = urlparse(normalized_endpoint)
     host = parsed.netloc.lower()
-    if not host.endswith(".openai.azure.com"):
+    if not (
+        host.endswith(".openai.azure.com")
+        or host.endswith(".api.cognitive.microsoft.com")
+        or host.endswith(".cognitiveservices.azure.com")
+    ):
         return ValidationResult(
             is_valid=False,
             normalized_endpoint=normalized_endpoint,

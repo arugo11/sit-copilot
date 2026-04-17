@@ -184,6 +184,7 @@ class ObservedLectureQAService:
 
         # Determine outcome reason
         outcome_reason = self._determine_outcome_reason(response)
+        metrics = getattr(self._inner, "_last_pipeline_metrics", None)
 
         try:
             await self._observer.track_qa_turn(
@@ -197,6 +198,7 @@ class ObservedLectureQAService:
                 latency_ms=latency_ms,
                 verifier_supported=True,  # Lecture QA always uses verifier
                 outcome_reason=outcome_reason,
+                metadata=metrics if isinstance(metrics, dict) else None,
             )
         except Exception:
             # Observer failures never block main flow

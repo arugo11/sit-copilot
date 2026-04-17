@@ -7,6 +7,177 @@
 
 Claude Code Orchestra is a multi-agent collaboration framework. Claude Code (200K context) is the orchestrator, with Codex CLI for planning/design/complex code, Gemini CLI (1M context) for codebase analysis, research, and multimodal reading, and subagents (Opus) for code implementation and Codex delegation.
 
+## Poster-Scoped UI Feature Enforcement (2026-03-10)
+
+### Decision Summary
+
+- Locked frontend-visible feature scope to poster-defined capabilities:
+  - real-time captions (language switching)
+  - rolling summary
+  - source-only QA
+  - accessibility support
+- Removed non-required materials UI from live experience:
+  - `SourcePanel` (slide/board tabs, OCR update history, recent frame history)
+- Removed the standalone lecture sources page implementation.
+- Preserved legacy route compatibility:
+  - `/lectures/:id/sources` now redirects to `/lectures`.
+- Removed related dead i18n keys:
+  - `landing.features.materials`
+  - `lectureSources`
+  - `sourcePanel`
+
+### Rationale
+
+- Runtime behavior was exposing UI capabilities not included in the approved poster requirements.
+- Hiding alone was considered insufficient; explicit code-path removal prevents accidental reappearance.
+- Keeping redirect behavior for legacy URLs avoids broken navigation while preventing out-of-scope views.
+
+### Compatibility Rules
+
+- Backend subtitle/summary/QA logic is unchanged.
+- Only frontend UI composition, route behavior for the legacy sources page, and translation dictionaries were updated.
+- Live page continues to support desktop and mobile layouts with transcript + assist panels.
+
+## Default Model Baseline for Demo Runtime (2026-03-10)
+
+### Decision Summary
+
+- Updated the default model stack to a split-role baseline:
+  - primary LLM: `gpt-5-mini`
+  - lecture QA verifier: `gpt-5-nano`
+  - lecture QA repair: `gpt-5-mini`
+  - keyterms / judge: `gpt-5-nano`
+- Kept live ASR input default as browser `SpeechRecognition` locale `ja-JP`.
+- Reserved Azure Speech TTS defaults for future runtime use:
+  - locale: `ja-JP`
+  - voice: `ja-JP-NanamiNeural`
+
+### Rationale
+
+- `gpt-5-mini` is the best default quality/speed tradeoff for user-facing generation paths in this repo.
+- verifier / judge / keyterms are narrower tasks and benefit more from lower-latency `gpt-5-nano`.
+- current live caption ASR is not Azure Speech model-driven; the operative default is the browser recognition locale rather than a backend STT model name.
+- TTS is not yet active in runtime, so the safest change is to standardize the future default voice in config and docs without introducing a new live dependency.
+
+### Compatibility Rules
+
+- Existing env vars still override all defaults.
+- Public APIs remain unchanged.
+- The frontend live page now reads `VITE_DEFAULT_ASR_LOCALE` but still falls back to `ja-JP`.
+- TTS defaults are additive configuration only until a real runtime consumer is added.
+
+## Live Caption Synthetic Replay Measurement Contract (2026-03-10)
+
+### Decision Summary
+
+- Added a first-phase synthetic replay experiment for live caption latency.
+- The experiment replays public transcript text into `/api/v4/lecture/speech/chunk` instead of replaying raw audio.
+- Report artifacts are written under:
+  - `docs/reports/live-caption/`
+- Added reusable helper/script pair:
+  - `app/evaluation/live_caption_replay.py`
+  - `scripts/run_live_caption_synthetic_replay.py`
+- Replay input is sourced from a public TED transcript page by default.
+- Quantitative and qualitative markdown reports are both generated for each run.
+
+### Rationale
+
+- Current live caption runtime does not send raw audio to the backend.
+- Browser `SpeechRecognition` produces finalized text locally, then the frontend posts that text to `/speech/chunk`.
+- The live page immediately applies subtitle text after ingest HTTP success, before waiting for SSE replay.
+- Therefore the first measurable subtitle-display latency contract is:
+  - `subtitle_visible_estimate_ms ~= ingest HTTP roundtrip`
+- SSE remains important, but primarily as a consistency/reconnect propagation path rather than the first-paint path for the speaking client.
+
+### Compatibility Rules
+
+- No public API schema changes.
+- Replay experiments must clearly distinguish:
+  - text-ingest latency already measurable today
+  - browser speech recognition latency not covered by synthetic replay
+- Future audio-level experiments may extend this contract, but must not relabel synthetic replay numbers as full microphone-to-caption latency.
+
+## Lecture QA Latency Reduction with Always-On Verification (2026-03-10)
+
+### Decision Summary
+
+- Kept lecture QA verification mandatory on every answer path.
+- Changed repair policy from unconditional `verify -> repair -> verify` to:
+  - default `answer -> verify`
+  - run `repair -> re-verify` only when verification fails and the question is high-risk
+- Added configurable repair policy and token budgets:
+  - `LECTURE_QA_REPAIR_MODE=always|conditional|off`
+  - `LECTURE_QA_ANSWER_MAX_TOKENS_FACT`
+  - `LECTURE_QA_ANSWER_MAX_TOKENS_EXPLANATION`
+  - `LECTURE_QA_VERIFY_MAX_TOKENS`
+  - `LECTURE_QA_VERIFIER_MODEL`
+  - `LECTURE_QA_REPAIR_MODEL`
+  - `LECTURE_QA_VERIFY_TIMEOUT_SECONDS`
+  - `LECTURE_QA_REPAIR_TIMEOUT_SECONDS`
+- Reduced default answer retries from `4` to `1` to avoid long tail latency amplification.
+- Compressed answerer and verifier prompts:
+  - answerer now uses up to 2 sources
+  - source text is clipped around question-overlap snippets when possible
+  - verifier validates a short rule-based claim list instead of re-deriving all claims from full answer text
+- Added structured phase metrics persistence for each `qa_turn`:
+  - retrieval / answer / verify / repair latency
+  - prompt/completion token counts
+  - total LLM calls
+  - verification / repair trigger flags
+- Extended Weave QA turn tracking metadata so the same phase metrics can be emitted to observability pipelines.
+
+### Rationale
+
+- Measured lecture QA latency was dominated by serial LLM calls, not retrieval.
+- Removing verification entirely was rejected because groundedness is a product requirement.
+- Always-on verification preserves the existing safety contract, while conditional repair removes the most expensive extra calls from low-risk paths.
+- Prompt compression and lower retry counts reduce both mean latency and p95 latency without changing the public response schema.
+- Persisted phase metrics are required to prove whether future latency work helps answer generation, verification, or repair specifically.
+
+### Compatibility Rules
+
+- Public lecture QA API schemas remain unchanged.
+- Verification remains mandatory in runtime behavior.
+- Repair remains available and can be forced back to the old behavior with `LECTURE_QA_REPAIR_MODE=always`.
+- `qa_turns` now stores additive `metrics_json`; existing fields and consumers remain valid.
+
+## Lecture QA Evaluation Framework and Hybrid Retrieval Baseline (2026-03-10)
+
+### Decision Summary
+
+- Added a repeatable lecture QA evaluation workflow seeded from:
+  - `docs/transformer.md`
+  - `docs/transformer_qa.md`
+- Evaluation normalizes memo-style notes into scenario cases with:
+  - question
+  - expected evidence terms
+  - expected answer policy
+  - expected no-source flag
+- Added markdown report generation with persistent history under:
+  - `docs/reports/lecture-qa/`
+- Reports are split into:
+  - quantitative evaluation
+  - qualitative evaluation
+  - index/history file
+- Adopted hybrid Japanese fallback retrieval baseline for lecture QA:
+  - Azure Search remains primary
+  - local BM25 fallback is retained for resilience
+  - local fallback uses ASCII word + Japanese character bi-gram tokenization
+- Azure-backed lecture index build now also prepares local BM25 index state so `build -> immediate ask` can fall back locally if remote search visibility lags.
+
+### Rationale
+
+- Existing lecture QA regressions were not observable with stable, versioned evaluation artifacts.
+- Memo docs already captured desired QA behavior, but were not machine-evaluable.
+- Whitespace-only BM25 tokenization is effectively unusable for Japanese lecture questions.
+- Azure Search propagation timing can create transient `no_source` responses immediately after index build, so local fallback must be available at the same time as remote indexing.
+
+### Compatibility Rules
+
+- Public lecture QA API schema remains unchanged.
+- Evaluation artifacts are additive and do not alter production response contracts.
+- Hybrid local retrieval is a resilience layer; Azure Search remains the primary backend when available.
+
 ## Architecture
 
 ```
