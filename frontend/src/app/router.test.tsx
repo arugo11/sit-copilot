@@ -1,37 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}))
-
-vi.mock('@/pages/landing/LandingPage', () => ({
-  LandingPage: () => <div>Landing Page</div>,
-}))
-
-vi.mock('@/pages/lectures/LecturesPage', () => ({
-  LecturesPage: () => <div>Lectures Page</div>,
-}))
-
-vi.mock('@/pages/lectures/LectureLivePage', () => ({
-  LectureLivePage: () => <div>Lecture Live Page</div>,
-}))
-
-vi.mock('@/pages/settings/SettingsPage', () => ({
-  SettingsPage: () => <div>Settings Page</div>,
-}))
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 
 describe('AppRouter', () => {
-  it('redirects legacy sources route to lectures', async () => {
+  it('shows the suspended notice on legacy routes', async () => {
     window.history.pushState({}, '', '/lectures/session-123/sources')
 
     const { AppRouter } = await import('./router')
     render(<AppRouter />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Lectures Page')).toBeInTheDocument()
-    })
+    expect(screen.getByText('公開停止中')).toBeInTheDocument()
+    expect(
+      screen.getByText('現在このデモは公開を停止しています. 何かあれば me@argo11.devまで'),
+    ).toBeInTheDocument()
   })
 })
