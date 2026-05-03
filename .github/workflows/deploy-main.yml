@@ -387,12 +387,53 @@ jobs:
         run: |
           test -n "${PROD_WEB_BASE_URL}" || { echo "PROD_WEB_BASE_URL is required."; exit 1; }
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Playwright Chromium
+        run: npm exec --prefix frontend playwright install --with-deps chromium
+
       - name: Verify suspended notice at root
         run: |
-          curl --fail --show-error --silent "${PROD_WEB_BASE_URL}/" > root.html
-          grep -F "現在このデモは公開を停止しています. 何かあれば me@argo11.devまで" root.html
+          node <<'NODE'
+          const { chromium } = require('./frontend/node_modules/playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto(process.env.PROD_WEB_BASE_URL + '/', { waitUntil: 'networkidle' });
+            const text = (await page.textContent('body')).replace(/\s+/g, ' ').trim();
+            if (!text.includes('現在このデモは公開を停止しています. 何かあれば me@argo11.devまで')) {
+              throw new Error(text);
+            }
+            await browser.close();
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
 
       - name: Verify suspended notice on legacy route
         run: |
-          curl --fail --show-error --silent "${PROD_WEB_BASE_URL}/lectures" > lectures.html
-          grep -F "現在このデモは公開を停止しています. 何かあれば me@argo11.devまで" lectures.html
+          node <<'NODE'
+          const { chromium } = require('./frontend/node_modules/playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto(process.env.PROD_WEB_BASE_URL + '/lectures', { waitUntil: 'networkidle' });
+            const text = (await page.textContent('body')).replace(/\s+/g, ' ').trim();
+            if (!text.includes('現在このデモは公開を停止しています. 何かあれば me@argo11.devまで')) {
+              throw new Error(text);
+            }
+            await browser.close();
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
