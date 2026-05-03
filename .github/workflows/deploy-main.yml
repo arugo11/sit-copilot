@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       force_all:
-        description: "Force backend/frontend deploy pipeline regardless of changed paths"
+        description: "Force frontend deploy regardless of changed paths"
         required: false
         type: boolean
         default: false
@@ -21,7 +21,6 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.scope.outputs.backend_changed }}
       frontend_changed: ${{ steps.scope.outputs.frontend_changed }}
     steps:
       - name: Checkout
@@ -32,242 +31,26 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            backend:
-              - "app/**"
-              - "pyproject.toml"
-              - "uv.lock"
-              - "Dockerfile"
             frontend:
               - "frontend/**"
+              - ".github/workflows/deploy-main.yml"
 
       - name: Resolve deployment scope
         id: scope
         run: |
-          backend_changed="${{ steps.filter.outputs.backend }}"
           frontend_changed="${{ steps.filter.outputs.frontend }}"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_all }}" = "true" ]; then
-            backend_changed="true"
             frontend_changed="true"
           fi
 
-          echo "backend_changed=${backend_changed}" >> "${GITHUB_OUTPUT}"
           echo "frontend_changed=${frontend_changed}" >> "${GITHUB_OUTPUT}"
-
-  api_test:
-    name: API test
-    runs-on: ubuntu-latest
-    needs: detect_changes
-    if: needs.detect_changes.outputs.backend_changed == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Install dependencies
-        run: uv sync --frozen --all-extras
-
-      - name: Run pytest
-        run: uv run pytest
-
-  api_deploy:
-    name: API deploy
-    runs-on: ubuntu-latest
-    needs:
-      - detect_changes
-      - api_test
-    if: needs.detect_changes.outputs.backend_changed == 'true'
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
-      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
-      IMAGE_REPOSITORY: ${{ vars.AZURE_IMAGE_REPOSITORY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Validate deploy variables
-        run: |
-          test -n "${RESOURCE_GROUP}" || { echo "AZURE_RESOURCE_GROUP is required."; exit 1; }
-          test -n "${CONTAINER_APP_NAME}" || { echo "AZURE_CONTAINER_APP_NAME is required."; exit 1; }
-          test -n "${ACR_NAME}" || { echo "AZURE_ACR_NAME is required."; exit 1; }
-          if [ -z "${IMAGE_REPOSITORY}" ]; then
-            echo "IMAGE_REPOSITORY not set; defaulting to sit-copilot-api"
-            echo "IMAGE_REPOSITORY=sit-copilot-api" >> "${GITHUB_ENV}"
-          fi
-
-      - name: Log in to ACR
-        run: |
-          az acr login --name "${ACR_NAME}"
-
-      - name: Build and push image to ACR
-        id: build_image
-        run: |
-          IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-sit-copilot-api}"
-          IMAGE_TAG="${GITHUB_SHA}"
-          IMAGE_URI="${ACR_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-
-          docker build -t "${IMAGE_URI}" .
-          docker push "${IMAGE_URI}"
-
-          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
-
-      - name: Update Container App
-        run: |
-          az containerapp update \
-            --name "${CONTAINER_APP_NAME}" \
-            --resource-group "${RESOURCE_GROUP}" \
-            --image "${{ steps.build_image.outputs.image_uri }}"
-
-      - name: Enforce lecture runtime flags
-        run: |
-          az containerapp update \
-            --name "${CONTAINER_APP_NAME}" \
-            --resource-group "${RESOURCE_GROUP}" \
-            --set-env-vars \
-              WEAVE_ENABLED=false \
-              AZURE_OPENAI_ENABLED=true \
-              AZURE_SEARCH_ENABLED=true \
-              LECTURE_LIVE_ASR_REVIEW_ENABLED=true \
-              LECTURE_LIVE_TRANSLATION_ENABLED=true \
-              LECTURE_LIVE_SUMMARY_ENABLED=true \
-              LECTURE_LIVE_KEYTERMS_ENABLED=true \
-              LECTURE_QA_ENABLED=true \
-              LECTURE_IDLE_AUTOSTOP_SECONDS=120
-
-      - name: Verify lecture runtime flags
-        run: |
-          ENV_DUMP="$(az containerapp show \
-            --name "${CONTAINER_APP_NAME}" \
-            --resource-group "${RESOURCE_GROUP}" \
-            --query 'properties.template.containers[0].env[].{name:name,value:value}' \
-            -o tsv)"
-
-          echo "${ENV_DUMP}" | grep -F "WEAVE_ENABLED	false"
-          echo "${ENV_DUMP}" | grep -F "AZURE_OPENAI_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "AZURE_SEARCH_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_ASR_REVIEW_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_TRANSLATION_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_SUMMARY_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_LIVE_KEYTERMS_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_QA_ENABLED	true"
-          echo "${ENV_DUMP}" | grep -F "LECTURE_IDLE_AUTOSTOP_SECONDS	120"
-
-  api_smoke:
-    name: API smoke test
-    runs-on: ubuntu-latest
-    needs:
-      - detect_changes
-      - api_deploy
-    if: needs.detect_changes.outputs.backend_changed == 'true'
-    env:
-      PROD_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
-      LECTURE_API_TOKEN: ${{ secrets.VITE_LECTURE_API_TOKEN }}
-      DEMO_USER_ID: demo-user
-    steps:
-      - name: Verify health endpoint
-        run: |
-          curl --fail --show-error --silent \
-            "${PROD_API_BASE_URL}/api/v4/health" \
-            > health.json
-
-          grep -q '"status"' health.json
-          grep -q '"version"' health.json
-
-      - name: Verify lecture auth and speech ingest
-        run: |
-          curl --fail --show-error --silent \
-            "${PROD_API_BASE_URL}/api/v4/settings/me" \
-            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
-            -H "X-User-Id: ${DEMO_USER_ID}" \
-            > settings.json
-
-          python - <<'PY'
-          import json
-          with open("settings.json", "r", encoding="utf-8") as fh:
-              payload = json.load(fh)
-          assert payload["user_id"] == "demo-user", payload
-          PY
-
-          curl --fail --show-error --silent \
-            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/session/start" \
-            -H "Content-Type: application/json" \
-            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
-            -H "X-User-Id: ${DEMO_USER_ID}" \
-            -d '{"course_name":"CI Smoke","lang_mode":"ja","camera_enabled":false,"consent_acknowledged":true}' \
-            > session.json
-
-          SESSION_ID="$(python - <<'PY'
-          import json
-          with open("session.json", "r", encoding="utf-8") as fh:
-              payload = json.load(fh)
-          print(payload["session_id"])
-          PY
-          )"
-
-          curl --fail --show-error --silent \
-            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/speech/chunk" \
-            -H "Content-Type: application/json" \
-            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
-            -H "X-User-Id: ${DEMO_USER_ID}" \
-            -d "{\"session_id\":\"${SESSION_ID}\",\"start_ms\":1770000000000,\"end_ms\":1770000002000,\"text\":\"CI smoke transcript\",\"confidence\":0.99,\"is_final\":true,\"speaker\":\"teacher\"}" \
-            > ingest.json
-
-          python - <<'PY'
-          import json
-          with open("ingest.json", "r", encoding="utf-8") as fh:
-              payload = json.load(fh)
-          assert payload["accepted"] is True, payload
-          assert payload["event_id"], payload
-          PY
-
-          curl --fail --show-error --silent \
-            -X POST "${PROD_API_BASE_URL}/api/v4/lecture/session/finalize" \
-            -H "Content-Type: application/json" \
-            -H "X-Lecture-Token: ${LECTURE_API_TOKEN}" \
-            -H "X-User-Id: ${DEMO_USER_ID}" \
-            -d "{\"session_id\":\"${SESSION_ID}\",\"build_qa_index\":false}" \
-            > finalize.json
-
-          python - <<'PY'
-          import json
-          with open("finalize.json", "r", encoding="utf-8") as fh:
-              payload = json.load(fh)
-          assert payload["status"] == "finalized", payload
-          PY
 
   frontend_build:
     name: Frontend build
     runs-on: ubuntu-latest
     needs: detect_changes
     if: needs.detect_changes.outputs.frontend_changed == 'true'
-    env:
-      VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
-      VITE_LECTURE_API_TOKEN: ${{ secrets.VITE_LECTURE_API_TOKEN }}
-      VITE_PROCEDURE_API_TOKEN: ${{ secrets.VITE_PROCEDURE_API_TOKEN }}
-      VITE_DEMO_USER_ID: "demo-user"
-      VITE_LECTURE_LIVE_TRANSLATION_ENABLED: "true"
-      VITE_LECTURE_LIVE_SUMMARY_ENABLED: "true"
-      VITE_LECTURE_LIVE_KEYTERMS_ENABLED: "true"
-      VITE_LECTURE_QA_ENABLED: "true"
-      VITE_LECTURE_IDLE_AUTOSTOP_SECONDS: "120"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -301,19 +84,7 @@ jobs:
     needs:
       - detect_changes
       - frontend_build
-      - api_deploy
-      - api_smoke
-    if: |
-      always() &&
-      needs.detect_changes.outputs.frontend_changed == 'true' &&
-      needs.frontend_build.result == 'success' &&
-      (
-        needs.detect_changes.outputs.backend_changed != 'true' ||
-        (
-          needs.api_deploy.result == 'success' &&
-          needs.api_smoke.result == 'success'
-        )
-      )
+    if: needs.detect_changes.outputs.frontend_changed == 'true' && needs.frontend_build.result == 'success'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -352,31 +123,13 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
-  prod_web_e2e:
+  production_notice_smoke:
     name: Production notice smoke
     runs-on: ubuntu-latest
     needs:
       - detect_changes
-      - api_deploy
-      - api_smoke
       - frontend_deploy
-    if: |
-      always() &&
-      (
-        needs.detect_changes.outputs.backend_changed == 'true' ||
-        needs.detect_changes.outputs.frontend_changed == 'true'
-      ) &&
-      (
-        needs.detect_changes.outputs.backend_changed != 'true' ||
-        (
-          needs.api_deploy.result == 'success' &&
-          needs.api_smoke.result == 'success'
-        )
-      ) &&
-      (
-        needs.detect_changes.outputs.frontend_changed != 'true' ||
-        needs.frontend_deploy.result == 'success'
-      )
+    if: needs.detect_changes.outputs.frontend_changed == 'true' && needs.frontend_deploy.result == 'success'
     env:
       PROD_WEB_BASE_URL: ${{ vars.PROD_WEB_BASE_URL }}
     steps:
